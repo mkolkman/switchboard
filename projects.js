@@ -21,6 +21,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const git = require('./git');
+const githubTracker = require('./github-tracker');
 const planParser = require('./public/plan-parser');
 const sessionConfig = require('./public/session-config');
 
@@ -583,6 +584,13 @@ function scheduleNode(row) {
   };
 }
 
+function parseGithubRefs(text) {
+  try {
+    const list = JSON.parse(text || '[]');
+    return Array.isArray(list) ? list.filter(r => typeof r === 'string') : [];
+  } catch { return []; }
+}
+
 function projectNode(row, folderRows = [], trackRows = [], scheduleRows = []) {
   const added = addedFilesAtRoot(row.root);
   return {
@@ -593,6 +601,7 @@ function projectNode(row, folderRows = [], trackRows = [], scheduleRows = []) {
     defaultCwd: row.defaultCwd || null,
     snoozedUntil: row.snoozedUntil || null,
     snoozedAt: row.snoozedAt || null,
+    githubRefs: parseGithubRefs(row.githubRefs),
     created: row.created, modified: row.modified,
     lastActivity: null, sessionCount: 0,
     addedFilesPath: added.dirPath,
@@ -705,6 +714,17 @@ function updateProject(id, patch) {
     const cwd = normalizeCwdWithinProject(row, patch.defaultCwd);
     if (cwd.error) return { error: cwd.error };
     clean.defaultCwd = cwd.cwd;
+  }
+  if (patch?.githubRefs !== undefined) {
+    if (!Array.isArray(patch.githubRefs)) return { error: 'githubRefs must be a list' };
+    const refs = [];
+    for (const raw of patch.githubRefs) {
+      const ref = githubTracker.parseRef(raw);
+      if (!ref) return { error: `Not a GitHub issue or project link: ${raw}` };
+      const text = githubTracker.formatRef(ref);
+      if (!refs.some(r => r.toLowerCase() === text.toLowerCase())) refs.push(text);
+    }
+    clean.githubRefs = JSON.stringify(refs);
   }
   if (patch?.snoozedUntil !== undefined) {
     const snooze = normalizeSnooze(row, patch.snoozedUntil, clean.status || row.status);

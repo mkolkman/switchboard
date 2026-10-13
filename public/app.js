@@ -92,7 +92,7 @@ let activePtyIds = new Set();
 let sortedOrder = []; // [{ projectPath, itemIds: [itemId, ...] }, ...] — single source of truth for sidebar order
 // Only Sessions and Projects are remembered: the others (Plans, Agent Files,
 // Stats) are places you visit, not places you work from.
-const REMEMBERED_TABS = ['sessions', 'projects'];
+const REMEMBERED_TABS = ['sessions', 'projects', 'github'];
 const LAST_TAB_KEY = 'lastTab';
 function rememberedTab() {
   try {
@@ -1171,7 +1171,7 @@ async function launchNewSession(project, sessionOptions, { focus = true } = {}) 
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
     entry.closed = true;
-    return;
+    return sessionId;
   }
   if (typeof setSessionMcpActive === 'function') setSessionMcpActive(sessionId, !!result.mcpActive);
 
@@ -1179,6 +1179,8 @@ async function launchNewSession(project, sessionOptions, { focus = true } = {}) 
   // any session, but does not take over whatever the user is looking at.
   if (focus) showSession(sessionId);
   pollActiveSessions();
+  // The caller can keep track of it, e.g. a PR panel that shows its terminal.
+  return sessionId;
 }
 
 // Legacy alias
@@ -1228,7 +1230,8 @@ async function unarchiveSessionBeforeOpen(session) {
   return true;
 }
 
-async function openSession(session, customOptions) {
+// `focus: false` resumes without showing it: a PR panel shows the terminal itself.
+async function openSession(session, customOptions, { focus = true } = {}) {
   if (!await unarchiveSessionBeforeOpen(session)) return;
 
   const { sessionId, projectPath } = session;
@@ -1247,7 +1250,7 @@ async function openSession(session, customOptions) {
         return;
       }
     } else {
-      showSession(sessionId);
+      if (focus) showSession(sessionId);
       return;
     }
   }
@@ -1278,7 +1281,7 @@ async function openSession(session, customOptions) {
   const pending = pendingSessions.get(sessionId);
   if (pending) pending.exited = false;
 
-  showSession(sessionId);
+  if (focus) showSession(sessionId);
   pollActiveSessions();
 }
 
@@ -1304,6 +1307,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     if (!tabName || tabName === activeTab) return;
     // Leaving the Projects tab takes its page, strip and pane with it.
     if (activeTab === 'projects' && typeof leaveProjectViews === 'function') leaveProjectViews();
+    if (activeTab === 'github' && typeof hideGithubView === 'function') hideGithubView();
     activeTab = tabName;
     if (REMEMBERED_TABS.includes(tabName)) { try { localStorage.setItem(LAST_TAB_KEY, tabName); } catch {} }
     document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
@@ -1321,6 +1325,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     plansContent.style.display = 'none';
     statsContent.style.display = 'none';
     memoryContent.style.display = 'none';
+    document.getElementById('github-content').style.display = 'none';
     sessionFilters.style.display = 'none';
     searchBar.style.display = 'none';
 
@@ -1365,6 +1370,9 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
         renderProjectList();
         showProjectHome();
       }
+    } else if (tabName === 'github') {
+      document.getElementById('github-content').style.display = '';
+      showGithubView();
     } else if (tabName === 'plans') {
       searchBar.style.display = '';
       searchInput.placeholder = 'Search plans...';
@@ -1581,11 +1589,14 @@ loadProjects().then(async () => {
   // point, so an already-open entry still needs showSession().
   if (activeSessionId) {
     const session = sessionMap.get(activeSessionId);
+    // The GitHub tab has no terminal in view: the session comes back in the
+    // background instead of covering it.
+    const focus = activeTab !== 'github';
     if (session?.archived) {
       setActiveSession(null);
     } else if (session) {
-      if (openSessions.has(activeSessionId)) showSession(activeSessionId);
-      else openSession(session);
+      if (openSessions.has(activeSessionId)) { if (focus) showSession(activeSessionId); }
+      else openSession(session, undefined, { focus });
     }
     else setActiveSession(null);
   }

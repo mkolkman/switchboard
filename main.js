@@ -44,8 +44,9 @@ const { resolveTerminalFiles } = require('./terminal-file-links');
 const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('./preview-assets');
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
 const { createTaskManager } = require('./task-manager');
-const { lastAssistantMessage } = require('./session-preview');
-const { repoInfoForPaths } = require('./repo-info');
+const { lastAssistantMessage, currentActivity } = require('./session-preview');
+const { repoInfoForPaths, findLocalClones } = require('./repo-info');
+const githubTracker = require('./github-tracker');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -479,6 +480,42 @@ ipcMain.handle('get-chat-folder', guarded(() => {
   return dir;
 }));
 ipcMain.handle('get-repo-info', guarded((paths) => repoInfoForPaths(Array.isArray(paths) ? paths : [])));
+// A project's GitHub tracking, fetched live (github-tracker.js keeps it in memory only).
+ipcMain.handle('get-github-tracker', guarded((ref, opts) => githubTracker.getTracker(String(ref || ''), { force: !!opts?.force })));
+// The review panel: read a PR or issue, toggle auto-rebase, merge. Each acts
+// with the user's own gh login, only when they click in the panel.
+const ghTarget = (t) => [String(t?.owner || ''), String(t?.repo || ''), Number(t?.number)];
+ipcMain.handle('github-pull-request', (_e, t) => githubTracker.asResult(githubTracker.getPullRequest(...ghTarget(t))));
+ipcMain.handle('github-issue', (_e, t) => githubTracker.asResult(githubTracker.getIssue(...ghTarget(t))));
+ipcMain.handle('github-my-prs', () => githubTracker.asResult(githubTracker.getMyPullRequests()));
+ipcMain.handle('github-pr-files', (_e, t) => githubTracker.asResult(githubTracker.getPullRequestFiles(...ghTarget(t))));
+ipcMain.handle('github-review-comments', (_e, t) => githubTracker.asResult(githubTracker.getReviewComments(...ghTarget(t))));
+ipcMain.handle('github-create-review-comment', (_e, t, spec) => githubTracker.asResult(githubTracker.createReviewComment(...ghTarget(t), spec || {})));
+ipcMain.handle('github-reply-review-comment', (_e, t, id, body) => githubTracker.asResult(githubTracker.replyToReviewComment(...ghTarget(t), id, String(body || ''))));
+ipcMain.handle('github-set-autorebase', (_e, t, on) => githubTracker.asResult(githubTracker.setAutorebase(...ghTarget(t), !!on)));
+// A GitHub-backed project writes its todos and plan back to GitHub.
+ipcMain.handle('github-set-issue-closed', (_e, t, closed) => githubTracker.asResult(githubTracker.setIssueClosed(...ghTarget(t), !!closed)));
+ipcMain.handle('github-rename-issue', (_e, t, title) => githubTracker.asResult(githubTracker.renameIssue(...ghTarget(t), String(title || ''))));
+ipcMain.handle('github-create-todo', (_e, ref, spec) => githubTracker.asResult(githubTracker.createTodo(String(ref || ''), spec || {})));
+ipcMain.handle('github-update-plan', (_e, ref, body, expected) => githubTracker.asResult(githubTracker.updatePlan(String(ref || ''), String(body ?? ''), expected || null)));
+ipcMain.handle('github-set-milestone', (_e, t, title) => githubTracker.asResult(githubTracker.setIssueMilestone(...ghTarget(t), title ? String(title) : null)));
+ipcMain.handle('github-set-field', (_e, t, field, value) => githubTracker.asResult(githubTracker.setIssueField(...ghTarget(t), String(field || ''), value ?? null)));
+ipcMain.handle('github-seed-field', (_e, ref, column, field, opts) => githubTracker.asResult(githubTracker.seedPhaseField(String(ref || ''), String(column || ''), String(field || ''), { apply: !!opts?.apply })));
+ipcMain.handle('github-seed-milestones', (_e, ref, column, opts) => githubTracker.asResult(githubTracker.seedMilestones(String(ref || ''), String(column || ''), { apply: !!opts?.apply })));
+// Where the plan's repositories are checked out: ~/Sources and known folders.
+const sourcesRoot = () => path.join(os.homedir(), 'Sources');
+ipcMain.handle('find-local-clones', guarded((repos, knownPaths) => findLocalClones(Array.isArray(repos) ? repos : [], {
+  roots: [sourcesRoot()], knownPaths: Array.isArray(knownPaths) ? knownPaths : [],
+})));
+ipcMain.handle('github-clone-repo', (_e, repoFull) => {
+  const [owner, repo] = String(repoFull || '').split('/');
+  if (!owner || !repo) return { error: 'Unknown repository' };
+  fs.mkdirSync(sourcesRoot(), { recursive: true });
+  return githubTracker.asResult(githubTracker.cloneRepo(owner, repo, sourcesRoot()));
+});
+ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTracker.mergePullRequest(...ghTarget(t), {
+  method: String(opts?.method || ''), expectedHeadOid: String(opts?.expectedHeadOid || ''),
+})));
 ipcMain.handle('get-project-git-status', guarded((id, opts) => projects.folderGitStatus(id, opts || {})));
 ipcMain.handle('get-project-git-info', guarded((id) => projects.projectGitInfo(id)));
 ipcMain.handle('get-project-git-diff', guarded((id, folderPath, filePath) => projects.projectGitDiff(id, folderPath, filePath)));
@@ -1199,6 +1236,19 @@ ipcMain.handle('get-session-last-message', (_event, sessionId) => {
   try {
     const { text, truncated } = lastAssistantMessage(readSessionViewerEntries(row));
     return { text, truncated };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// The last thing a session said and what it is doing now, from one read of
+// its transcript: the PR panel shows both for sessions working on the PR.
+ipcMain.handle('get-session-glance', (_event, sessionId) => {
+  const row = getCachedSession(sessionId);
+  if (!row) return { error: 'Session not found in cache' };
+  try {
+    const entries = readSessionViewerEntries(row);
+    return { text: lastAssistantMessage(entries).text, activity: currentActivity(entries) };
   } catch (err) {
     return { error: err.message };
   }

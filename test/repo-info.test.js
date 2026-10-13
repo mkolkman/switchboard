@@ -67,3 +67,12 @@ test('repoInfoForPath is null outside a repository or without a remote', (t) => 
   if (repoInfoForPath(dir) === null) assert.equal(repoInfoForPath(plain), null);
   assert.equal(repoInfoForPath(path.join(dir, 'missing')), null);
 });
+
+test('findLocalClones finds main checkouts one level inside a root', (t) => {
+  const { findLocalClones } = require('../repo-info');
+  const { dir, main } = makeRepo(t);
+  const worktree = path.join(dir, 'CityRow-App-wt', '.worktrees', 'x');
+  fs.mkdirSync(worktree, { recursive: true });
+  const found = findLocalClones(['MoveLab-Studio/CityRow-App', 'MoveLab-Studio/Missing'], { roots: [dir] });
+  assert.deepEqual(found, { 'movelab-studio/cityrow-app': main, 'movelab-studio/missing': null });
+});

@@ -73,4 +73,31 @@ function repoInfoForPaths(paths) {
   return result;
 }
 
-module.exports = { parseRemoteUrl, parseRemotes, repoInfoForPath, repoInfoForPaths };
+const isWorktree = (p) => /[\\/]\.(?:claude[\\/])?worktrees[\\/]/.test(p);
+
+/**
+ * Main checkouts of the given repositories ("owner/name"), looked up among
+ * `knownPaths` and every folder one level inside `roots` (~/Sources by
+ * default). Worktrees are skipped. { "owner/name": path | null }, keys lowercased.
+ */
+function findLocalClones(repos, { roots = [], knownPaths = [] } = {}) {
+  const wanted = new Set((repos || []).map(r => String(r).toLowerCase()));
+  const candidates = new Set(knownPaths.filter(p => typeof p === 'string' && p));
+  for (const root of roots) {
+    let entries = [];
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch {}
+    for (const e of entries) if (e.isDirectory() && !e.name.startsWith('.')) candidates.add(path.join(root, e.name));
+  }
+  const found = {};
+  for (const r of wanted) found[r] = null;
+  for (const dir of candidates) {
+    const info = repoInfoForPath(dir);
+    if (!info || isWorktree(info.root)) continue;
+    const key = `${info.owner}/${info.name}`.toLowerCase();
+    if (!wanted.has(key)) continue;
+    if (!found[key] || info.root.length < found[key].length) found[key] = info.root;
+  }
+  return found;
+}
+
+module.exports = { parseRemoteUrl, parseRemotes, repoInfoForPath, repoInfoForPaths, findLocalClones };

@@ -3,10 +3,10 @@ import { EditorState, StateField, StateEffect, Compartment } from '@codemirror/s
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
+import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap, LanguageDescription } from '@codemirror/language';
 import { highlightSelectionMatches } from '@codemirror/search';
 import { dracula } from '@ddietr/codemirror-themes/theme/dracula';
-import { tags } from '@lezer/highlight';
+import { tags, highlightTree, classHighlighter } from '@lezer/highlight';
 import { MergeView, unifiedMergeView } from '@codemirror/merge';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
@@ -530,6 +530,46 @@ function createUnifiedMergeViewer(parent, originalContent, modifiedContent, file
 
 // ── Exports ─────────────────────────────────────────────────────────
 
+// ── Code to coloured HTML, one string per line (PR diffs) ────────────
+// Parses with the language CodeMirror would use for the file name and marks
+// tokens with Lezer's tok-* classes; the page's stylesheet colours them.
+
+const loadedLanguages = new Map();
+
+function escapeCode(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function highlightCodeLines(code, filename) {
+  const desc = LanguageDescription.matchFilename(languages, filename || '');
+  if (!desc) return null;
+  let support = loadedLanguages.get(desc.name);
+  if (!support) {
+    support = await desc.load();
+    loadedLanguages.set(desc.name, support);
+  }
+  // PHP is only PHP after "<?php"; a piece of a file usually lacks it.
+  const prefix = desc.name === 'PHP' && !/^\s*<\?/.test(code) ? '<?php\n' : '';
+  const text = prefix + code;
+  const tree = support.language.parser.parse(text);
+  const lines = [''];
+  const push = (part, cls) => {
+    part.split('\n').forEach((piece, i) => {
+      if (i > 0) lines.push('');
+      if (piece) lines[lines.length - 1] += cls ? `<span class="${cls}">${escapeCode(piece)}</span>` : escapeCode(piece);
+    });
+  };
+  let pos = 0;
+  highlightTree(tree, classHighlighter, (from, to, classes) => {
+    if (from > pos) push(text.slice(pos, from), '');
+    push(text.slice(from, to), classes);
+    pos = to;
+  });
+  if (pos < text.length) push(text.slice(pos), '');
+  return prefix ? lines.slice(1) : lines;
+}
+
+window.highlightCodeLines = highlightCodeLines;
 window.createPlanEditor = createPlanEditor;
 window.createReadOnlyViewer = createReadOnlyViewer;
 window.createEditableViewer = createEditableViewer;

@@ -307,6 +307,9 @@ db.exec(`
   // counts, so the renderer decides from the timestamp alone.
   if (!cols.has('snoozedUntil')) db.exec('ALTER TABLE projects ADD COLUMN snoozedUntil TEXT');
   if (!cols.has('snoozedAt')) db.exec('ALTER TABLE projects ADD COLUMN snoozedAt TEXT');
+  // GitHub work tracked from the project: a JSON array of references (issue
+  // or Project URLs). Only the references; their content is fetched live.
+  if (!cols.has('githubRefs')) db.exec('ALTER TABLE projects ADD COLUMN githubRefs TEXT');
 }
 // Which session started or finished a plan phase or a todo. Items are matched
 // by their text, not their line, so editing the file above an item does not
@@ -680,7 +683,7 @@ function deleteSetting(key) {
 
 // --- Project functions ---
 
-const PROJECT_PATCH_KEYS = ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'modified'];
+const PROJECT_PATCH_KEYS = ['name', 'status', 'sharedBranch', 'branchName', 'defaultCwd', 'snoozedUntil', 'snoozedAt', 'githubRefs', 'modified'];
 const TRACK_PATCH_KEYS = ['name', 'cwd', 'cli', 'status', 'sortOrder'];
 const SCHEDULE_PATCH_KEYS = ['name', 'trackId', 'cwd', 'prompt', 'every', 'atHour', 'atMinute', 'weekday', 'cron', 'cli', 'enabled', 'catchUp', 'lastRunAt', 'lastSessionId', 'sessionConfig'];
 

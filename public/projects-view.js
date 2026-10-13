@@ -172,17 +172,18 @@ function saveProjectsUi() {
   sessionStorage.setItem('projects.archivedOpen', JSON.stringify(projectsUi.archivedOpen));
 }
 
-const PROJECT_WORKSPACE_TABS = new Set(['overview', 'plan', 'files', 'git', 'settings']);
+const PROJECT_WORKSPACE_TABS = new Set(['overview', 'plan', 'files', 'git', 'github', 'settings']);
 
 function projectTab(projectOrId = projectsUi.selectedProjectId) {
   const projectId = typeof projectOrId === 'string' ? projectOrId : projectOrId?.id;
-  return projectNavigation(projectId).tab;
+  const tab = projectNavigation(projectId).tab;
+  return tab === 'github' ? 'plan' : tab;
 }
 
 function setProjectTab(projectOrId, tab) {
   const projectId = typeof projectOrId === 'string' ? projectOrId : projectOrId?.id;
   if (!projectId || !PROJECT_WORKSPACE_TABS.has(tab)) return;
-  projectNavigation(projectId).tab = tab;
+  projectNavigation(projectId).tab = tab === 'github' ? 'plan' : tab;
 }
 
 function projectNavigation(projectOrId = projectsUi.selectedProjectId) {
@@ -1300,7 +1301,7 @@ function renderOverview() {
       </div>
       <div class="ws-tabs">
         <button type="button" class="ws-tab ${tabName === 'overview' ? 'active' : ''}" data-tab="overview">Overview</button>
-        <button type="button" class="ws-tab ${tabName === 'plan' ? 'active' : ''}" data-tab="plan" title="Phases from plan-tracker.md and the todos, with the sessions that worked on them">Plan <span class="ws-tab-meta" id="ws-tab-plan-meta"></span></button>
+        <button type="button" class="ws-tab ${tabName === 'plan' ? 'active' : ''}" data-tab="plan" title="${typeof isGithubBacked === 'function' && isGithubBacked(project) ? 'The plan on GitHub: its issues by phase or PR status, reviewed side by side' : 'Phases from plan-tracker.md and the todos, with the sessions that worked on them'}">Plan <span class="ws-tab-meta" id="ws-tab-plan-meta"></span></button>
         <button type="button" class="ws-tab ${tabName === 'files' ? 'active' : ''}" data-tab="files" title="The project folder: brief, plan, todos and anything else the project keeps">Files</button>
         <button type="button" class="ws-tab ${tabName === 'git' ? 'active' : ''}" data-tab="git" title="Branches, working changes and recent commits in attached repositories">Git</button>
         <button type="button" class="ws-tab ${tabName === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
@@ -1309,11 +1310,18 @@ function renderOverview() {
     <div class="ws-body" id="ws-body"></div>`;
 
   const body = projectViewer.querySelector('#ws-body');
-  if (tabName === 'settings') renderSettings(project, body);
-  else if (tabName === 'files') renderFilesTab(project, body);
-  else if (tabName === 'plan') renderPlanTab(project, body);
-  else if (tabName === 'git') renderProjectGitTab(project, body);
-  else renderOverviewBody(project, body);
+  // A tab that fails to draw shows why, and never takes the tab bar and
+  // header buttons down with it: they are bound below.
+  try {
+    if (tabName === 'settings') renderSettings(project, body);
+    else if (tabName === 'files') renderFilesTab(project, body);
+    else if (tabName === 'plan') renderPlanTab(project, body);
+    else if (tabName === 'git') renderProjectGitTab(project, body);
+      else renderOverviewBody(project, body);
+  } catch (err) {
+    console.error('[projects] could not draw the tab', err);
+    body.innerHTML = `<div class="git-empty-state"><div class="git-empty-title">This tab could not be drawn</div><div>${escapeHtml(err?.message || String(err))}</div></div>`;
+  }
 
   projectViewer.querySelectorAll('.ws-tab:not([disabled])').forEach(tab => {
     tab.onclick = () => { setProjectTab(project, tab.dataset.tab); renderOverview(); };
@@ -1324,10 +1332,12 @@ function renderOverview() {
   projectViewer.querySelector('#ws-schedules').onclick = (e) => showProjectScheduleMenu(project, e.currentTarget);
   projectViewer.querySelector('#ws-add-folder').onclick = () => attachFolderAsk(project);
   loadProjectFiles(project).then(() => { if (selectedProject()?.id === project.id) renderPlanMeta(project); });
+  prefetchGithubMeta(project);
   loadProjectGit(project).then(changed => { if (changed && selectedProject()?.id === project.id) applyGitStatus(project); });
 }
 
 function renderPlanMeta(project) {
+  if (typeof isGithubBacked === 'function' && isGithubBacked(project)) { renderGithubPlanMeta(project); return; }
   const meta = projectViewer?.querySelector('#ws-tab-plan-meta');
   const plan = parsePlan(fileContent(project, 'plan-tracker.md'));
   if (meta) meta.textContent = plan.phases.length ? `${plan.done}/${plan.phases.length}` : '';
@@ -1678,6 +1688,11 @@ function planSignature(state) {
 }
 
 function renderPlanTab(project, body) {
+  if (typeof isGithubBacked === 'function' && isGithubBacked(project)) { renderProjectGithubTab(project, body); return; }
+  // A file-based plan, with a way to make a GitHub issue or Project the plan instead.
+  body.innerHTML = '<div id="ws-file-plan"></div><div id="ws-plan-github-link"></div>';
+  renderGithubLinkForm(project, body.querySelector('#ws-plan-github-link'));
+  body = body.querySelector('#ws-file-plan');
   const state = planState(project);
   // Only the first look at a project has nothing to show. A refresh keeps what
   // is on screen — a running session writes constantly, and blanking the tab
@@ -2425,6 +2440,8 @@ function renderSideCards(project, side) {
     list.prepend(input);
     input.focus();
   };
+  // A project fed by GitHub takes its plan, todos and folders from there.
+  if (typeof isGithubBacked === 'function' && isGithubBacked(project)) applyGithubSideCards(project, side);
 }
 
 // --- Settings tab ---
@@ -2627,19 +2644,35 @@ function buildTrackSettingsRow(project, track) {
 // --- Working mode: strip + panes ---
 
 function renderStrip(project) {
+  // Opened from a PR's panel: back goes to that PR (project-github-view.js).
+  const backToPr = typeof prReturnFor === 'function' && activeSessionId ? prReturnFor(project, activeSessionId) : null;
+  // However it was opened, a session that works on a PR or task links to it.
+  const prLink = !backToPr && typeof githubLinkForSession === 'function' && activeSessionId ? githubLinkForSession(project, activeSessionId) : null;
+  if (!prLink && activeSessionId && typeof isGithubBacked === 'function' && isGithubBacked(project) && !planState(project).data && !planState(project).loadingLinks) {
+    // The links are not loaded yet: fetch them and draw the strip again.
+    planState(project).loadingLinks = true;
+    loadProjectPlan(project).then(() => { planState(project).loadingLinks = false; if (projectsUi.working) renderStrip(project); });
+  }
   const running = runningTasksFor(project);
   const branch = (project.folders || []).find(f => f.mode === 'worktree')?.branch;
   projectStrip.innerHTML = `
-    <button type="button" class="ws-btn ws-btn--sm" id="strip-back">${PICONS.back(13)}<span>Overview</span></button>
+    <button type="button" class="ws-btn ws-btn--sm" id="strip-back" ${backToPr ? `title="Back to ${escapeHtml(backToPr.label)} on the Plan tab"` : ''}>${PICONS.back(13)}<span>${backToPr ? escapeHtml(backToPr.label) : 'Overview'}</span></button>
     ${markHtml(project, 22, 'proj-mark--sm')}
     <span class="strip-name">${escapeHtml(project.name)}</span>
     ${branch ? `<span class="strip-branch mono">${PICONS.branch(11)}<span>${escapeHtml(branch)}</span></span>` : ''}
+    ${prLink ? `<button type="button" class="ws-btn ws-btn--sm" id="strip-pr" title="Open ${escapeHtml(prLink.label)} on the Plan tab: the task this session works on">${escapeHtml(prLink.label)}${PICONS.chevronRight(10)}</button>` : ''}
     <span class="ws-flex"></span>
     <button type="button" class="ws-btn ws-btn--sm project-task-btn" id="strip-tasks" data-project-id="${project.id}" data-project-path="${escapeHtml(project.root)}" data-project-paths="${escapeHtml(taskPseudoProject(project).projectPaths.join('\n'))}">${PICONS.play(11)}<span>Tasks</span><span class="project-task-count ws-badge" ${running ? '' : 'style="display:none"'}>${running || ''}</span></button>
     ${scheduleButtonHtml(project, 'strip-schedules', true)}
     <button type="button" class="ws-btn ws-btn--sm ws-btn--primary" id="strip-new">${PICONS.plus(11)}<span>New session</span>${PICONS.chevronDown(10)}</button>
     <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" id="strip-more" title="More">${PICONS.dots(13)}</button>`;
-  projectStrip.querySelector('#strip-back').onclick = () => { setProjectTab(project, 'overview'); showProjectOverview(); };
+  projectStrip.querySelector('#strip-back').onclick = () => {
+    if (backToPr) { returnToPr(project); return; }
+    setProjectTab(project, 'overview');
+    showProjectOverview();
+  };
+  const prBtn = projectStrip.querySelector('#strip-pr');
+  if (prBtn) prBtn.onclick = () => openGithubLink(project, prLink);
   projectStrip.querySelector('#strip-tasks').onclick = (e) => showTaskPopover(taskPseudoProject(project), e.currentTarget);
   projectStrip.querySelector('#strip-schedules').onclick = (e) => showProjectScheduleMenu(project, e.currentTarget);
   projectStrip.querySelector('#strip-new').onclick = (e) => showNewSessionMenu(project, null, e.currentTarget);
