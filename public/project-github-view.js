@@ -696,7 +696,7 @@ function githubMyReviewSection(pr, state) {
   return `<div class="gh-sec gh-myrev"><div class="gh-sec-h">Your review</div><div class="gh-myrev-row"><span class="gh-myrev-text">${text}</span>${button}</div></div>`;
 }
 
-function githubReviewsSection(pr) {
+function githubReviewsSection(pr, state) {
   // Decided by people; a bot's approval (movelabbot checks merge rights) does not count.
   const decision = pr.humanReview
     ? { APPROVED: ['ok', 'Approved'], CHANGES_REQUESTED: ['bad', 'Changes requested'] }[pr.humanReview]
@@ -705,8 +705,16 @@ function githubReviewsSection(pr) {
     const [k, text] = REVIEW_STATE_TEXT[r.state] || ['muted', r.state.toLowerCase()];
     return `<div class="gh-review-row${r.ignored ? ' gh-review-row--bot' : ''}" ${r.ignored ? 'title="A permission check, not a code review; it does not count"' : ''}><span class="gh-who">${escapeHtml(r.author)}</span><span class="gh-state gh-state--${r.ignored ? 'muted' : k}">${text}</span>${r.ignored ? '<span class="gh-muted">bot, not a review</span>' : ''}<span class="gh-muted">${escapeHtml(githubAgo(r.at))}</span></div>`;
   });
-  for (const who of pr.requested) rows.push(`<div class="gh-review-row"><span class="gh-who">${escapeHtml(who)}</span><span class="gh-state gh-state--pending">review requested</span></div>`);
-  return `<div class="gh-sec"><div class="gh-sec-h">Reviews ${decision ? `<span class="gh-state gh-state--${decision[0]}">${decision[1]}</span>` : ''}</div>
+  const open = pr.state === 'OPEN';
+  for (const who of pr.requested) {
+    rows.push(`<div class="gh-review-row"><span class="gh-who">${escapeHtml(who)}</span><span class="gh-state gh-state--pending">review requested</span>`
+      + (open ? `<button type="button" class="ws-ghost gh-unrequest" data-login="${escapeHtml(who)}" ${state.busy ? 'disabled' : ''} title="Withdraw the review request to ${escapeHtml(who)}">${PICONS.x(11)}</button>` : '')
+      + '</div>');
+  }
+  const requestBtn = open
+    ? `<span class="ws-flex"></span><button type="button" class="ws-ghost gh-request-review" id="gh-request-review" ${state.busy ? 'disabled' : ''} title="Ask someone to review this pull request">${state.busy === 'request' ? 'Requesting…' : `${PICONS.plus(11)}<span>Request review</span>`}</button>`
+    : '';
+  return `<div class="gh-sec"><div class="gh-sec-h gh-reviews-h">Reviews ${decision ? `<span class="gh-state gh-state--${decision[0]}">${decision[1]}</span>` : ''}${requestBtn}</div>
     ${rows.length ? rows.join('') : '<div class="gh-muted">No reviews yet.</div>'}</div>`;
 }
 
@@ -1122,7 +1130,7 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
       ${githubSessionsSection(project, detail)}
       ${githubChecksSection(detail, state)}
       ${githubMyReviewSection(detail, state)}
-      ${githubReviewsSection(detail)}
+      ${githubReviewsSection(detail, state)}
       <div class="gh-sec"><div class="gh-sec-h">Description</div><div class="gh-md">${githubMarkdown(detail.body)}</div></div>
       ${githubConversation(detail)}`;
   } else {
@@ -1197,6 +1205,40 @@ function bindGithubPrActions(project, panel, pr) {
       paintGithubPanel(project);
     };
   }
+  // Review requests: a change shows in the panel and in the list's chips.
+  const setRequest = async (login, on) => {
+    state.busy = 'request';
+    paintGithubPanel(project);
+    const result = await window.api.setGithubReviewRequest(target, login, on);
+    state.busy = null;
+    state.notice = result?.error ? { kind: 'bad', text: result.error } : null;
+    await loadGithubDetail(project, { quiet: true });
+    for (const ref of project.githubRefs || []) loadGithubTracker(project, ref, { force: true });
+    if (project.isGithubView && typeof loadGithubView === 'function') loadGithubView({ quiet: true });
+    paintGithubPanel(project);
+  };
+  const requestBtn = panel.querySelector('#gh-request-review');
+  if (requestBtn) {
+    requestBtn.onclick = async (e) => {
+      const anchor = e.currentTarget;
+      const result = await window.api.getGithubReviewCandidates(target);
+      if (result?.error) { state.notice = { kind: 'bad', text: result.error }; paintGithubPanel(project); return; }
+      const groups = [['reviewed', 'Ask again'], ['suggested', 'Suggested'], ['other', 'Everyone']];
+      const items = [];
+      for (const [id, head] of groups) {
+        const people = (result.candidates || []).filter(c => c.group === id);
+        if (!people.length) continue;
+        if (items.length) items.push({ sep: true });
+        items.push({ head }, ...people.map(c => ({ label: c.login, hint: c.name || '', onClick: () => setRequest(c.login, true) })));
+      }
+      // The panel may have been redrawn (live checks) while the list loaded.
+      const current = anchor.isConnected ? anchor : githubRoot(project)?.querySelector('#gh-request-review');
+      showContextMenu(items.length ? items : [{ head: 'Nobody else can review this' }], { anchor: current || anchor });
+    };
+  }
+  panel.querySelectorAll('.gh-unrequest').forEach(btn => {
+    btn.onclick = () => setRequest(btn.dataset.login, false);
+  });
   const markBtn = panel.querySelector('#gh-mark-reviewed');
   if (markBtn) {
     markBtn.onclick = async () => {

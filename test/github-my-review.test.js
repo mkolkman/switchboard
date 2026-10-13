@@ -50,3 +50,20 @@ test('itemReviewGroup puts each issue where its most urgent open PR is', () => {
   assert.equal(itemReviewGroup(item(open({ link: 'mentions' }), { state: 'MERGED', link: 'closes' })), 'none');
   assert.equal(itemReviewGroup(item(open({ link: 'mentions' }))), 'needs');
 });
+
+const { reviewCandidates } = require('../github-tracker');
+
+test('reviewCandidates: earlier reviewers to re-request, then suggested, then everyone else', () => {
+  const got = reviewCandidates({
+    author: 'mkolkman', me: 'mkolkman',
+    users: [{ login: 'JBlaak', name: 'Joris' }, { login: 'mkolkman' }, { login: 'movelabbot' }, { login: 'nhaarman', name: 'Niek' }, { login: 'ThomasHaas15' }, { login: 'LvanArkel' }],
+    suggested: [{ login: 'ThomasHaas15' }],
+    requested: ['nhaarman'],
+    reviewed: ['LvanArkel', 'movelabbot'],
+  });
+  assert.deepEqual(got, [
+    { login: 'LvanArkel', name: null, group: 'reviewed' },
+    { login: 'ThomasHaas15', name: null, group: 'suggested' },
+    { login: 'JBlaak', name: 'Joris', group: 'other' },
+  ]);
+});

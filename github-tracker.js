@@ -756,6 +756,63 @@ async function markReviewed(owner, repo, number, headOid) {
   return { ok: true };
 }
 
+// --- Review requests ---
+
+/**
+ * Who can be asked to review, in menu order: people who reviewed before (to
+ * ask again), GitHub's suggestions, then everyone else who can be assigned.
+ * The author, you, bots and people already asked are left out.
+ */
+function reviewCandidates({ users = [], suggested = [], author, me, requested = [], reviewed = [] }) {
+  const skip = new Set([author, me, ...requested].filter(Boolean).map(l => l.toLowerCase()));
+  const names = new Map([...users, ...suggested].map(u => [u.login.toLowerCase(), u.name || null]));
+  const out = [];
+  const add = (login, group) => {
+    const key = login.toLowerCase();
+    if (skip.has(key) || isIgnoredReviewer({ login })) return;
+    skip.add(key);
+    out.push({ login, name: names.get(key) || null, group });
+  };
+  reviewed.forEach(l => add(l, 'reviewed'));
+  suggested.forEach(u => add(u.login, 'suggested'));
+  users.forEach(u => add(u.login, 'other'));
+  return out;
+}
+
+/** The reviewer menu for a PR (see reviewCandidates). */
+async function getReviewCandidates(owner, repo, number) {
+  const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      assignableUsers(first: 100) { nodes { login name } }
+      pullRequest(number: $number) {
+        author { login }
+        suggestedReviewers { reviewer { login name } }
+        reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
+        latestOpinionatedReviews(first: 20) { nodes { author { login } } }
+      }
+    }
+  }`, { owner, repo, number });
+  const pr = data?.repository?.pullRequest;
+  if (!pr) throw new Error(`${owner}/${repo}#${number} was not found.`);
+  return {
+    candidates: reviewCandidates({
+      users: data.repository.assignableUsers?.nodes || [],
+      suggested: (pr.suggestedReviewers || []).map(s => s.reviewer).filter(Boolean),
+      author: pr.author?.login, me: await ghLogin(),
+      requested: (pr.reviewRequests?.nodes || []).map(n => n.requestedReviewer?.login).filter(Boolean),
+      reviewed: (pr.latestOpinionatedReviews?.nodes || []).map(n => n.author?.login).filter(Boolean),
+    }),
+  };
+}
+
+/** Ask someone to review a PR, or withdraw the request. */
+async function setReviewRequest(owner, repo, number, login, on) {
+  if (!/^[\w-]+$/.test(String(login || ''))) throw new Error('Not a GitHub login.');
+  await rest(on ? 'POST' : 'DELETE', `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`, { reviewers: [login] });
+  cache.clear();
+  return { ok: true };
+}
+
 // --- Pull request and issue detail (the side panel) ---
 
 const AUTOREBASE_LABEL = 'autorebase:opt-in';
@@ -1290,4 +1347,5 @@ module.exports = {
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,
+  reviewCandidates, getReviewCandidates, setReviewRequest,
 };
