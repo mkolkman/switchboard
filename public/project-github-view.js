@@ -7,7 +7,8 @@
 // Depends on: escapeHtml (utils.js), PICONS, selectedProject, projectTab,
 // renderOverview, projectViewer, showContextMenu (projects-view.js),
 // formatDate (utils.js), window.marked (codemirror bundle), releaseText,
-// releaseDetail, releaseKind, leastReleased (github-releases.js).
+// releaseDetail, releaseKind, leastReleased (github-releases.js),
+// myReviewState, itemReviewGroup, MY_REVIEW_GROUPS (github-my-review.js).
 
 // An eye: someone has been asked to review this pull request.
 const GITHUB_REQUESTED_ICON = '<svg class="gh-requested" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-label="review requested"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -92,9 +93,11 @@ function githubPrChip(pr, itemKey) {
     : null;
   const requested = pr.state === 'OPEN' ? (pr.requested || []) : [];
   const linkText = { closes: 'closes this issue', linked: 'linked in Development', mentions: 'mentions this issue' }[pr.link] || '';
-  const title = `${pr.repo}#${pr.number}: ${pr.title}\n${stateText}${review ? ', ' + review[1].toLowerCase() : ''}, ${linkText}${requested.length ? `\nReview requested from ${requested.join(', ')}` : ''}\nClick to review here`;
+  const mine = githubMineMark(pr);
+  const title = `${pr.repo}#${pr.number}: ${pr.title}\n${stateText}${review ? ', ' + review[1].toLowerCase() : ''}, ${linkText}${requested.length ? `\nReview requested from ${requested.join(', ')}` : ''}${mine ? '\n' + mine.text : ''}\nClick to review here`;
   return `<button type="button" class="gh-pr gh-pr--${state}${pr.link === 'mentions' ? ' gh-pr--mention' : ''}" data-item="${escapeHtml(itemKey)}" data-pr="${escapeHtml(`${pr.repo}#${pr.number}`)}" title="${escapeHtml(title)}">`
     + `<span class="gh-pr-num">#${pr.number}</span>`
+    + (mine ? `<span class="gh-mine gh-mine--${mine.kind}">${mine.kind === 'reviewed' ? '✓' : '↻'}you</span>` : '')
     + (review ? `<span class="gh-review gh-review--${review[0]}">${review[0] === 'approved' ? '✓' : '±'}</span>` : '')
     + (requested.length ? GITHUB_REQUESTED_ICON : '')
     + githubChecksDot(pr.state === 'OPEN' ? pr.checks : null)
@@ -141,6 +144,15 @@ function loadGithubReleases(project, prs, { force = false } = {}) {
     .catch(() => {});
 }
 
+/** Your own review of an open PR, for its chip: reviewed, or changed since. Null when you have not. */
+function githubMineMark(pr) {
+  if (pr.state !== 'OPEN' || typeof myReviewState !== 'function') return null;
+  const kind = myReviewState(pr);
+  if (kind === 'none') return null;
+  const files = pr.myReview.changedFiles;
+  return { kind, text: kind === 'reviewed' ? 'Reviewed by you' : `Changed since your review${files ? ` (${files} file${files === 1 ? '' : 's'})` : ''}` };
+}
+
 function githubItemKey(item) {
   return item.number ? `${item.repo}#${item.number}` : `draft:${item.title}`;
 }
@@ -174,7 +186,10 @@ function githubItemRow(item, prefix, showRepo, selectedKey, releases) {
 const GITHUB_GROUP_MODE_KEY = (projectId) => `githubGroupMode:${projectId}`;
 
 function githubGroupMode(project) {
-  try { return localStorage.getItem(GITHUB_GROUP_MODE_KEY(project.id)) === 'status' ? 'status' : 'phase'; } catch { return 'phase'; }
+  try {
+    const mode = localStorage.getItem(GITHUB_GROUP_MODE_KEY(project.id));
+    return mode === 'status' || mode === 'mine' ? mode : 'phase';
+  } catch { return 'phase'; }
 }
 
 function setGithubGroupMode(project, mode) {
@@ -186,6 +201,9 @@ const openFirst = (items) => [...items].sort((a, b) => (a.status === 'done' || a
 
 /** The list's groups for a tracker, in the project's grouping. */
 function githubListGroups(project, result) {
+  if (githubGroupMode(project) === 'mine' && typeof itemReviewGroup === 'function') {
+    return MY_REVIEW_GROUPS.map(g => ({ ...g, items: result.items.filter(i => itemReviewGroup(i) === g.id) })).filter(g => g.items.length);
+  }
   if (githubGroupMode(project) === 'status' || typeof githubPhases !== 'function') return githubGroupsFor(result);
   const { by, phases, unphased } = githubPhases(project, result);
   const groups = phases.map(p => ({
@@ -201,6 +219,7 @@ function githubListGroups(project, result) {
 }
 
 function groupByLabel(project, result) {
+  if (githubGroupMode(project) === 'mine') return 'Your review';
   if (githubGroupMode(project) === 'status' || typeof githubPhases !== 'function') return 'PR status';
   return phaseSourceLabel(githubPhases(project, result).by);
 }
@@ -394,6 +413,7 @@ function bindGithubPlanActions(project, list, state) {
       showContextMenu([
         { head: 'Group by' },
         { label: 'PR status', icon: mode === 'status' ? PICONS.check(14) : '', onClick: () => setGithubGroupMode(project, 'status') },
+        { label: 'Your review', hint: 'needs you, changed, waiting', icon: mode === 'mine' ? PICONS.check(14) : '', onClick: () => setGithubGroupMode(project, 'mine') },
         { sep: true },
         { head: 'Phase' },
         ...phaseSources(result).map(src => ({
@@ -651,6 +671,29 @@ function githubChecksSection(pr, state) {
       const [k, text] = checkRunState(r);
       return `<a class="gh-check" href="${escapeHtml(r.url || pr.url)}" title="${escapeHtml(r.name)}: ${text}${r.required ? ' (required)' : ''}"><span class="gh-ci gh-ci--${k === 'bad' ? 'fail' : k === 'pending' ? 'pending' : k === 'ok' ? 'ok' : 'skip'}"></span><span class="gh-check-name">${escapeHtml(r.name)}</span>${r.required ? '<span class="gh-req">required</span>' : ''}<span class="gh-check-state">${text}</span></a>`;
     }).join('')}</div></div>`;
+}
+
+// Your own review: GitHub will not let you approve your own PR, so the button
+// leaves a marked comment review on the commit shown (github-my-review.js).
+function githubMyReviewSection(pr, state) {
+  if (pr.state !== 'OPEN' || !pr.headOid || typeof myReviewState !== 'function') return '';
+  const kind = myReviewState(pr);
+  const mine = pr.myReview;
+  const sha = (oid) => `<code>${escapeHtml(String(oid).slice(0, 7))}</code>`;
+  let text;
+  if (kind === 'none') text = '<span class="gh-state gh-state--warn">Not reviewed by you yet</span>';
+  else {
+    const when = `${mine.kind === 'approved' ? 'Approved' : 'Reviewed'} by you at ${sha(mine.sha)} <span class="gh-muted">${escapeHtml(githubAgo(mine.at))}</span>`;
+    if (kind === 'reviewed') {
+      text = `<span class="gh-state gh-state--ok">✓</span> ${when}${mine.sha !== pr.headOid ? '<span class="gh-muted">; rebased since, its files are unchanged</span>' : ''}`;
+    } else {
+      const files = mine.changedFiles;
+      text = `<span class="gh-state gh-state--warn">Changed since your review</span> ${when}${files ? `<span class="gh-muted">; ${files} of its files changed</span>` : ''}`;
+    }
+  }
+  const button = kind === 'reviewed' ? '' : `<button type="button" class="ws-btn gh-mark-reviewed" id="gh-mark-reviewed" ${state.busy ? 'disabled' : ''}
+      title="Leaves a comment review on GitHub at ${escapeHtml(pr.headOid.slice(0, 7))}, the commit shown here. Collaborators see it.">${state.busy === 'mark' ? 'Marking…' : kind === 'changed' ? 'Mark reviewed again' : 'Mark reviewed'}</button>`;
+  return `<div class="gh-sec gh-myrev"><div class="gh-sec-h">Your review</div><div class="gh-myrev-row"><span class="gh-myrev-text">${text}</span>${button}</div></div>`;
 }
 
 function githubReviewsSection(pr) {
@@ -1078,6 +1121,7 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
       ${githubMergeSection(detail, state, project)}
       ${githubSessionsSection(project, detail)}
       ${githubChecksSection(detail, state)}
+      ${githubMyReviewSection(detail, state)}
       ${githubReviewsSection(detail)}
       <div class="gh-sec"><div class="gh-sec-h">Description</div><div class="gh-md">${githubMarkdown(detail.body)}</div></div>
       ${githubConversation(detail)}`;
@@ -1150,6 +1194,21 @@ function bindGithubPrActions(project, panel, pr) {
       state.busy = null;
       state.notice = result?.error ? { kind: 'bad', text: result.error } : null;
       await loadGithubDetail(project, { quiet: true });
+      paintGithubPanel(project);
+    };
+  }
+  const markBtn = panel.querySelector('#gh-mark-reviewed');
+  if (markBtn) {
+    markBtn.onclick = async () => {
+      state.busy = 'mark';
+      paintGithubPanel(project);
+      const result = await window.api.markGithubReviewed(target, pr.headOid);
+      state.busy = null;
+      state.notice = result?.error ? { kind: 'bad', text: result.error } : null;
+      await loadGithubDetail(project, { quiet: true });
+      // The list's chips and groups show it too.
+      for (const ref of project.githubRefs || []) loadGithubTracker(project, ref, { force: true });
+      if (project.isGithubView && typeof loadGithubView === 'function') loadGithubView({ quiet: true });
       paintGithubPanel(project);
     };
   }

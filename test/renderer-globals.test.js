@@ -37,7 +37,7 @@ test('renderer scripts without load-time DOM work run their top level cleanly', 
     window: {}, console, localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     sessionStorage: { getItem: () => null, setItem() {} }, document: {},
   });
-  for (const name of ['session-groups.js', 'github-phases.js', 'github-releases.js', 'project-github-view.js', 'project-github-source.js']) {
+  for (const name of ['session-groups.js', 'github-phases.js', 'github-releases.js', 'github-my-review.js', 'project-github-view.js', 'project-github-source.js']) {
     assert.doesNotThrow(() => vm.runInContext(fs.readFileSync(path.join(dir, name), 'utf8'), ctx, { filename: name }), name);
   }
   // The last top-level bindings of each file were reached.

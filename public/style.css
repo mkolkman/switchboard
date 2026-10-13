@@ -7273,6 +7273,15 @@ body { display: flex; flex-direction: column; }
 .gh-rel--beta { color: #8cc8e8; border-color: rgba(140,200,232,0.3); }
 .gh-rel--production { color: #6fcf8f; border-color: rgba(111,207,143,0.3); }
 .gh-rel-detail { font-size: 11px; line-height: 1.5; color: #8a8aa0; }
+
+/* Your own review on a PR chip, and its row in the panel (github-my-review.js). */
+.gh-mine { font-size: 9.5px; letter-spacing: 0.02em; }
+.gh-mine--reviewed { color: #6fcf8f; }
+.gh-mine--changed { color: #e0b860; }
+.gh-myrev-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.gh-myrev-text { flex: 1; min-width: 0; font-size: 12px; color: #c4c4d8; }
+.gh-myrev-text code { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; color: #c8c8dc; }
+.gh-mark-reviewed[disabled] { opacity: 0.45; cursor: not-allowed; }
 .gh-review { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 10px; }
 .gh-review--approved { color: #6fcf8f; }
 .gh-review--changes { color: #e08a8a; }

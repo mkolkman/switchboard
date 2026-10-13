@@ -493,6 +493,7 @@ ipcMain.handle('github-pr-files', (_e, t) => githubTracker.asResult(githubTracke
 ipcMain.handle('github-review-comments', (_e, t) => githubTracker.asResult(githubTracker.getReviewComments(...ghTarget(t))));
 ipcMain.handle('github-create-review-comment', (_e, t, spec) => githubTracker.asResult(githubTracker.createReviewComment(...ghTarget(t), spec || {})));
 ipcMain.handle('github-reply-review-comment', (_e, t, id, body) => githubTracker.asResult(githubTracker.replyToReviewComment(...ghTarget(t), id, String(body || ''))));
+ipcMain.handle('github-mark-reviewed', (_e, t, headOid) => githubTracker.asResult(githubTracker.markReviewed(...ghTarget(t), headOid ? String(headOid) : null)));
 ipcMain.handle('github-set-autorebase', (_e, t, on) => githubTracker.asResult(githubTracker.setAutorebase(...ghTarget(t), !!on)));
 // A GitHub-backed project writes its todos and plan back to GitHub.
 ipcMain.handle('github-set-issue-closed', (_e, t, closed) => githubTracker.asResult(githubTracker.setIssueClosed(...ghTarget(t), !!closed)));

@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('api', {
   getGithubReviewComments: (target) => ipcRenderer.invoke('github-review-comments', target),
   createGithubReviewComment: (target, spec) => ipcRenderer.invoke('github-create-review-comment', target, spec),
   replyGithubReviewComment: (target, id, body) => ipcRenderer.invoke('github-reply-review-comment', target, id, body),
+  markGithubReviewed: (target, headOid) => ipcRenderer.invoke('github-mark-reviewed', target, headOid),
   setGithubAutorebase: (target, on) => ipcRenderer.invoke('github-set-autorebase', target, on),
   mergeGithubPullRequest: (target, opts) => ipcRenderer.invoke('github-merge', target, opts),
   setGithubIssueClosed: (target, closed) => ipcRenderer.invoke('github-set-issue-closed', target, closed),

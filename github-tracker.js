@@ -87,6 +87,7 @@ function summarize(items) {
 }
 
 const { phasesFrom } = require('./public/github-phases');
+const { latestMyReview, reviewMarkBody } = require('./public/github-my-review');
 
 // --- GraphQL ---
 
@@ -101,7 +102,8 @@ function isIgnoredReviewer(author) {
 }
 
 const PR_FIELDS = `
-  number title url state isDraft reviewDecision updatedAt mergedAt mergeCommit { oid }
+  number title url state isDraft reviewDecision updatedAt mergedAt mergeCommit { oid } headRefOid
+  mine: reviews(last: 20, author: $me) { nodes { state body submittedAt commit { oid } } }
   latestOpinionatedReviews(first: 20) { nodes { state author { __typename login } } }
   reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } ... on Bot { login } } } }
   repository { nameWithOwner }
@@ -153,6 +155,8 @@ function shapePr(node, link) {
     updatedAt: node.updatedAt,
     mergedAt: node.mergedAt || null,
     mergeSha: node.mergeCommit?.oid || null, // what release status looks for in tags
+    headOid: node.headRefOid || null,
+    myReview: latestMyReview(node.mine?.nodes), // { sha, at, kind }; addReviewChanges adds changedFiles
     link, // closes | linked | mentions
   };
 }
@@ -348,6 +352,14 @@ function ghToken() {
   return tryNext(ghCandidates()).then(token => { cachedToken = token; return token; });
 }
 
+let cachedLogin = null;
+
+/** Your GitHub login: queries that read PRs pass it as $me to find your own reviews. */
+function ghLogin() {
+  if (!cachedLogin) cachedLogin = graphql('query { viewer { login } }').then(d => d.viewer.login).catch(err => { cachedLogin = null; throw err; });
+  return cachedLogin;
+}
+
 async function graphql(query, variables = {}) {
   const token = await ghToken();
   const res = await fetch(API, {
@@ -374,16 +386,17 @@ async function fetchIssues(refs) {
   const batches = [];
   for (let i = 0; i < refs.length; i += ITEM_BATCH) batches.push(refs.slice(i, i + ITEM_BATCH));
   await Promise.all(batches.map(async (batch) => {
-    const query = (withProjects) => `query {\n${batch.map((r, j) =>
+    const me = await ghLogin();
+    const query = (withProjects) => `query($me: String) {\n${batch.map((r, j) =>
       `  i${j}: repository(owner: ${JSON.stringify(r.owner)}, name: ${JSON.stringify(r.repo)}) { issue(number: ${r.number}) { ${ISSUE_FIELDS}${withProjects ? PROJECT_ITEM_FIELDS : ''} } }`
     ).join('\n')}\n}`;
     let data;
     try {
-      data = await graphql(query(projectScope));
+      data = await graphql(query(projectScope), { me });
     } catch (err) {
       if (!projectScope || !isScopeError(err)) throw err;
       projectScope = false; // read without Project fields from now on
-      data = await graphql(query(false));
+      data = await graphql(query(false), { me });
     }
     batch.forEach((r, j) => {
       const node = data?.[`i${j}`]?.issue;
@@ -415,7 +428,7 @@ async function fetchTrackingIssue(ref) {
   }
   const issues = await fetchIssues(refs);
   const items = refs.map(r => issues.get(formatRef(r).toLowerCase())).filter(Boolean);
-  const issueFields = await phaseFieldsFor(ref.owner, items);
+  const [issueFields] = await Promise.all([phaseFieldsFor(ref.owner, items), addReviewChanges(items.flatMap(i => i.pullRequests))]);
   return {
     kind: 'issue',
     ref: formatRef(ref),
@@ -441,7 +454,7 @@ async function fetchProject(ref) {
   let cursor = null;
   let project = null;
   do {
-    const data = await graphql(`query($login: String!, $number: Int!, $after: String) {
+    const data = await graphql(`query($login: String!, $number: Int!, $after: String, $me: String) {
       ${owner}(login: $login) {
         projectV2(number: $number) {
           id title url closed shortDescription readme updatedAt
@@ -459,7 +472,7 @@ async function fetchProject(ref) {
           }
         }
       }
-    }`, { login: ref.owner, number: ref.number, after: cursor });
+    }`, { login: ref.owner, number: ref.number, after: cursor, me: await ghLogin() });
     project = data?.[owner]?.projectV2;
     if (!project) throw new Error(`Project ${ref.number} of ${ref.owner} was not found, or your GitHub login cannot see it.`);
     for (const node of project.items.nodes) {
@@ -479,6 +492,7 @@ async function fetchProject(ref) {
     }
     cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null;
   } while (cursor);
+  await addReviewChanges(items.flatMap(i => i.pullRequests));
   return {
     kind: 'project', ref: formatRef(ref), id: project.id, title: project.title, url: project.url, state: project.closed ? 'CLOSED' : 'OPEN',
     // A Project's README is its plan; the short description heads it.
@@ -683,6 +697,65 @@ async function getReleaseStatus(prs, { force = false } = {}) {
   return { statuses };
 }
 
+// --- Your own review: a marked comment review (public/github-my-review.js) ---
+
+const reviewChangeCache = new Map(); // "owner/repo#n|reviewed|head" → Promise<number|null>
+
+/**
+ * How many of a PR's files differ between the commit you reviewed and the
+ * head: 0 after a rebase that did not touch them. Null when unknown.
+ */
+function reviewChangedFiles(owner, repo, number, sha, head) {
+  const key = `${owner}/${repo}#${number}|${sha}|${head}`.toLowerCase();
+  if (reviewChangeCache.has(key)) return reviewChangeCache.get(key);
+  const promise = (async () => {
+    const files = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) { pullRequest(number: $number) { files(first: 100) { nodes { path } } } }
+    }`, { owner, repo, number });
+    const paths = (files?.repository?.pullRequest?.files?.nodes || []).map(n => n.path);
+    if (!paths.length) return 0;
+    // A file missing at one end comes back null (with an error GitHub sends alongside the data).
+    const pick = paths.map((p, i) => `f${i}: file(path: ${JSON.stringify(p)}) { oid }`).join(' ');
+    const data = await graphql(`query($owner: String!, $repo: String!, $a: GitObjectID!, $b: GitObjectID!) {
+      repository(owner: $owner, name: $repo) { a: object(oid: $a) { ... on Commit { ${pick} } } b: object(oid: $b) { ... on Commit { ${pick} } } }
+    }`, { owner, repo, a: sha, b: head });
+    const a = data?.repository?.a;
+    const b = data?.repository?.b;
+    if (!a || !b) return null;
+    return paths.filter((_, i) => (a[`f${i}`]?.oid || null) !== (b[`f${i}`]?.oid || null)).length;
+  })().catch(() => { reviewChangeCache.delete(key); return null; });
+  reviewChangeCache.set(key, promise);
+  return promise;
+}
+
+/** Fill in myReview.changedFiles on open PRs whose head moved since your review. */
+async function addReviewChanges(prs) {
+  await Promise.all((prs || []).map(async (pr) => {
+    const mine = pr?.myReview;
+    if (!mine || pr.state !== 'OPEN' || !pr.headOid || mine.sha === pr.headOid) return;
+    const [owner, repo] = String(pr.repo || '').split('/');
+    if (owner && repo) mine.changedFiles = await reviewChangedFiles(owner, repo, pr.number, mine.sha, pr.headOid);
+  }));
+}
+
+/**
+ * Mark a PR reviewed by you: a comment review on the commit the panel showed.
+ * GitHub does not let you approve your own PR; this works on any PR.
+ */
+async function markReviewed(owner, repo, number, headOid) {
+  const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id headRefOid } }
+  }`, { owner, repo, number });
+  const pr = data?.repository?.pullRequest;
+  if (!pr) throw new Error(`${owner}/${repo}#${number} was not found.`);
+  if (headOid && pr.headRefOid !== headOid) throw new Error('New commits came in after this panel loaded. Refresh and look at those first.');
+  await graphql(`mutation($id: ID!, $oid: GitObjectID!, $body: String!) {
+    addPullRequestReview(input: { pullRequestId: $id, commitOID: $oid, event: COMMENT, body: $body }) { pullRequestReview { id } }
+  }`, { id: pr.id, oid: pr.headRefOid, body: reviewMarkBody(pr.headRefOid) });
+  cache.clear();
+  return { ok: true };
+}
+
 // --- Pull request and issue detail (the side panel) ---
 
 const AUTOREBASE_LABEL = 'autorebase:opt-in';
@@ -692,7 +765,7 @@ const COMMENT_FIELDS = 'author { login } body createdAt url';
 
 /** Everything the review panel shows for one PR, read fresh (no cache). */
 async function getPullRequest(owner, repo, number) {
-  const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+  const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!, $me: String) {
     repository(owner: $owner, name: $repo) {
       nameWithOwner squashMergeAllowed rebaseMergeAllowed mergeCommitAllowed defaultBranchRef { name }
       autorebase: label(name: "${AUTOREBASE_LABEL}") { id }
@@ -707,6 +780,7 @@ async function getPullRequest(owner, repo, number) {
         latestOpinionatedReviews(first: 20) { nodes { author { __typename login } state submittedAt url } }
         comments(last: 50) { nodes { ${COMMENT_FIELDS} } }
         reviews(last: 30) { nodes { author { login } state body submittedAt url } }
+        mine: reviews(last: 20, author: $me) { nodes { state body submittedAt commit { oid } } }
         reviewThreads(last: 50) { nodes { isResolved isOutdated path line comments(first: 20) { nodes { ${COMMENT_FIELDS} } } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
@@ -715,18 +789,21 @@ async function getPullRequest(owner, repo, number) {
         } } } } } }
       }
     }
-  }`, { owner, repo, number });
+  }`, { owner, repo, number, me: await ghLogin() });
   const r = data?.repository;
   const pr = r?.pullRequest;
   if (!pr) throw new Error(`${owner}/${repo}#${number} was not found, or your GitHub login cannot see it.`);
   const commit = pr.commits?.nodes?.[0]?.commit;
   const labels = (pr.labels?.nodes || []).map(l => l.name);
+  const mine = { repo: r.nameWithOwner, number: pr.number, state: pr.state, headOid: pr.headRefOid, myReview: latestMyReview(pr.mine?.nodes) };
+  await addReviewChanges([mine]);
   return {
     kind: 'pr',
     id: pr.id, repo: r.nameWithOwner, number: pr.number, title: pr.title, url: pr.url,
     state: pr.state, isDraft: pr.isDraft, merged: pr.merged, mergedAt: pr.mergedAt, mergeSha: pr.mergeCommit?.oid || null,
     body: pr.body || '', author: pr.author?.login || 'ghost', createdAt: pr.createdAt, updatedAt: pr.updatedAt,
     headRef: pr.headRefName, baseRef: pr.baseRefName, headOid: pr.headRefOid,
+    myReview: mine.myReview,
     defaultBranch: r.defaultBranchRef?.name || null,
     mergeable: pr.mergeable, mergeState: pr.mergeStateStatus, reviewDecision: pr.reviewDecision,
     additions: pr.additions, deletions: pr.deletions, changedFiles: pr.changedFiles,
@@ -1175,14 +1252,14 @@ async function replyToReviewComment(owner, repo, number, commentId, body) {
  * and its chips work on them unchanged.
  */
 async function getMyPullRequests() {
-  const data = await graphql(`query {
+  const data = await graphql(`query($me: String) {
     mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
       nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
     }
     review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
       nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
     }
-  }`);
+  }`, { me: await ghLogin() });
   const toItem = (node) => {
     if (!node?.number) return null;
     const pr = shapePr(node, 'linked');
@@ -1194,11 +1271,12 @@ async function getMyPullRequests() {
     item.status = itemStatus(item);
     return item;
   };
-  return {
+  const lists = {
     mine: (data?.mine?.nodes || []).map(toItem).filter(Boolean),
     review: (data?.review?.nodes || []).map(toItem).filter(Boolean),
-    fetchedAt: new Date().toISOString(),
   };
+  await addReviewChanges([...lists.mine, ...lists.review].flatMap(i => i.pullRequests));
+  return { ...lists, fetchedAt: new Date().toISOString() };
 }
 
 /** Run a GitHub call for the renderer; errors become { error } like the rest of IPC. */
@@ -1211,5 +1289,5 @@ module.exports = {
   humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
-  releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus,
+  releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,
 };
