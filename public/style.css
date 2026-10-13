@@ -7260,6 +7260,19 @@ body { display: flex; flex-direction: column; }
 .gh-pr--closed { color: #e08a8a; border-color: rgba(224,138,138,0.25); }
 .gh-pr--mention { opacity: 0.6; }
 .gh-pr:hover { filter: brightness(1.25); opacity: 1; }
+
+/* Release status of an issue's merged work: staging, a stage and its tag, or production. */
+.gh-rel {
+  flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 10px; white-space: nowrap;
+  border: 1px solid transparent; background: rgba(255,255,255,0.04); cursor: default;
+}
+.gh-rel--unreleased { color: #e0b860; border-color: rgba(224,184,96,0.3); }
+.gh-rel--tagged { color: #9a9ab0; border-color: rgba(154,154,176,0.3); }
+.gh-rel--internal { color: #a0a6e8; border-color: rgba(160,166,232,0.3); }
+.gh-rel--beta { color: #8cc8e8; border-color: rgba(140,200,232,0.3); }
+.gh-rel--production { color: #6fcf8f; border-color: rgba(111,207,143,0.3); }
+.gh-rel-detail { font-size: 11px; line-height: 1.5; color: #8a8aa0; }
 .gh-review { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 10px; }
 .gh-review--approved { color: #6fcf8f; }
 .gh-review--changes { color: #e08a8a; }

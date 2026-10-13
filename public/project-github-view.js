@@ -6,7 +6,8 @@
 // reviews, comments and checks, the auto-rebase label and a merge button.
 // Depends on: escapeHtml (utils.js), PICONS, selectedProject, projectTab,
 // renderOverview, projectViewer, showContextMenu (projects-view.js),
-// formatDate (utils.js), window.marked (codemirror bundle).
+// formatDate (utils.js), window.marked (codemirror bundle), releaseText,
+// releaseDetail, releaseKind, leastReleased (github-releases.js).
 
 // An eye: someone has been asked to review this pull request.
 const GITHUB_REQUESTED_ICON = '<svg class="gh-requested" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-label="review requested"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -27,6 +28,7 @@ const GITHUB_GROUPS = [
 //   results: Map<ref, tracker result>, loading: Set<ref>, open: Map<groupKey, bool>,
 //   selection: null | { itemKey, view: 'issue' | 'repo#number' },
 //   details: Map<'pr:repo#n' | 'issue:repo#n', detail>, detailLoading: Set<key>, busy: string|null,
+//   releases: Map<'repo#n', release status> of merged PRs (github-tracker.js getReleaseStatus),
 // }
 const githubTabStates = new Map();
 
@@ -50,6 +52,7 @@ function githubTabState(projectId) {
     githubTabStates.set(projectId, {
       results: new Map(), loading: new Set(), open: new Map(),
       selection: null, details: new Map(), detailLoading: new Set(), busy: null, notice: null,
+      releases: new Map(),
     });
   }
   return githubTabStates.get(projectId);
@@ -98,11 +101,51 @@ function githubPrChip(pr, itemKey) {
     + '</button>';
 }
 
+// --- Release status: which tag a merged PR shipped in (github-releases.js words it) ---
+
+/** The merged PRs that are an item's work: those that close or are linked to it, else any. */
+function mergedWorkPrs(item) {
+  const all = item.pullRequests || [];
+  const direct = all.filter(p => p.link !== 'mentions');
+  return (direct.length ? direct : all).filter(p => p.state === 'MERGED' && p.mergeSha);
+}
+
+function githubReleasePill(status, extraTitle = '') {
+  if (!status || typeof releaseText !== 'function') return '';
+  const title = `${releaseDetail(status)}${extraTitle ? '\n' + extraTitle : ''}`;
+  return `<span class="gh-rel gh-rel--${releaseKind(status)}" title="${escapeHtml(title)}">${escapeHtml(releaseText(status))}</span>`;
+}
+
+/** An issue's release pill: its least released merged PR. */
+function githubItemReleasePill(item, releases) {
+  if (typeof leastReleased !== 'function') return '';
+  const prs = mergedWorkPrs(item);
+  const least = leastReleased(prs.map(p => releases.get(`${p.repo}#${p.number}`)));
+  if (!least) return '';
+  const which = prs.length > 1 ? `Least released of ${prs.map(p => `#${p.number}`).join(', ')}` : '';
+  return githubReleasePill(least, which);
+}
+
+/** Ask for the release status of merged PRs not known yet (or all of them on a refresh). */
+function loadGithubReleases(project, prs, { force = false } = {}) {
+  const state = githubTabState(project.id);
+  const wanted = prs.filter(p => p.mergeSha && p.mergedAt && (force || !state.releases.has(`${p.repo}#${p.number}`)));
+  if (!wanted.length || !window.api.getGithubReleaseStatus) return;
+  window.api.getGithubReleaseStatus(wanted.map(p => ({ repo: p.repo, number: p.number, sha: p.mergeSha, mergedAt: p.mergedAt })), { force })
+    .then(res => {
+      if (!res?.statuses) return;
+      for (const [key, status] of Object.entries(res.statuses)) state.releases.set(key, status);
+      repaintGithubTabIfShown(project);
+      paintGithubPanel(project);
+    })
+    .catch(() => {});
+}
+
 function githubItemKey(item) {
   return item.number ? `${item.repo}#${item.number}` : `draft:${item.title}`;
 }
 
-function githubItemRow(item, prefix, showRepo, selectedKey) {
+function githubItemRow(item, prefix, showRepo, selectedKey, releases) {
   const key = githubItemKey(item);
   const title = prefix && item.title.startsWith(prefix) ? item.title.slice(prefix.length) : item.title;
   const who = item.assignees?.length ? `<span class="gh-item-who" title="Assigned to ${escapeHtml(item.assignees.join(', '))}">${escapeHtml(item.assignees.join(', '))}</span>` : '';
@@ -121,6 +164,7 @@ function githubItemRow(item, prefix, showRepo, selectedKey) {
     + `<span class="gh-item-badge"></span>`
     + who
     + `<span class="gh-item-prs">${prs}</span>`
+    + (releases ? githubItemReleasePill(item, releases) : '')
     + actions
     + '</div>';
 }
@@ -225,7 +269,7 @@ function githubTrackerCard(project, refText, state) {
       : `<span class="gh-group-n">${group.items.length}</span>`;
     html += `<div class="gh-group${open ? '' : ' collapsed'}" data-key="${escapeHtml(key)}" data-ref="${escapeHtml(refText)}" ${ph?.title ? `data-phase="${escapeHtml(ph.title)}"` : ''}>`
       + `<div class="gh-group-h" role="button" tabindex="0" title="${escapeHtml(group.hint)}"><span class="arrow">&#9660;</span><span>${escapeHtml(group.label)}</span>${phaseBits}</div>`
-      + `<div class="gh-group-items">${group.items.map(i => githubItemRow(i, prefix, repos.size > 1, selectedKey)).join('')}</div></div>`;
+      + `<div class="gh-group-items">${group.items.map(i => githubItemRow(i, prefix, repos.size > 1, selectedKey, state.releases)).join('')}</div></div>`;
   }
   if (!result.items.length) html += '<div class="ws-card-text muted">No linked issues found. Link issues in its description, or add them as sub-issues.</div>';
   return html + '</div>';
@@ -401,7 +445,11 @@ function loadGithubTracker(project, ref, { force = false } = {}) {
   state.loading.add(ref);
   repaintGithubTabIfShown(project);
   window.api.getGithubTracker(ref, { force })
-    .then(result => state.results.set(ref, result || { error: 'No answer from GitHub.' }))
+    .then(result => {
+      state.results.set(ref, result || { error: 'No answer from GitHub.' });
+      // Release status follows the list in, once the merged PRs are known.
+      if (result?.items) loadGithubReleases(project, result.items.flatMap(mergedWorkPrs), { force });
+    })
     .catch(err => state.results.set(ref, { error: err?.message || String(err) }))
     .finally(() => {
       state.loading.delete(ref);
@@ -506,6 +554,7 @@ async function loadGithubDetail(project, { quiet = false } = {}) {
   try {
     const detail = kind === 'pr' ? await window.api.getGithubPullRequest(target) : await window.api.getGithubIssue(target);
     state.details.set(key, detail || { error: 'No answer from GitHub.' });
+    if (detail?.merged) loadGithubReleases(project, [detail]);
   } catch (err) {
     state.details.set(key, { error: err?.message || String(err) });
   }
@@ -621,7 +670,12 @@ function githubReviewsSection(pr) {
 function githubMergeSection(pr, state, project) {
   const prKey = `${pr.repo}#${pr.number}`;
   const resolving = state.busy === 'resolve' || (!!project && prSessionIds(project, prKey).some(id => prSessionState(id)[0] !== 'stopped'));
-  if (pr.merged) return `<div class="gh-sec gh-merge"><span class="gh-state gh-state--merged">Merged ${escapeHtml(githubAgo(pr.mergedAt))}</span></div>`;
+  if (pr.merged) {
+    const release = state.releases.get(`${pr.repo}#${pr.number}`);
+    return `<div class="gh-sec gh-merge"><div class="gh-merge-state"><span class="gh-state gh-state--merged">Merged ${escapeHtml(githubAgo(pr.mergedAt))}</span>${githubReleasePill(release)}</div>`
+      + (release ? `<div class="gh-rel-detail">${escapeHtml(releaseDetail(release)).replace(/\n/g, '<br>')}</div>` : '')
+      + '</div>';
+  }
   if (pr.state !== 'OPEN') return '<div class="gh-sec gh-merge"><span class="gh-state gh-state--bad">Closed without merging</span></div>';
   const [kind, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
   const method = state.mergeMethod && pr.mergeMethods.includes(state.mergeMethod) ? state.mergeMethod : pr.mergeMethods[0];

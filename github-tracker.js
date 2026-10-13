@@ -101,7 +101,7 @@ function isIgnoredReviewer(author) {
 }
 
 const PR_FIELDS = `
-  number title url state isDraft reviewDecision updatedAt
+  number title url state isDraft reviewDecision updatedAt mergedAt mergeCommit { oid }
   latestOpinionatedReviews(first: 20) { nodes { state author { __typename login } } }
   reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } ... on Bot { login } } } }
   repository { nameWithOwner }
@@ -151,6 +151,8 @@ function shapePr(node, link) {
       .map(r => r.login || r.name),
     checks: node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state || null,
     updatedAt: node.updatedAt,
+    mergedAt: node.mergedAt || null,
+    mergeSha: node.mergeCommit?.oid || null, // what release status looks for in tags
     link, // closes | linked | mentions
   };
 }
@@ -504,6 +506,183 @@ function getTracker(refText, { force = false } = {}) {
   return promise;
 }
 
+// --- Release status: which tags a merged PR has shipped in ---
+//
+// A PR is released once its merge commit is in a tag (`git tag --contains`).
+// What a tag means comes from the repo's release.toml (mls): "tagged" repos
+// deploy production on every tag and staging from main; "staged" repos
+// publish a tag to an internal track and promote it target by target, which
+// the GitHub Release body records in its Targets table. Containment is asked
+// of GitHub (Ref.compare), batched per repo and remembered for good: a tag
+// that contains a commit always will.
+
+const RELEASE_STAGES = ['internal', 'beta', 'production'];
+const RELEASE_BATCH = 50;
+
+/** The mls release model ("tagged" or "staged") from release.toml; null without one. */
+function releaseModel(toml) {
+  const m = String(toml || '').match(/^\s*model\s*=\s*"([\w-]+)"/m);
+  return m ? m[1] : null;
+}
+
+/**
+ * The Targets table of an mls Release body: { target: { stage: rollout % } }
+ * for the stages each target reached ("✅" is 100, "✅ 50%" a rollout).
+ * Null when the body has no such table.
+ */
+function parseReleaseTargets(body) {
+  const lines = String(body || '').split('\n');
+  const cells = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+  const start = lines.findIndex(l => /^\s*\|/.test(l) && /^target$/i.test(cells(l)[0]));
+  if (start < 0) return null;
+  const stages = cells(lines[start]).slice(1).map(s => s.toLowerCase());
+  const targets = {};
+  for (const line of lines.slice(start + 2)) {
+    if (!/^\s*\|/.test(line)) break;
+    const [name, ...marks] = cells(line);
+    if (!name || name.startsWith('**')) continue; // the totals row
+    targets[name] = {};
+    marks.forEach((mark, i) => {
+      if (!mark.includes('✅') || !stages[i]) return;
+      const pct = mark.match(/(\d+)\s*%/);
+      targets[name][stages[i]] = pct ? Number(pct[1]) : 100;
+    });
+  }
+  return targets;
+}
+
+/**
+ * Where a merge commit stands in a repo's tags. `info` is { model, tags }
+ * with tags oldest first ({ name, date, targets }); `check(tagName)` answers
+ * whether that tag contains the commit. Null when the repo has no tags.
+ */
+async function resolveRelease(info, mergedAt, check) {
+  const tags = info?.tags || [];
+  if (!tags.length) return null;
+  const model = info.model || null;
+  // A tag's commit descends from the merge, so it is never older than it.
+  const since = new Date(mergedAt).getTime();
+  const later = tags.filter(t => new Date(t.date).getTime() >= since);
+  // The first tag after the merge nearly always has it; ask a few at a time.
+  let first = -1;
+  for (let i = 0; i < later.length && first < 0; i += 3) {
+    const answers = await Promise.all(later.slice(i, i + 3).map(t => check(t.name)));
+    if (answers.includes(true)) first = i + answers.indexOf(true);
+  }
+  if (first < 0) return { state: 'unreleased', model };
+  const head = later[first];
+  if (model !== 'staged') return { state: 'released', model, stage: 'production', tag: head.name, targets: null };
+
+  // Per target and stage, the earliest tag that reached it and contains the
+  // merge; a later tag on a hotfix branch does not.
+  const rest = later.slice(first);
+  const names = [...new Set(rest.flatMap(t => Object.keys(t.targets || {})))];
+  const reached = await Promise.all(names.flatMap(target => RELEASE_STAGES.map(async (stage) => {
+    for (const t of rest) {
+      const rollout = t.targets?.[target]?.[stage];
+      if (rollout !== undefined && (t === head || await check(t.name))) return { stage, target, tag: t.name, rollout };
+    }
+    return null;
+  })));
+  const found = reached.filter(Boolean);
+  if (!found.length) return { state: 'released', model, stage: null, tag: head.name, targets: null };
+  const targets = Object.fromEntries(RELEASE_STAGES.map(s => [s, found.filter(r => r.stage === s).map(({ target, tag, rollout }) => ({ target, tag, rollout }))]));
+  const stage = [...RELEASE_STAGES].reverse().find(s => targets[s].length);
+  const order = rest.map(t => t.name);
+  const tag = targets[stage].map(r => r.tag).sort((a, b) => order.indexOf(a) - order.indexOf(b))[0];
+  return { state: 'released', model, stage, tag, targets };
+}
+
+const releaseInfoCache = new Map(); // "owner/repo" → { at, promise }
+
+/** A repo's release model and tags (oldest first, with their Release's Targets table). */
+function repoReleaseInfo(owner, repo, { force = false } = {}) {
+  const key = `${owner}/${repo}`.toLowerCase();
+  const hit = releaseInfoCache.get(key);
+  if (!force && hit && Date.now() - hit.at < CACHE_MS) return hit.promise;
+  const promise = graphql(`query($owner: String!, $repo: String!) {
+    repository(owner: $owner, name: $repo) {
+      toml: object(expression: "HEAD:release.toml") { ... on Blob { text } }
+      refs(refPrefix: "refs/tags/", first: 100, orderBy: { field: TAG_COMMIT_DATE, direction: DESC }) { nodes {
+        name target { __typename ... on Commit { committedDate } ... on Tag { target { ... on Commit { committedDate } } } }
+      } }
+      releases(first: 30, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { tagName description } }
+    }
+  }`, { owner, repo })
+    .then(data => {
+      const r = data?.repository;
+      if (!r) throw new Error(`${owner}/${repo} was not found.`);
+      const tables = new Map((r.releases?.nodes || []).map(n => [n.tagName, parseReleaseTargets(n.description)]));
+      const tags = (r.refs?.nodes || []).map(n => ({
+        name: n.name,
+        date: n.target?.committedDate || n.target?.target?.committedDate || null,
+        targets: tables.get(n.name) || null,
+      })).filter(t => t.date).sort((a, b) => new Date(a.date) - new Date(b.date));
+      return { model: releaseModel(r.toml?.text), tags };
+    })
+    .catch(err => { releaseInfoCache.delete(key); throw err; });
+  releaseInfoCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
+const containsCache = new Map(); // "owner/repo|tag|sha" → Promise<boolean>
+const containsQueue = new Map(); // "owner/repo" → [{ tag, sha, resolve, reject }]
+
+/** Whether a tag contains a commit; questions asked in the same tick go out as one query per repo. */
+function tagContains(owner, repo, tag, sha) {
+  const key = `${owner}/${repo}|${tag}|${sha}`.toLowerCase();
+  if (containsCache.has(key)) return containsCache.get(key);
+  const promise = new Promise((resolve, reject) => {
+    const repoKey = `${owner}/${repo}`;
+    if (!containsQueue.has(repoKey)) {
+      containsQueue.set(repoKey, []);
+      setTimeout(() => flushContains(owner, repo), 0);
+    }
+    containsQueue.get(repoKey).push({ tag, sha, resolve, reject });
+  });
+  promise.catch(() => containsCache.delete(key)); // ask again next time
+  containsCache.set(key, promise);
+  return promise;
+}
+
+async function flushContains(owner, repo) {
+  const queue = containsQueue.get(`${owner}/${repo}`) || [];
+  containsQueue.delete(`${owner}/${repo}`);
+  for (let i = 0; i < queue.length; i += RELEASE_BATCH) {
+    const batch = queue.slice(i, i + RELEASE_BATCH);
+    const query = `query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {\n${batch.map((q, j) =>
+      `  c${j}: ref(qualifiedName: ${JSON.stringify(`refs/tags/${q.tag}`)}) { compare(headRef: ${JSON.stringify(q.sha)}) { status } }`).join('\n')}\n} }`;
+    try {
+      const data = await graphql(query, { owner, repo });
+      // BEHIND: the commit is behind the tag, so the tag contains it.
+      batch.forEach((q, j) => q.resolve(['BEHIND', 'IDENTICAL'].includes(data?.repository?.[`c${j}`]?.compare?.status)));
+    } catch (err) {
+      batch.forEach(q => q.reject(err));
+    }
+  }
+}
+
+/**
+ * Release status of merged PRs ({ repo: "owner/name", number, sha, mergedAt }),
+ * keyed "owner/name#number". A repo that cannot be read leaves its PRs out.
+ */
+async function getReleaseStatus(prs, { force = false } = {}) {
+  const statuses = {};
+  // One read of each repo's tags, also when several PRs come from it.
+  const infos = new Map();
+  await Promise.all((prs || []).filter(p => p?.sha && p.mergedAt && /^[^/]+\/[^/]+$/.test(p.repo || '')).map(async (p) => {
+    const [owner, repo] = p.repo.split('/');
+    try {
+      const key = p.repo.toLowerCase();
+      if (!infos.has(key)) infos.set(key, repoReleaseInfo(owner, repo, { force }));
+      const info = await infos.get(key);
+      const status = await resolveRelease(info, p.mergedAt, (tag) => tagContains(owner, repo, tag, p.sha));
+      if (status) statuses[`${p.repo}#${p.number}`] = status;
+    } catch {}
+  }));
+  return { statuses };
+}
+
 // --- Pull request and issue detail (the side panel) ---
 
 const AUTOREBASE_LABEL = 'autorebase:opt-in';
@@ -518,7 +697,7 @@ async function getPullRequest(owner, repo, number) {
       nameWithOwner squashMergeAllowed rebaseMergeAllowed mergeCommitAllowed defaultBranchRef { name }
       autorebase: label(name: "${AUTOREBASE_LABEL}") { id }
       pullRequest(number: $number) {
-        id number title url state isDraft merged mergedAt body createdAt updatedAt
+        id number title url state isDraft merged mergedAt mergeCommit { oid } body createdAt updatedAt
         author { login }
         headRefName baseRefName headRefOid
         mergeable mergeStateStatus reviewDecision
@@ -545,7 +724,7 @@ async function getPullRequest(owner, repo, number) {
   return {
     kind: 'pr',
     id: pr.id, repo: r.nameWithOwner, number: pr.number, title: pr.title, url: pr.url,
-    state: pr.state, isDraft: pr.isDraft, merged: pr.merged, mergedAt: pr.mergedAt,
+    state: pr.state, isDraft: pr.isDraft, merged: pr.merged, mergedAt: pr.mergedAt, mergeSha: pr.mergeCommit?.oid || null,
     body: pr.body || '', author: pr.author?.login || 'ghost', createdAt: pr.createdAt, updatedAt: pr.updatedAt,
     headRef: pr.headRefName, baseRef: pr.baseRefName, headOid: pr.headRefOid,
     defaultBranch: r.defaultBranchRef?.name || null,
@@ -1032,4 +1211,5 @@ module.exports = {
   humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
+  releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus,
 };

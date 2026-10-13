@@ -488,6 +488,7 @@ const ghTarget = (t) => [String(t?.owner || ''), String(t?.repo || ''), Number(t
 ipcMain.handle('github-pull-request', (_e, t) => githubTracker.asResult(githubTracker.getPullRequest(...ghTarget(t))));
 ipcMain.handle('github-issue', (_e, t) => githubTracker.asResult(githubTracker.getIssue(...ghTarget(t))));
 ipcMain.handle('github-my-prs', () => githubTracker.asResult(githubTracker.getMyPullRequests()));
+ipcMain.handle('github-release-status', (_e, prs, opts) => githubTracker.asResult(githubTracker.getReleaseStatus(Array.isArray(prs) ? prs : [], { force: !!opts?.force })));
 ipcMain.handle('github-pr-files', (_e, t) => githubTracker.asResult(githubTracker.getPullRequestFiles(...ghTarget(t))));
 ipcMain.handle('github-review-comments', (_e, t) => githubTracker.asResult(githubTracker.getReviewComments(...ghTarget(t))));
 ipcMain.handle('github-create-review-comment', (_e, t, spec) => githubTracker.asResult(githubTracker.createReviewComment(...ghTarget(t), spec || {})));

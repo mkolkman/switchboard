@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('api', {
   getGithubIssue: (target) => ipcRenderer.invoke('github-issue', target),
   getGithubPullRequestFiles: (target) => ipcRenderer.invoke('github-pr-files', target),
   getMyGithubPullRequests: () => ipcRenderer.invoke('github-my-prs'),
+  getGithubReleaseStatus: (prs, opts) => ipcRenderer.invoke('github-release-status', prs, opts),
   getGithubReviewComments: (target) => ipcRenderer.invoke('github-review-comments', target),
   createGithubReviewComment: (target, spec) => ipcRenderer.invoke('github-create-review-comment', target, spec),
   replyGithubReviewComment: (target, id, body) => ipcRenderer.invoke('github-reply-review-comment', target, id, body),
