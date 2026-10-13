@@ -172,10 +172,10 @@ function decorateScheduleButton(btn, schedules) {
   if (schedules.length) {
     if (!badge) { badge = document.createElement('span'); badge.className = 'schedule-count'; btn.appendChild(badge); }
     badge.textContent = String(schedules.length);
-    btn.title = schedules.length === 1 ? '1 scheduled task' : `${schedules.length} scheduled tasks`;
+    btn.title = (schedules.length === 1 ? '1 scheduled task' : `${schedules.length} scheduled tasks`) + ' in this folder: click to list or add';
   } else {
     if (badge) badge.remove();
-    btn.title = 'New scheduled task';
+    btn.title = 'Schedule a task: run a prompt here on a timer';
   }
 }
 

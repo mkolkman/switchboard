@@ -27,6 +27,86 @@ function folderId(projectPath) {
   return 'project-' + projectPath.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+// --- Grouping (session-groups.js holds the pure rules) ---
+// sidebarGroupMode, customerMapping, repoInfoByPath and chatFolderPath live in
+// app.js; the "Group by" control and Settings write them.
+
+function isChatFolder(projectPath) {
+  return !!chatFolderPath && projectPath === chatFolderPath;
+}
+
+function repoNameFor(projectPath) {
+  if (isChatFolder(projectPath)) return null;
+  return repoInfoByPath.get(projectPath)?.name || null;
+}
+
+// What a session row says it belongs to: the repo name, the folder name when
+// the folder has no remote, or "Chat" for a repo-less chat.
+function sessionSourceLabel(projectPath) {
+  if (!projectPath) return '';
+  if (isChatFolder(projectPath)) return 'Chat';
+  return repoNameFor(projectPath) || folderBaseName(projectPath);
+}
+
+function sessionSourceTitle(projectPath) {
+  const info = repoInfoByPath.get(projectPath);
+  return info ? `${info.owner}/${info.name}\n${projectPath}` : projectPath;
+}
+
+function lastActivityOf(sessions) {
+  let latest = 0;
+  for (const s of sessions) {
+    const t = new Date(s.modified).getTime();
+    if (Number.isFinite(t) && t > latest) latest = t;
+  }
+  return latest;
+}
+
+function statusOfSession(session) {
+  const id = session.sessionId;
+  return sessionStatus({
+    attention: attentionSessions.has(id),
+    unread: responseReadySessions.has(id),
+    busy: sessionBusyState.get(id) === true,
+    running: isSessionRunning(id),
+    modifiedMs: new Date(session.modified).getTime(),
+    nowMs: Date.now(),
+    maxAgeDays: sessionMaxAgeDays,
+  });
+}
+
+// Status grouping moves rows when a session's state changes, which the
+// in-place class updates alone cannot do. Coalesced so a burst of busy/idle
+// signals costs one render.
+let statusRegroupTimer = null;
+let renderedStatuses = new Map(); // sessionId → status it was rendered under
+function onSessionStatusChanged() {
+  if (sidebarGroupMode !== 'status' || statusRegroupTimer) return;
+  statusRegroupTimer = setTimeout(() => {
+    statusRegroupTimer = null;
+    // The running poll calls in every few seconds; only a move re-renders.
+    for (const [id, status] of renderedStatuses) {
+      const session = sessionMap.get(id);
+      if (session && statusOfSession(session) !== status) {
+        refreshSidebar({ reason: 'sessions' });
+        return;
+      }
+    }
+  }, 250);
+}
+
+// Every folder the app knows, with this render's sessions, so a group whose
+// sessions are filtered out or archived still shows. A search narrows the
+// list to what matched instead.
+function withAllFolders(projects) {
+  if (searchMatchIds !== null) return projects;
+  const known = new Set(projects.map(p => p.projectPath));
+  const extra = cachedAllProjects
+    .filter(p => !known.has(p.projectPath))
+    .map(p => ({ folder: p.folder, projectPath: p.projectPath, sessions: [] }));
+  return extra.length ? [...projects, ...extra] : projects;
+}
+
 function buildSlugGroup(slug, sessions) {
   const group = document.createElement('div');
   const id = slugId(slug);
@@ -65,7 +145,7 @@ function buildSlugGroup(slug, sessions) {
 
   const archiveSlugBtn = document.createElement('button');
   archiveSlugBtn.className = 'slug-group-archive-btn';
-  archiveSlugBtn.title = 'Archive all sessions in group';
+  archiveSlugBtn.title = 'Archive every session in this conversation thread';
   archiveSlugBtn.innerHTML = ICONS.archive(14);
 
   info.appendChild(nameEl);
@@ -139,8 +219,9 @@ function processProjectSessions(project, resort, previousOrder = sortedOrder) {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === todayStr;
     });
   }
-  const anyFilterActive = showStarredOnly || showRunningOnly || showTodayOnly || searchMatchIds !== null;
-  if (filtered.length === 0 && !project._projectMatchedOnly && (project.sessions.length > 0 || anyFilterActive)) return null;
+  // Groups stay on screen when a filter empties them; only a search, which
+  // is asking where something is, drops the ones that did not match.
+  if (filtered.length === 0 && !project._projectMatchedOnly && searchMatchIds !== null) return null;
 
   // Sort
   filtered = [...filtered].sort((a, b) => {
@@ -238,8 +319,8 @@ function buildSessionsList(fId, visible, older) {
 
     const archiveOlderBtn = document.createElement('button');
     archiveOlderBtn.className = 'sessions-older-archive-btn';
-    archiveOlderBtn.title = 'Archive all older sessions';
-    archiveOlderBtn.setAttribute('aria-label', 'Archive all older sessions');
+    archiveOlderBtn.title = 'Archive all older sessions in this group';
+    archiveOlderBtn.setAttribute('aria-label', archiveOlderBtn.title);
     archiveOlderBtn.innerHTML = ICONS.archive(14);
 
     moreBtn.appendChild(moreLabel);
@@ -300,20 +381,41 @@ function preserveSidebarDomState(fromEl, toEl) {
 
 function renderProjects(projects, resort) {
   const newSidebar = document.createElement('div');
+  const { newSortedOrder, boundProjects } = sidebarGroupMode === 'folder'
+    ? buildFolderGroups(newSidebar, projects, resort)
+    : buildVirtualGroups(newSidebar, projects, resort, sidebarGroupMode);
 
-  // Sort project groups using sortedOrder as source of truth
-  if (!resort && sortedOrder.length > 0) {
-    const orderIndex = new Map(sortedOrder.map((e, i) => [e.projectPath, i]));
-    projects = [...projects].sort((a, b) => {
-      const aPos = orderIndex.get(a.projectPath);
-      const bPos = orderIndex.get(b.projectPath);
-      if (aPos !== undefined && bPos !== undefined) return aPos - bPos;
-      if (aPos === undefined && bPos !== undefined) return -1;
-      if (aPos !== undefined && bPos === undefined) return 1;
-      return 0;
-    });
+  // Re-apply active state
+  if (activeSessionId) {
+    const activeItem = newSidebar.querySelector(`[data-session-id="${activeSessionId}"]`);
+    if (activeItem) activeItem.classList.add('active');
   }
-  // projects are now in the correct order (data order for resort, preserved order otherwise)
+
+  morphdom(sidebarContent, newSidebar, {
+    childrenOnly: true,
+    onBeforeElUpdated: preserveSidebarDomState,
+    getNodeKey(node) {
+      return node.id || undefined;
+    }
+  });
+
+  // Save the full sorted order (project order + item order) as source of truth
+  sortedOrder = newSortedOrder;
+
+  rebindSidebarEvents(boundProjects);
+
+  // Restore terminal focus after morphdom DOM updates, but not if the user is
+  // interacting with an input/textarea (search box, rename input, dialogs, etc.)
+  const ae = document.activeElement;
+  const isUserTyping = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable || ae.closest('.modal-overlay'));
+  if (activeSessionId && openSessions.has(activeSessionId) && !isUserTyping) {
+    openSessions.get(activeSessionId).terminal.focus();
+  }
+}
+
+// Folder mode: one group per folder, Claude worktrees nested under their parent.
+function buildFolderGroups(newSidebar, projects, resort) {
+  projects = withAllFolders(projects);
 
   // Detect worktree projects and group them under their parent
   const worktreePattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
@@ -327,6 +429,27 @@ function renderProjects(projects, resort) {
       worktreeMap.get(parentPath).push(project);
       worktreeSet.add(project.projectPath);
     }
+  }
+
+  // Latest activity first on a re-sort (a worktree's sessions count for its
+  // parent); otherwise keep the order on screen, new folders at the top.
+  if (resort || sortedOrder.length === 0) {
+    const activity = (p) => Math.max(lastActivityOf(p.sessions),
+      ...(worktreeMap.get(p.projectPath) || []).map(wt => lastActivityOf(wt.sessions)));
+    projects = [...projects]
+      .map(p => ({ p, t: activity(p) }))
+      .sort((a, b) => b.t - a.t || a.p.projectPath.localeCompare(b.p.projectPath))
+      .map(({ p }) => p);
+  } else {
+    const orderIndex = new Map(sortedOrder.map((e, i) => [e.projectPath, i]));
+    projects = [...projects].sort((a, b) => {
+      const aPos = orderIndex.get(a.projectPath);
+      const bPos = orderIndex.get(b.projectPath);
+      if (aPos !== undefined && bPos !== undefined) return aPos - bPos;
+      if (aPos === undefined && bPos !== undefined) return -1;
+      if (aPos !== undefined && bPos === undefined) return 1;
+      return 0;
+    });
   }
 
   const newSortedOrder = [];
@@ -343,7 +466,7 @@ function renderProjects(projects, resort) {
 
     // Build DOM
     const group = document.createElement('div');
-    group.className = 'project-group';
+    group.className = 'project-group' + (filtered.length === 0 ? ' is-empty' : '');
     group.id = fId;
 
     const header = document.createElement('div');
@@ -376,20 +499,20 @@ function renderProjects(projects, resort) {
 
     const settingsBtn = document.createElement('button');
     settingsBtn.className = 'project-settings-btn';
-    settingsBtn.title = 'Project settings';
+    settingsBtn.title = `Folder settings for ${shortName} (CLI options, launch defaults)`;
     settingsBtn.innerHTML = ICONS.gear(16);
     header.appendChild(settingsBtn);
 
     const archiveGroupBtn = document.createElement('button');
     archiveGroupBtn.className = 'project-archive-btn';
-    archiveGroupBtn.title = 'Archive all sessions';
+    archiveGroupBtn.title = `Archive all sessions in ${shortName}`;
     archiveGroupBtn.innerHTML = ICONS.archive(18);
     header.appendChild(archiveGroupBtn);
 
     const newBtn = document.createElement('button');
     newBtn.className = 'project-new-btn';
     newBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
-    newBtn.title = 'New session';
+    newBtn.title = `New session in ${shortName}`;
     header.appendChild(newBtn);
 
     const sessionsList = buildSessionsList(fId, visible, older);
@@ -428,7 +551,7 @@ function renderProjects(projects, resort) {
 
       const wtHideBtn = document.createElement('button');
       wtHideBtn.className = 'worktree-hide-btn';
-      wtHideBtn.title = 'Hide worktree';
+      wtHideBtn.title = 'Hide this worktree from the sidebar (no files are deleted)';
       wtHideBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
       wtHeader.appendChild(wtHideBtn);
 
@@ -438,7 +561,7 @@ function renderProjects(projects, resort) {
       const wtNewBtn = document.createElement('button');
       wtNewBtn.className = 'project-new-btn worktree-new-btn';
       wtNewBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
-      wtNewBtn.title = 'New session in worktree';
+      wtNewBtn.title = `New session in worktree ${wtName}`;
       wtHeader.appendChild(wtNewBtn);
 
       const wtSessionsList = buildSessionsList(wtFId, wtResult.visible, wtResult.older);
@@ -460,32 +583,133 @@ function renderProjects(projects, resort) {
     newSidebar.appendChild(group);
   }
 
-  // Re-apply active state
-  if (activeSessionId) {
-    const activeItem = newSidebar.querySelector(`[data-session-id="${activeSessionId}"]`);
-    if (activeItem) activeItem.classList.add('active');
+  return { newSortedOrder, boundProjects: projects };
+}
+
+// Repository, customer and status modes: a group gathers sessions from any
+// number of folders. Each renders like a folder group under a synthetic path
+// ("group:<mode>:<key>"), so its row order and collapse state carry across
+// renders the same way a folder's do.
+function collectGroups(projects, mode) {
+  const groups = new Map();
+  const statuses = new Map();
+  const ensure = (key, label, title) => {
+    const path = `group:${mode}:${key}`;
+    if (!groups.has(path)) groups.set(path, { path, key, label, title, sessions: [], folders: [], lastActivity: 0 });
+    return groups.get(path);
+  };
+
+  // Groups that exist whether or not anything is in them.
+  if (mode === 'status') {
+    for (const status of STATUS_GROUPS) ensure(status.id, status.label, status.description);
+  } else if (mode === 'customer') {
+    for (const c of customerMapping) ensure('c:' + c.name.toLowerCase(), c.name, `Repositories matching ${c.patterns.join(', ')}`);
+    ensure('c:' + OTHER_CUSTOMER.toLowerCase(), OTHER_CUSTOMER, 'Repositories that match no customer in Settings › Customers');
   }
 
-  morphdom(sidebarContent, newSidebar, {
-    childrenOnly: true,
-    onBeforeElUpdated: preserveSidebarDomState,
-    getNodeKey(node) {
-      return node.id || undefined;
+  for (const project of projects) {
+    const p = project.projectPath;
+    let folderGroup = null;
+    if (mode !== 'status') {
+      if (isChatFolder(p)) {
+        folderGroup = ensure('chats', 'Chats', 'Chats started with New chat, outside any repository');
+        folderGroup.chat = true;
+      } else if (mode === 'repo') {
+        const info = repoInfoByPath.get(p);
+        folderGroup = info
+          ? ensure(`r:${info.owner}/${info.name}`.toLowerCase(), info.name, `${info.owner}/${info.name}`)
+          : ensure('d:' + p, folderBaseName(p), `${p}\n(no git remote)`);
+      } else {
+        const name = customerFor([repoNameFor(p), folderBaseName(p)], customerMapping);
+        folderGroup = ensure('c:' + name.toLowerCase(), name, 'Repositories that match no customer in Settings › Customers');
+      }
+      folderGroup.folders.push(project);
     }
-  });
-
-  // Save the full sorted order (project order + item order) as source of truth
-  sortedOrder = newSortedOrder;
-
-  rebindSidebarEvents(projects);
-
-  // Restore terminal focus after morphdom DOM updates, but not if the user is
-  // interacting with an input/textarea (search box, rename input, dialogs, etc.)
-  const ae = document.activeElement;
-  const isUserTyping = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable || ae.closest('.modal-overlay'));
-  if (activeSessionId && openSessions.has(activeSessionId) && !isUserTyping) {
-    openSessions.get(activeSessionId).terminal.focus();
+    for (const session of project.sessions) {
+      if (folderGroup) { folderGroup.sessions.push(session); continue; }
+      const status = statusOfSession(session);
+      statuses.set(session.sessionId, status);
+      ensure(status).sessions.push(session);
+    }
   }
+  if (mode === 'status') renderedStatuses = statuses;
+
+  for (const group of groups.values()) {
+    group.lastActivity = lastActivityOf(group.sessions);
+    // A repo's + starts in its main checkout: the shortest of its folders,
+    // since worktrees sit below it.
+    if (mode === 'repo' && !group.chat && group.folders.length) {
+      group.newSessionProject = [...group.folders].sort((a, b) => a.projectPath.length - b.projectPath.length)[0];
+    }
+  }
+  return [...groups.values()];
+}
+
+// Status groups keep their fixed order (what needs you first). Others sort by
+// latest activity on a re-sort, and otherwise keep their place on screen with
+// newly appearing groups on top, like folders do.
+function orderGroups(groups, mode, resort) {
+  if (mode === 'status') {
+    const rank = new Map(STATUS_GROUPS.map((s, i) => [s.id, i]));
+    return [...groups].sort((a, b) => rank.get(a.key) - rank.get(b.key));
+  }
+  const byActivity = sortGroupsByActivity(groups);
+  if (resort) return byActivity;
+  const orderIndex = new Map(sortedOrder.map((e, i) => [e.projectPath, i]));
+  const known = byActivity.filter(g => orderIndex.has(g.path)).sort((a, b) => orderIndex.get(a.path) - orderIndex.get(b.path));
+  return [...byActivity.filter(g => !orderIndex.has(g.path)), ...known];
+}
+
+function buildVirtualGroups(newSidebar, projects, resort, mode) {
+  const groups = orderGroups(collectGroups(withAllFolders(projects), mode), mode, resort);
+  const newSortedOrder = [];
+  const boundProjects = [];
+
+  for (const g of groups) {
+    const project = { projectPath: g.path, sessions: g.sessions, label: g.label, chat: !!g.chat, newSessionProject: g.newSessionProject || null };
+    const result = processProjectSessions(project, resort);
+    if (!result) continue;
+    const { filtered, visible, older, sortOrderEntry } = result;
+    newSortedOrder.push(sortOrderEntry);
+    boundProjects.push(project);
+    const fId = folderId(g.path);
+
+    const group = document.createElement('div');
+    group.className = 'project-group' + (filtered.length === 0 ? ' is-empty' : '');
+    group.id = fId;
+
+    const header = document.createElement('div');
+    header.className = 'project-header';
+    header.id = 'ph-' + fId;
+    header.title = g.title || g.label;
+    header.innerHTML = `<span class="arrow">&#9660;</span> <span class="project-name">${escapeHtml(g.label)}</span><span class="project-group-count" title="${filtered.length} session${filtered.length === 1 ? '' : 's'} shown">${filtered.length}</span>`;
+
+    const archiveGroupBtn = document.createElement('button');
+    archiveGroupBtn.className = 'project-archive-btn';
+    archiveGroupBtn.title = `Archive all sessions in ${g.label}`;
+    archiveGroupBtn.innerHTML = ICONS.archive(18);
+    header.appendChild(archiveGroupBtn);
+
+    if (project.chat || project.newSessionProject) {
+      const newBtn = document.createElement('button');
+      newBtn.className = 'project-new-btn';
+      newBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
+      newBtn.title = project.chat ? 'New chat' : `New session in ${shortProjectPath(project.newSessionProject.projectPath)}`;
+      header.appendChild(newBtn);
+    }
+
+    // Collapse what has been quiet past the max age, the Stale group always.
+    if (searchMatchIds === null && !showStarredOnly && !showRunningOnly) {
+      const quiet = g.lastActivity && (Date.now() - g.lastActivity) > sessionMaxAgeDays * 86400000;
+      if (quiet || (mode === 'status' && g.key === 'stale')) header.classList.add('collapsed');
+    }
+
+    group.appendChild(header);
+    group.appendChild(buildSessionsList(fId, visible, older));
+    newSidebar.appendChild(group);
+  }
+
+  return { newSortedOrder, boundProjects };
 }
 
 function rebindSidebarEvents(projects) {
@@ -495,7 +719,11 @@ function rebindSidebarEvents(projects) {
     if (!header) continue;
     const newBtn = header.querySelector('.project-new-btn');
     if (newBtn) {
-      newBtn.onclick = (e) => { e.stopPropagation(); showNewSessionPopover(project, newBtn); };
+      newBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (project.chat) launchChatSession();
+        else showNewSessionPopover(project.newSessionProject || project, newBtn);
+      };
     }
     const taskBtn = header.querySelector('.project-task-btn');
     if (taskBtn) {
@@ -515,7 +743,7 @@ function rebindSidebarEvents(projects) {
         e.stopPropagation();
         const sessions = project.sessions.filter(s => !s.archived);
         if (sessions.length === 0) return;
-        const shortName = shortProjectPath(project.projectPath);
+        const shortName = project.label || shortProjectPath(project.projectPath);
         if (!confirm(`Archive all ${sessions.length} session${sessions.length > 1 ? 's' : ''} in ${shortName}?`)) return;
         for (const s of sessions) {
           if (activePtyIds.has(s.sessionId)) {
@@ -781,7 +1009,7 @@ function buildSessionItem(session) {
   const pin = document.createElement('button');
   pin.className = 'session-pin' + (session.starred ? ' pinned' : '');
   pin.type = 'button';
-  pin.title = session.starred ? 'Unstar session' : 'Star session';
+  pin.title = session.starred ? 'Unstar session' : 'Star session (keeps it at the top of its group)';
   pin.setAttribute('aria-label', pin.title);
   pin.setAttribute('aria-pressed', String(!!session.starred));
   pin.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="${session.starred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.78 5.63L21 9.54l-4.5 4.39 1.06 6.2L12 17.2l-5.56 2.93 1.06-6.2L3 9.54l6.22-.91L12 3z"/></svg>`;
@@ -814,6 +1042,15 @@ function buildSessionItem(session) {
   summaryEl.textContent = displayName;
   header.append(summaryEl, pin);
 
+  // Which repo the session is in, except where the group already says so.
+  let sourceEl = null;
+  if (sidebarGroupMode !== 'repo' && session.projectPath) {
+    sourceEl = document.createElement('div');
+    sourceEl.className = 'session-source';
+    sourceEl.textContent = sessionSourceLabel(session.projectPath);
+    sourceEl.title = sessionSourceTitle(session.projectPath);
+  }
+
   const footer = document.createElement('div');
   footer.className = 'session-footer';
   const metaEl = document.createElement('div');
@@ -821,7 +1058,7 @@ function buildSessionItem(session) {
   // The 30-second ticker updates this span, including the message count.
   const timeEl = document.createElement('span');
   timeEl.className = 'session-time';
-  timeEl.title = session.sessionId;
+  timeEl.title = `Last active ${Number.isFinite(modified.getTime()) ? modified.toLocaleString() : 'unknown'}\nSession ID ${session.sessionId}`;
   timeEl.textContent = timeStr + (session.messageCount ? ' \u00b7 ' + session.messageCount + ' msgs' : '');
   metaEl.append(mark, timeEl);
   // Started by a scheduled task: a clock, with which one and when in its tooltip.
@@ -839,30 +1076,30 @@ function buildSessionItem(session) {
   const stopBtn = document.createElement('button');
   const dismissible = typeof isDismissibleSession === 'function' && isDismissibleSession(session.sessionId);
   stopBtn.className = 'session-stop-btn' + (dismissible ? ' session-dismiss-btn' : '');
-  stopBtn.title = dismissible ? 'Dismiss session' : 'Stop session';
+  stopBtn.title = dismissible ? 'Dismiss: remove this session, it never started' : 'Stop session (ends its process, the conversation is kept)';
   stopBtn.innerHTML = dismissible
     ? '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg>'
     : '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>';
 
   const archiveBtn = document.createElement('button');
   archiveBtn.className = 'session-archive-btn';
-  archiveBtn.title = session.archived ? 'Unarchive' : 'Archive';
+  archiveBtn.title = session.archived ? 'Unarchive session' : 'Archive session (stops it if running)';
   archiveBtn.innerHTML = ICONS.archive(16);
 
   const forkBtn = document.createElement('button');
   forkBtn.className = 'session-fork-btn';
-  forkBtn.title = 'Fork session';
+  forkBtn.title = 'Fork: start a new session that continues from this conversation';
   forkBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 3h-5v5"/><path d="M21 3l-7.536 7.536a5 5 0 0 0-1.464 3.534v6.93"/><path d="M3 3l7.536 7.536a5 5 0 0 1 1.464 3.534v.93"/></svg>';
 
   const isUnread = responseReadySessions.has(session.sessionId);
   const unreadBtn = document.createElement('button');
   unreadBtn.className = 'session-unread-btn';
-  unreadBtn.title = isUnread ? 'Mark as read' : 'Mark as unread';
+  unreadBtn.title = isUnread ? 'Mark as read' : 'Mark as unread (flag it to come back to)';
   unreadBtn.innerHTML = isUnread ? ICONS.markRead(14) : ICONS.markUnread(14);
 
   const moreBtn = document.createElement('button');
   moreBtn.className = 'session-more-btn';
-  moreBtn.title = 'More session actions';
+  moreBtn.title = 'More actions: rename, copy ID, view messages, move to project';
   moreBtn.setAttribute('aria-haspopup', 'menu');
   moreBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
 
@@ -876,7 +1113,9 @@ function buildSessionItem(session) {
   }
 
   footer.append(metaEl, actions);
-  row.append(header, footer);
+  row.append(header);
+  if (sourceEl) row.append(sourceEl);
+  row.append(footer);
   item.appendChild(row);
 
   return item;

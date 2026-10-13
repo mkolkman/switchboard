@@ -96,6 +96,7 @@
     const addDirsValue = fieldValue('addDirs', '');
     const visCountValue = fieldValue('visibleSessionCount', 10);
     const maxAgeValue = fieldValue('sessionMaxAgeDays', 3);
+    const customersValue = Array.isArray(current.customers) ? current.customers : [];
     const themeValue = fieldValue('terminalTheme', 'switchboard');
     const mcpEmulationValue = fieldValue('mcpEmulation', true);
     // Global-only: where new projects get their folder (projects.js). Empty
@@ -335,6 +336,19 @@
       </div>` : ''}
 
       ${!isProject ? `<div class="settings-section">
+        <div class="settings-section-title">Customers</div>
+        <div class="settings-field settings-field-stacked">
+          <div class="settings-field-info">
+            <span class="settings-label">Customer Mapping</span>
+            <div class="settings-description">Used when the sidebar is grouped by customer. One customer per line: a name, a colon, then repository or folder names separated by commas. <code>*</code> matches anything, matching ignores case, and the first matching line wins. Unmatched repositories go under "${escapeHtml(OTHER_CUSTOMER)}".</div>
+          </div>
+          <div class="settings-field-control">
+            <textarea class="settings-input settings-textarea" id="sv-customers" rows="6" spellcheck="false" placeholder="CityRow: CityRow-*&#10;NOHRD: NOHRD-*, WATERROWER-*&#10;RP3: RP3-*">${escapeHtml(formatCustomerMapping(customersValue))}</textarea>
+          </div>
+        </div>
+      </div>` : ''}
+
+      ${!isProject ? `<div class="settings-section">
         <div class="settings-section-title">Updates</div>
         <div class="settings-field">
           <div class="settings-field-info">
@@ -456,6 +470,7 @@
         settings.mcpEmulation = settingsViewerBody.querySelector('#sv-mcp-emulation').checked;
         settings.shellProfile = settingsViewerBody.querySelector('#sv-shell-profile').value || 'auto';
         settings.projectsRoot = settingsViewerBody.querySelector('#sv-projects-root').value.trim();
+        settings.customers = parseCustomerMapping(settingsViewerBody.querySelector('#sv-customers').value);
       }
 
       // Merge form values into existing settings to preserve keys not managed by the form
@@ -474,6 +489,7 @@
         if (settings.sessionMaxAgeDays && typeof window._setSessionMaxAge === 'function') {
           window._setSessionMaxAge(settings.sessionMaxAgeDays);
         }
+        if (typeof window._setCustomerMapping === 'function') window._setCustomerMapping(settings.customers);
         if (settings.terminalTheme && typeof window._applyTerminalTheme === 'function') {
           window._applyTerminalTheme(settings.terminalTheme);
         }

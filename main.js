@@ -45,6 +45,7 @@ const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
 const { createTaskManager } = require('./task-manager');
 const { lastAssistantMessage } = require('./session-preview');
+const { repoInfoForPaths } = require('./repo-info');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -470,6 +471,14 @@ ipcMain.handle('delete-track', guarded((id, options = {}) => {
   return result;
 }));
 ipcMain.handle('get-projects-root', guarded(() => projects.projectsRoot()));
+// Where repo-less chat sessions run: a plain folder under the projects root,
+// created on first use, so they get a sidebar group of their own.
+ipcMain.handle('get-chat-folder', guarded(() => {
+  const dir = path.join(projects.projectsRoot(), 'Chats');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}));
+ipcMain.handle('get-repo-info', guarded((paths) => repoInfoForPaths(Array.isArray(paths) ? paths : [])));
 ipcMain.handle('get-project-git-status', guarded((id, opts) => projects.folderGitStatus(id, opts || {})));
 ipcMain.handle('get-project-git-info', guarded((id) => projects.projectGitInfo(id)));
 ipcMain.handle('get-project-git-diff', guarded((id, folderPath, filePath) => projects.projectGitDiff(id, folderPath, filePath)));

@@ -120,6 +120,20 @@ window._applyTerminalTheme = (themeName) => {
 let searchMatchIds = null; // null = no search active; Set<string> = matched session IDs
 let searchMatchProjectPaths = null; // Set<string> of project paths matched by name
 
+// Sidebar grouping (sidebar.js, session-groups.js). The mode is a view choice
+// for this machine, so it lives in localStorage; customers are a setting.
+const GROUP_MODE_KEY = 'sidebarGroupMode';
+let sidebarGroupMode = (() => {
+  try {
+    const saved = localStorage.getItem(GROUP_MODE_KEY);
+    return isGroupMode(saved) ? saved : DEFAULT_GROUP_MODE;
+  } catch { return DEFAULT_GROUP_MODE; }
+})();
+let customerMapping = []; // [{ name, patterns }] from Settings › Customers
+const repoInfoByPath = new Map(); // projectPath → { owner, name, root } | null
+let chatFolderPath = null; // where New chat sessions run, outside any repo
+window._setCustomerMapping = (customers) => { customerMapping = Array.isArray(customers) ? customers : []; };
+
 // --- Activity tracking ---
 //
 // Activity is determined by two signals:
@@ -239,6 +253,7 @@ function setActivity(sessionId, active) {
   });
   // The Projects tab rolls working / finished / needs-you up onto its rows.
   if (typeof updateProjectStatusDots === 'function') updateProjectStatusDots();
+  if (typeof onSessionStatusChanged === 'function') onSessionStatusChanged();
   saveSessionNotices();
 }
 
@@ -246,6 +261,7 @@ function clearUnread(sessionId) {
   responseReadySessions.delete(sessionId);
   forEachSessionItem(sessionId, item => item.classList.remove('response-ready'));
   if (typeof updateProjectStatusDots === 'function') updateProjectStatusDots();
+  if (typeof onSessionStatusChanged === 'function') onSessionStatusChanged();
   saveSessionNotices();
 }
 
@@ -255,6 +271,7 @@ function markUnread(sessionId) {
   responseReadySessions.add(sessionId);
   forEachSessionItem(sessionId, item => item.classList.add('response-ready'));
   if (typeof updateProjectStatusDots === 'function') updateProjectStatusDots();
+  if (typeof onSessionStatusChanged === 'function') onSessionStatusChanged();
   saveSessionNotices();
 }
 
@@ -265,6 +282,7 @@ function clearNotifications(sessionId) {
   attentionSessions.delete(sessionId);
   forEachSessionItem(sessionId, item => item.classList.remove('needs-attention'));
   if (typeof updateProjectStatusDots === 'function') updateProjectStatusDots();
+  if (typeof onSessionStatusChanged === 'function') onSessionStatusChanged();
   saveSessionNotices();
 }
 // Terminal themes, utils (cleanDisplayName, formatDate, escapeHtml, shellEscape)
@@ -462,6 +480,7 @@ window.api.onTerminalNotification((sessionId, message, kind) => {
     // The same session can be on screen in both tabs.
     document.querySelectorAll(`.session-item[data-session-id="${sessionId}"]`).forEach(item => item.classList.add('needs-attention'));
     if (typeof updateProjectStatusDots === 'function') updateProjectStatusDots();
+    if (typeof onSessionStatusChanged === 'function') onSessionStatusChanged();
   } else if (kind === 'idle') {
     // A completion notification is authoritative even if a quick turn never
     // produced a busy frame, or its busy state arrived under a temporary ID.
@@ -797,6 +816,7 @@ function updateRunningIndicators() {
     if (dot) dot.classList.toggle('running', hasRunning);
   });
   if (typeof updateProjectStatusDots === 'function') updateProjectStatusDots();
+  if (typeof onSessionStatusChanged === 'function') onSessionStatusChanged();
   // Update grid card dots and status text
   for (const [sid, card] of gridCards) {
     const running = activePtyIds.has(sid);
@@ -987,9 +1007,103 @@ async function loadProjects({ resort = false, reason = 'project' } = {}) {
   // Project roots and attached folders get their tasks too, even with no
   // sessions of their own, so a project's task menu is complete.
   await hydrateProjectTasks([cachedProjects, cachedAllProjects], treeTaskPaths(cachedProjectTreeAll));
+  await loadRepoInfo(cachedAllProjects.map(p => p.projectPath));
   await pollActiveSessions();
   refreshSidebar({ resort, reason });
   renderDefaultStatus();
+}
+
+// Which repo each folder is in, for the repo subtitle and the repository and
+// customer groupings. Read once per folder; a folder's remote rarely changes.
+async function loadRepoInfo(paths) {
+  const missing = [...new Set(paths)].filter(p => p && !repoInfoByPath.has(p));
+  if (!missing.length) return;
+  try {
+    const info = await window.api.getRepoInfo(missing);
+    if (!info || info.error) return;
+    for (const p of missing) repoInfoByPath.set(p, info[p] || null);
+  } catch {}
+}
+
+// A session for chatting or asking something outside any repository. It runs
+// in its own folder under the projects root, so it gets a "Chats" group and
+// never touches a codebase.
+async function launchChatSession() {
+  const folder = await window.api.getChatFolder();
+  if (!folder || folder.error) {
+    alert(`Could not create the chat folder: ${folder?.error || 'unknown error'}`);
+    return;
+  }
+  chatFolderPath = folder;
+  const project = { folder: encodeProjectPath(folder), projectPath: folder, sessions: [] };
+  const options = await resolveDefaultSessionOptions(project);
+  // A worktree needs a git repository, which the chat folder is not.
+  delete options.worktree;
+  delete options.worktreeName;
+  await launchWithDefaultCli(project, options);
+}
+
+// Claude unless it is switched off, then the first CLI that is on.
+async function launchWithDefaultCli(project, options) {
+  const harnesses = await window.api.getHarnesses().catch(() => []);
+  const enabled = (harnesses || []).filter(h => h.enabled);
+  if (!enabled.some(h => h.id === 'claude') && enabled.length) options.runtime = enabled[0].id;
+  launchNewSession(project, options);
+}
+
+// One entry per repository the sidebar knows, most recently active first. A
+// repo with worktrees starts in its main checkout, the shortest of its folders.
+function repoLaunchTargets() {
+  const byRepo = new Map();
+  for (const project of cachedAllProjects) {
+    const info = repoInfoByPath.get(project.projectPath);
+    if (!info || isChatFolder(project.projectPath)) continue;
+    const key = `${info.owner}/${info.name}`.toLowerCase();
+    if (!byRepo.has(key)) byRepo.set(key, { info, folders: [], lastActivity: 0 });
+    const entry = byRepo.get(key);
+    entry.folders.push(project);
+    entry.lastActivity = Math.max(entry.lastActivity, lastActivityOf(project.sessions));
+  }
+  return [...byRepo.values()]
+    .map(e => ({ ...e, project: [...e.folders].sort((a, b) => a.projectPath.length - b.projectPath.length)[0] }))
+    .sort((a, b) => b.lastActivity - a.lastActivity || a.info.name.localeCompare(b.info.name));
+}
+
+function showSidebarNewSessionMenu(anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const repos = repoLaunchTargets();
+  showContextMenu([
+    { label: 'Chat', hint: 'no repository', icon: ICONS.claude(14), onClick: launchChatSession },
+    { sep: true },
+    { head: repos.length ? 'In a repository' : 'No repositories yet' },
+    ...repos.map(({ info, project }) => {
+      const folder = folderBaseName(project.projectPath);
+      return {
+        label: info.name,
+        hint: folder === info.name ? '' : folder,
+        onClick: async () => launchWithDefaultCli(project, await resolveDefaultSessionOptions(project)),
+      };
+    }),
+  ], { x: rect.left, y: rect.bottom + 4 });
+}
+
+function setSidebarGroupMode(mode) {
+  if (!isGroupMode(mode) || mode === sidebarGroupMode) return;
+  sidebarGroupMode = mode;
+  try { localStorage.setItem(GROUP_MODE_KEY, mode); } catch {}
+  updateGroupModeButton();
+  // Group keys differ per mode, so the old order means nothing here.
+  sortedOrder = [];
+  refreshSidebar({ resort: true, reason: 'sessions' });
+}
+
+function updateGroupModeButton() {
+  const btn = document.getElementById('group-mode-btn');
+  if (!btn) return;
+  const label = SIDEBAR_GROUP_MODES.find(m => m.id === sidebarGroupMode)?.label || 'Folder';
+  btn.title = `Group sessions by: ${label}. Click to change`;
+  btn.setAttribute('aria-label', btn.title);
+  btn.classList.toggle('active', sidebarGroupMode !== DEFAULT_GROUP_MODE);
 }
 
 // Sidebar rendering (slugId, folderId, buildSlugGroup, renderProjects,
@@ -1350,11 +1464,44 @@ initGridObservers();
 {
   const gridToggleBtn = document.createElement('button');
   gridToggleBtn.id = 'grid-toggle-btn';
-  gridToggleBtn.title = 'Session overview';
+  gridToggleBtn.title = `Session overview: all open sessions side by side (${isMac ? '\u2318\u21e7G' : 'Ctrl+Shift+G'})`;
   gridToggleBtn.innerHTML = '<svg width="14" height="14" stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>';
   gridToggleBtn.addEventListener('click', toggleGridView);
   // Insert next to the resort button
   resortBtn.parentElement.insertBefore(gridToggleBtn, resortBtn);
+
+  // New session: a chat outside any repository, or a session in one of them.
+  const newSessionBtn = document.createElement('button');
+  newSessionBtn.id = 'new-session-btn';
+  newSessionBtn.type = 'button';
+  newSessionBtn.title = 'New session: a chat, or a session in a repository';
+  newSessionBtn.setAttribute('aria-label', newSessionBtn.title);
+  newSessionBtn.setAttribute('aria-haspopup', 'menu');
+  newSessionBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg><svg class="chevron" width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m2 3.5 3 3 3-3"/></svg>';
+  newSessionBtn.addEventListener('click', () => showSidebarNewSessionMenu(newSessionBtn));
+  resortBtn.parentElement.insertBefore(newSessionBtn, gridToggleBtn);
+
+  // Group by: folder, repository, customer or status.
+  const groupModeBtn = document.createElement('button');
+  groupModeBtn.id = 'group-mode-btn';
+  groupModeBtn.type = 'button';
+  groupModeBtn.setAttribute('aria-haspopup', 'menu');
+  groupModeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>';
+  groupModeBtn.addEventListener('click', () => {
+    const rect = groupModeBtn.getBoundingClientRect();
+    showContextMenu([
+      { head: 'Group sessions by' },
+      ...SIDEBAR_GROUP_MODES.map(m => ({
+        label: m.label,
+        icon: m.id === sidebarGroupMode ? PICONS.check(14) : '',
+        onClick: () => setSidebarGroupMode(m.id),
+      })),
+      { sep: true },
+      { label: 'Edit customers\u2026', onClick: () => openSettingsViewer('global') },
+    ], { x: rect.left, y: rect.bottom + 4 });
+  });
+  resortBtn.parentElement.insertBefore(groupModeBtn, newSessionBtn);
+  updateGroupModeButton();
 
   // Global keyboard shortcuts (covers non-terminal focus)
   // When a terminal is focused, xterm's customKeyEventHandler fires first and sets
@@ -1403,11 +1550,20 @@ setTimeout(() => {
     if (global.sessionMaxAgeDays) {
       sessionMaxAgeDays = global.sessionMaxAgeDays;
     }
+    if (Array.isArray(global.customers)) customerMapping = global.customers;
     if (global.terminalTheme && TERMINAL_THEMES[global.terminalTheme]) {
       currentThemeName = global.terminalTheme;
       TERMINAL_THEME = getTerminalTheme();
     }
   }
+  // Where New chat runs (main's get-chat-folder), known up front so earlier
+  // chats land in "Chats" without creating the folder before it is used.
+  const root = await window.api.getProjectsRoot().catch(() => null);
+  if (typeof root === 'string' && root) {
+    const sep = root.includes('\\') && !root.includes('/') ? '\\' : '/';
+    chatFolderPath = root.replace(/[\\/]+$/, '') + sep + 'Chats';
+  }
+  if (cachedAllProjects.length) refreshSidebar();
 })();
 
 loadProjects().then(async () => {

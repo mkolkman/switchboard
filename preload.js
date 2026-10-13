@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('api', {
   detachProjectFolder: (id, folderPath, opts) => ipcRenderer.invoke('detach-project-folder', id, folderPath, opts),
   setSessionAssignment: (sessionId, projectId, trackId) => ipcRenderer.invoke('set-session-assignment', sessionId, projectId, trackId),
   getProjectsRoot: () => ipcRenderer.invoke('get-projects-root'),
+  getChatFolder: () => ipcRenderer.invoke('get-chat-folder'),
+  getRepoInfo: (paths) => ipcRenderer.invoke('get-repo-info', paths),
   getProjectGitStatus: (id, opts) => ipcRenderer.invoke('get-project-git-status', id, opts),
   getProjectGitInfo: (id) => ipcRenderer.invoke('get-project-git-info', id),
   getProjectGitDiff: (id, folderPath, filePath) => ipcRenderer.invoke('get-project-git-diff', id, folderPath, filePath),

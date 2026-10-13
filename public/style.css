@@ -246,10 +246,18 @@ body { display: flex; flex-direction: column; }
   border-bottom-color: #8088ff;
 }
 
+/* Filters pack to the left; view and action buttons cluster on the right,
+   starting at the group-by button. */
 #session-filters {
   display: flex;
-  gap: 8px;
+  gap: 0;
   align-items: center;
+}
+#session-filters > #running-toggle,
+#session-filters > #star-toggle,
+#session-filters > #today-toggle,
+#session-filters > #archive-toggle {
+  margin-right: 5px;
 }
 
 #loading-status {
@@ -2908,6 +2916,8 @@ body { display: flex; flex-direction: column; }
 }
 
 /* ========== ADD PROJECT BUTTON ========== */
+#new-session-btn,
+#group-mode-btn,
 #grid-toggle-btn,
 #resort-btn,
 #add-project-btn {
@@ -2929,10 +2939,22 @@ body { display: flex; flex-direction: column; }
   justify-content: center;
 }
 
-#grid-toggle-btn { margin-left: auto; }
-#resort-btn { margin-left: 2px; }
-#add-project-btn { margin-left: 2px; }
+#group-mode-btn { margin-left: auto; }
+#new-session-btn,
+#grid-toggle-btn,
+#resort-btn,
+#add-project-btn { margin-left: 3px; }
 
+/* New session carries a chevron: it opens a menu, not a session. */
+#new-session-btn {
+  width: auto;
+  padding: 0 4px 0 5px;
+  gap: 1px;
+}
+#new-session-btn .chevron { opacity: 0.7; }
+
+#new-session-btn:hover,
+#group-mode-btn:hover,
 #grid-toggle-btn:hover,
 #resort-btn:hover,
 #add-project-btn:hover {
@@ -2941,6 +2963,7 @@ body { display: flex; flex-direction: column; }
   color: #888;
 }
 
+#group-mode-btn.active,
 #grid-toggle-btn.active {
   background: rgba(128,136,255,0.1);
   border-color: rgba(128,136,255,0.3);
@@ -7126,4 +7149,52 @@ body { display: flex; flex-direction: column; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   pointer-events: none;
+}
+
+/* ========== SIDEBAR GROUPING ========== */
+/* Which repo a session is in, between its title and its status line. */
+.session-source {
+  font-size: 10.5px;
+  color: #7c7c96;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+  margin-top: 1px;
+}
+
+.project-header .project-group-count {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: #707088;
+  background: rgba(255,255,255,0.05);
+  border-radius: 8px;
+  padding: 1px 6px;
+  margin-left: -2px;
+}
+
+/* A group shown with nothing in it under the current filters. */
+.project-group.is-empty > .project-header {
+  color: #686880;
+}
+.project-group.is-empty > .project-header .project-group-count {
+  background: transparent;
+}
+
+.settings-field-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.settings-field-stacked .settings-field-control {
+  width: 100%;
+}
+.settings-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
 }
