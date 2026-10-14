@@ -1986,6 +1986,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     if (meta?.projectId) { session.projectId = meta.projectId; session.trackId = meta.trackId || null; }
   }
 
+  // A resumed conversation replays its old links first; a new one has none.
+  if (session.previewWatcher && startFresh) session.previewWatcher = createPreviewWatcher({ quietMs: 0 });
+
   if (sessionOptions?.forkFrom) {
     log.info(`[fork-spawn] tempId=${sessionId} forkFrom=${sessionOptions.forkFrom} folder=${projectFolder} knownFiles=${knownJsonlFiles.size}`);
   }

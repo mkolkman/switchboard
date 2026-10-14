@@ -29,6 +29,7 @@ const TOOLS = [{
   description: 'Open a web page in the browser panel beside this session in Switchboard, for the user to look at. '
     + 'Use it when you have something to show: a dev server you started (http://localhost:5173), '
     + 'a static HTML file you wrote (its absolute path), or a published claude.ai artifact link. '
+    + 'Use it instead of the Artifact tool\'s open action, which opens the system browser. '
     + 'The panel reloads by itself when your turn ends, so open a page once.',
   inputSchema: {
     type: 'object',
@@ -161,6 +162,9 @@ function createPreviewMcpServer({ onOpen, log, scriptDir }) {
     await start();
     if (!scriptDir) return {};
     return {
+      // Claude Code opens a new artifact in the system browser by itself, past
+      // BROWSER; off, its link in the output opens it beside the session instead.
+      CLAUDE_CODE_ARTIFACT_AUTO_OPEN: '0',
       BROWSER: browserScript(scriptDir),
       SWITCHBOARD_PREVIEW_OPEN: `http://127.0.0.1:${port}/open/${token}/${sessionId}`,
     };

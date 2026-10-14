@@ -547,6 +547,9 @@ function showWebPreview(tab, { force = false } = {}) {
   fpWebHost.innerHTML = '';
   const view = document.createElement('webview');
   view.setAttribute('partition', 'persist:preview');
+  // Without it every window.open fails, sign-in popups included; main decides
+  // which open in a window of their own and which go to the system browser.
+  view.setAttribute('allowpopups', '');
   view.setAttribute('src', tab.url);
   view.dataset.tabUrl = tab.openedUrl;
   // The address bar follows the page; the tab remembers it for a session switch.
