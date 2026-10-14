@@ -1334,7 +1334,7 @@ function githubConversation(detail) {
     html += `<div class="gh-sec"><div class="gh-sec-h">Review threads <span class="gh-muted">${open.length} unresolved of ${threads.length}</span></div>`;
     html += [...open, ...threads.filter(t => t.resolved)].map(t => `
       <details class="gh-thread" ${t.resolved ? '' : 'open'}>
-        <summary><span class="gh-path">${escapeHtml(t.path)}${t.line ? ':' + t.line : ''}</span>${t.resolved ? '<span class="gh-muted">resolved</span>' : ''}${t.outdated ? '<span class="gh-muted">outdated</span>' : ''}</summary>
+        <summary><span class="gh-path">${escapeHtml(t.path)}${t.line ? ':' + t.line : ''}</span>${t.resolved ? '<span class="gh-muted">resolved</span>' : ''}${t.outdated ? '<span class="gh-muted">outdated</span>' : ''}<span class="ws-flex"></span>${t.comments[0]?.url ? `<button type="button" class="ws-ghost ws-ghost--sm gh-thread-show" data-thread-url="${githubAttr(t.comments[0].url)}" data-path="${githubAttr(t.path)}" title="Show this thread in its file, in Files changed">Show in file ${PICONS.chevronRight(10)}</button>` : ''}</summary>
         ${t.comments.map(c => `<div class="gh-comment"><div class="gh-comment-h"><span class="gh-who">${escapeHtml(c.author)}</span><span class="ws-flex"></span><a class="gh-muted" href="${escapeHtml(c.url)}">${escapeHtml(githubAgo(c.at))}</a></div><div class="gh-md">${githubMarkdown(c.body)}</div></div>`).join('')}
       </details>`).join('');
     html += '</div>';
@@ -1477,6 +1477,14 @@ function bindGithubPrActions(project, panel, pr) {
       paintGithubPanel(project);
     };
   }
+    // A review thread: its file in Files changed, scrolled to the thread.
+    panel.querySelectorAll('.gh-thread-show').forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openGithubReview(project, `${detail.repo}#${detail.number}`, detail.title, { path: btn.dataset.path, threadUrl: btn.dataset.threadUrl });
+      };
+    });
   // Review requests: a change shows in the panel and in the list's chips.
   const setRequest = async (login, on) => {
     state.busy = 'request';

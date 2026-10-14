@@ -55,3 +55,19 @@ test('githubPatchRows numbers old and new lines across hunks', () => {
     ['context', 12, 13], ['meta', null, null], ['hunk', null, null], ['remove', 40, null], ['add', null, 41],
   ]);
 });
+
+test('githubWholeFileRows fills the file around the hunks, numbered on both sides', () => {
+  const vm = require('node:vm');
+  const ctx = vm.createContext({ document: { addEventListener() {} }, window: {} });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/project-github-review.js'), 'utf8'), ctx);
+  // Old file a b c d e f; new file a b C d e f g: line 3 changed, a line added at the end.
+  const patch = '@@ -2,3 +2,3 @@\n b\n-c\n+C\n d\n@@ -6 +6,2 @@\n f\n+g';
+  const rows = vm.runInContext(`githubWholeFileRows(${JSON.stringify(patch)}, ${JSON.stringify('a\nb\nC\nd\ne\nf\ng\n')})`, ctx);
+  const simple = rows.map(r => [r.kind, r.oldNo ?? null, r.newNo ?? null, r.text, !!r.filler]);
+  assert.deepEqual(JSON.parse(JSON.stringify(simple)), [
+    ['context', 1, 1, ' a', true],
+    ['context', 2, 2, ' b', false], ['remove', 3, null, '-c', false], ['add', null, 3, '+C', false], ['context', 4, 4, ' d', false],
+    ['context', 5, 5, ' e', true],
+    ['context', 6, 6, ' f', false], ['add', null, 7, '+g', false],
+  ]);
+});

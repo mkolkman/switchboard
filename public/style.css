@@ -7614,6 +7614,11 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-state--merged { color: #c49cf5; }
 
 .gh-merge { display: flex; flex-direction: column; gap: 10px; background: rgba(120,130,255,0.04); }
+.gh-thread-show { flex-shrink: 0; margin-left: auto; }
+.gh-review-mode { display: inline-flex; margin-left: 8px; }
+.gh-review-mode .ws-ghost.active { background: rgba(120,130,255,0.16); color: #c0c4ff; }
+.gh-diff-row.filler .gh-code { opacity: 0.85; }
+.gh-thread-inline--focus { box-shadow: 0 0 0 2px rgba(128,136,255,0.7); transition: box-shadow 0.4s; }
 .gh-merge-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .gh-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #c8c8dc; }
 .gh-switch { transform: scale(0.8); transform-origin: left center; margin-right: -8px; }

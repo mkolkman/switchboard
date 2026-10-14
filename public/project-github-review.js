@@ -9,13 +9,19 @@
 // selectedProject, projectTab).
 
 /** Open the review of a PR, in place of the list and panel. */
-function openGithubReview(project, prKey, title) {
+function openGithubReview(project, prKey, title, focus = null) {
   const state = githubTabState(project.id);
   const same = state.review?.prKey === prKey;
   state.review = same ? state.review : {
     prKey, title: title || '', files: null, error: null, selected: null, collapsed: new Set(),
-    headSha: null, comments: [], hl: new Map(), composer: null,
+    headSha: null, comments: [], hl: new Map(), composer: null, wholeFile: false, contents: new Map(),
   };
+  // Opened for one review thread: its file, then the thread itself once drawn.
+  if (focus?.path) {
+    state.review.selected = focus.path;
+    state.review.focusUrl = focus.threadUrl || null;
+    state.review.focusUntil = null;
+  }
   const body = githubRoot(project)?.querySelector('#ws-body');
   if (body) renderProjectGithubTab(project, body);
   if (!state.review.files) loadGithubReviewFiles(project);
@@ -93,6 +99,49 @@ function githubPatchRows(patch) {
   return rows;
 }
 
+/**
+ * The whole new file as diff rows: the patch's rows where it has them, and
+ * the file's other lines as context between and around them, numbered on
+ * both sides (the old numbers run in step outside the hunks).
+ */
+function githubWholeFileRows(patch, text) {
+  const lines = String(text).split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  const out = [];
+  let nextNew = 1;
+  let nextOld = 1;
+  const fill = (untilNew) => {
+    for (; nextNew < untilNew && nextNew <= lines.length; nextNew++, nextOld++) {
+      out.push({ kind: 'context', oldNo: nextOld, newNo: nextNew, text: ' ' + lines[nextNew - 1], filler: true });
+    }
+  };
+  for (const row of githubPatchRows(patch)) {
+    if (row.kind === 'hunk') {
+      const m = row.text.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)/);
+      if (m) { fill(Number(m[2])); nextOld = Number(m[1]); nextNew = Number(m[2]); }
+      continue;
+    }
+    out.push(row);
+    if (row.newNo) nextNew = row.newNo + 1;
+    if (row.oldNo) nextOld = row.oldNo + 1;
+  }
+  fill(lines.length + 1);
+  return out;
+}
+
+/** Fetch a file's text at the PR's head for the whole-file view, once. */
+async function loadGithubFileContent(project, review, file) {
+  if (review.contents.has(file.path)) return;
+  review.contents.set(file.path, { loading: true });
+  const result = await window.api.getGithubFileContent(githubTarget(review.prKey), file.path, review.headSha).catch(err => ({ error: err?.message || String(err) }));
+  review.contents.set(file.path, result?.error ? { error: result.error } : { text: result.text, hl: null });
+  const content = review.contents.get(file.path);
+  if (content.text !== undefined && typeof highlightCodeLines === 'function') {
+    content.hl = await highlightCodeLines(content.text, file.path).catch(() => null);
+  }
+  if (githubTabState(project.id).review === review && review.selected === file.path) paintGithubReview(project);
+}
+
 // --- Highlighting: per hunk, in the background, kept per file ---
 
 /** Colour a file's hunks; each row of the patch gets its line as HTML. */
@@ -145,14 +194,19 @@ function githubComposerHtml(review) {
 
 function githubThreadHtml(review, thread) {
   const replying = review.composer?.replyTo === thread.root.id;
-  return `<div class="gh-thread-inline">${githubCommentHtml(thread.root)}${thread.replies.map(githubCommentHtml).join('')}
+  return `<div class="gh-thread-inline" data-url="${escapeHtml(thread.root.url || '')}">${githubCommentHtml(thread.root)}${thread.replies.map(githubCommentHtml).join('')}
     ${replying ? githubComposerHtml(review) : `<button type="button" class="ws-ghost ws-ghost--sm gh-reply-btn" data-reply="${thread.root.id}">Reply</button>`}</div>`;
 }
 
-/** A file's patch as rows with line numbers, colours, threads and the composer. */
-function githubDiffHtml(review, file) {
-  const rows = githubPatchRows(file.patch);
-  const hl = review.hl.get(file.path) || null;
+/**
+ * A file's patch as rows with line numbers, colours, threads and the composer.
+ * `whole` is the whole file's text and highlighting, for the whole-file view.
+ */
+function githubDiffHtml(review, file, whole = null) {
+  const rows = whole ? githubWholeFileRows(file.patch, whole.text) : githubPatchRows(file.patch);
+  const patchHl = review.hl.get(file.path) || null;
+  // Whole file: new-side lines take the file's own colours; removed ones the patch's.
+  const hl = whole ? rows.map(r => (r.newNo && whole.hl ? whole.hl[r.newNo - 1] ?? null : null)) : patchHl;
   const threads = githubThreads(review, file.path);
   const byKey = new Map();
   for (const t of threads) {
@@ -173,7 +227,7 @@ function githubDiffHtml(review, file) {
     const side = r.kind === 'remove' ? 'LEFT' : 'RIGHT';
     const line = r.kind === 'remove' ? r.oldNo : r.newNo;
     const commentable = (r.kind === 'add' || r.kind === 'remove' || r.kind === 'context') && !!line;
-    html += `<div class="gh-diff-row ${r.kind}">`
+    html += `<div class="gh-diff-row ${r.kind}${r.filler ? ' filler' : ''}">`
       + `<span class="gh-ln">${r.oldNo ?? ''}</span><span class="gh-ln">${r.newNo ?? ''}</span>`
       + `<span class="gh-code">${code || ' '}</span>`
       + (commentable ? `<button type="button" class="gh-add-comment" data-side="${side}" data-line="${line}" title="Comment on this line">+</button>` : '')
@@ -190,7 +244,7 @@ function githubDiffHtml(review, file) {
   // Comments on lines this diff does not show, or outdated by newer commits.
   const elsewhere = threads.filter(t => t.root.line === null || !placed.has(threadKey(t.root.side, t.root.line)));
   const top = elsewhere.length
-    ? `<details class="gh-outdated"><summary>${elsewhere.length} comment thread${elsewhere.length === 1 ? '' : 's'} on lines not shown here, or outdated</summary>${elsewhere.map(t =>
+    ? `<details class="gh-outdated"${review.outdatedOpen ? ' open' : ''}><summary>${elsewhere.length} comment thread${elsewhere.length === 1 ? '' : 's'} on lines not shown here, or outdated</summary>${elsewhere.map(t =>
       `<div class="gh-muted gh-outdated-at">${t.root.line === null ? `outdated, was line ${t.root.originalLine ?? '?'}` : `line ${t.root.line}`}</div>${githubThreadHtml(review, t)}`).join('')}</details>`
     : '';
   return top + `<div class="gh-diff">${html}</div>`;
@@ -224,12 +278,19 @@ function githubReviewDiffHtml(review, file) {
   const head = `<div class="gh-review-file-h"><span class="git-file-code ${file.status}">${{ added: 'A', deleted: 'D', renamed: 'R', modified: 'M' }[file.status] || 'M'}</span>`
     + `<span class="mono gh-review-path">${renamed}${escapeHtml(file.path)}</span>`
     + `<span class="gh-review-stat"><span class="gh-plus">+${file.additions}</span> <span class="gh-minus">−${file.deletions}</span></span>`
+    + (file.patch !== null && file.status !== 'deleted' ? `<span class="gh-review-mode">${[['changes', 'Changes', 'Only the changed lines and their context'], ['whole', 'Whole file', 'The whole file, with the changes in place']].map(([mode, label, hint]) =>
+      `<button type="button" class="ws-ghost ws-ghost--sm${(mode === 'whole') === !!review.wholeFile ? ' active' : ''}" data-view-mode="${mode}" title="${hint}">${label}</button>`).join('')}</span>` : '')
     + (file.url ? `<button type="button" class="ws-ghost ws-ghost--sm" data-act="file-github" title="Open this file on GitHub">GitHub ↗</button>` : '')
     + '</div>';
   if (file.patch === null) {
     return head + `<div class="git-diff-empty">${file.status === 'renamed' && !file.additions && !file.deletions ? 'Renamed without changes.' : 'GitHub shows no diff for this file (binary or too large). Open it on GitHub to see it.'}</div>`;
   }
-  return head + githubDiffHtml(review, file);
+  // A deleted file's patch already holds all of it.
+  if (!review.wholeFile || file.status === 'deleted') return head + githubDiffHtml(review, file);
+  const content = review.contents.get(file.path);
+  if (!content || content.loading) return head + '<div class="git-loading"><span class="git-loading-dot"></span>Reading the whole file…</div>';
+  if (content.error) return head + `<div class="git-diff-empty">${escapeHtml(content.error)}</div>` + githubDiffHtml(review, file);
+  return head + githubDiffHtml(review, file, content);
 }
 
 function paintGithubReview(project) {
@@ -277,7 +338,7 @@ function paintGithubReview(project) {
 
   const select = (path) => { review.selected = path; paintGithubReview(project); };
   body.querySelector('#gh-review-back').onclick = () => closeGithubReview(project);
-  body.querySelector('#gh-review-refresh').onclick = () => { review.files = null; loadGithubReviewFiles(project); };
+  body.querySelector('#gh-review-refresh').onclick = () => { review.files = null; review.contents = new Map(); loadGithubReviewFiles(project); };
   const prev = body.querySelector('#gh-review-prev');
   if (prev) prev.onclick = () => order[index - 1] && select(order[index - 1].path);
   const next = body.querySelector('#gh-review-next');
@@ -292,8 +353,35 @@ function paintGithubReview(project) {
   });
   const fileGithub = body.querySelector('[data-act="file-github"]');
   if (fileGithub && file?.url) fileGithub.onclick = () => window.api.openExternal(file.url);
+  // The outdated fold stays as it was left across a redraw.
+  body.querySelector('.gh-outdated')?.addEventListener('toggle', (e) => { review.outdatedOpen = e.target.open; });
+  body.querySelectorAll('[data-view-mode]').forEach(btn => {
+    btn.onclick = () => { review.wholeFile = btn.dataset.viewMode === 'whole'; paintGithubReview(project); };
+  });
+  if (file && review.wholeFile && file.patch !== null && file.status !== 'deleted') loadGithubFileContent(project, review, file);
   if (file) highlightGithubFile(project, review, file);
   bindGithubReviewComments(project, review, file, body, composerFocused);
+  revealGithubReviewThread(review, body);
+}
+
+/** Scroll to the thread the review was opened for, opening the outdated fold it may sit in. */
+function revealGithubReviewThread(review, body) {
+  if (!review.focusUrl || !review.files) return;
+  const thread = [...body.querySelectorAll('.gh-review-diff .gh-thread-inline')].find(el => el.dataset.url === review.focusUrl);
+  if (!thread) { review.focusUrl = null; return; }
+  const fold = thread.closest('details');
+  if (fold) { fold.open = true; review.outdatedOpen = true; }
+  // Centred, unless it is taller than the view: then its start, so it reads from the top.
+  const view = body.querySelector('.gh-review-diff');
+  thread.scrollIntoView({ block: view && thread.offsetHeight > view.clientHeight * 0.8 ? 'start' : 'center' });
+  // The colours arrive in a redraw just after: it scrolls back to the
+  // thread too, for a moment, and only the first one flashes it.
+  if (!review.focusUntil) {
+    review.focusUntil = Date.now() + 1500;
+    thread.classList.add('gh-thread-inline--focus');
+    setTimeout(() => { if (thread.isConnected) thread.classList.remove('gh-thread-inline--focus'); }, 2400);
+  }
+  if (Date.now() > review.focusUntil) { review.focusUrl = null; review.focusUntil = null; }
 }
 
 function bindGithubReviewComments(project, review, file, body, refocus) {

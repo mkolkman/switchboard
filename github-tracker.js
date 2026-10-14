@@ -996,6 +996,15 @@ async function mergePullRequest(owner, repo, number, { method, expectedHeadOid }
   return { ok: true, merged: !!res?.mergePullRequest?.pullRequest?.merged };
 }
 
+/** A file's text at a commit, for the whole-file view of a PR's diff. */
+async function getFileContent(owner, repo, filePath, ref) {
+  const encoded = String(filePath).split('/').map(encodeURIComponent).join('/');
+  const file = await rest('GET', `/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`);
+  if (Array.isArray(file) || file?.type !== 'file') throw new Error(`${filePath} is not a file at ${String(ref).slice(0, 7)}.`);
+  if (file.encoding !== 'base64' || !file.content) throw new Error('GitHub does not return this file\'s text (over 1 MB, or binary). Open it on GitHub.');
+  return { ok: true, text: Buffer.from(file.content, 'base64').toString('utf8') };
+}
+
 // --- Writing back: the project's todos and plan live on GitHub ---
 
 async function rest(method, apiPath, body) {
@@ -1385,7 +1394,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,

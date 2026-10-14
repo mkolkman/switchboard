@@ -836,6 +836,7 @@ ipcMain.handle('github-clone-repo', (_e, repoFull) => {
   fs.mkdirSync(sourcesRoot(), { recursive: true });
   return githubTracker.asResult(githubTracker.cloneRepo(owner, repo, sourcesRoot()));
 });
+ipcMain.handle('github-file-content', (_e, t, filePath, ref) => githubTracker.asResult(githubTracker.getFileContent(String(t?.owner || ''), String(t?.repo || ''), String(filePath || ''), String(ref || ''))));
 ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTracker.mergePullRequest(...ghTarget(t), {
   method: String(opts?.method || ''), expectedHeadOid: String(opts?.expectedHeadOid || ''),
 })));
