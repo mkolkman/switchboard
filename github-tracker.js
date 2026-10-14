@@ -120,6 +120,8 @@ const ISSUE_FIELDS = `
   } }
   repository { nameWithOwner }
   assignees(first: 5) { nodes { login } }
+  blockedBy(first: 20) { nodes { number title url state repository { nameWithOwner } } }
+  blocking(first: 20) { nodes { number title url state repository { nameWithOwner } } }
   closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { ${PR_FIELDS} } }
   timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], last: 40) {
     nodes {
@@ -290,6 +292,12 @@ function issueFieldsOf(owner) {
   return promise;
 }
 
+function shapeDeps(connection) {
+  return (connection?.nodes || []).filter(Boolean).map(n => ({
+    repo: n.repository?.nameWithOwner || '', number: n.number, title: n.title, url: n.url, state: n.state,
+  }));
+}
+
 /** An issue node with its PRs gathered from every way GitHub links them. */
 function shapeIssue(node) {
   const prs = new Map();
@@ -321,6 +329,9 @@ function shapeIssue(node) {
     updatedAt: node.updatedAt,
     assignees: (node.assignees?.nodes || []).map(a => a.login),
     pullRequests: [...prs.values()].sort((a, b) => b.number - a.number),
+    // GitHub's "blocked by" relations, both ways (see github-deps.js).
+    blockedBy: shapeDeps(node.blockedBy),
+    blocking: shapeDeps(node.blocking),
   };
   issue.status = itemStatus(issue);
   return issue;

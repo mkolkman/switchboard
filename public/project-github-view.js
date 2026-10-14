@@ -153,6 +153,16 @@ function githubMineMark(pr) {
   return { kind, text: kind === 'reviewed' ? 'Reviewed by you' : `Changed since your review${files ? ` (${files} file${files === 1 ? '' : 's'})` : ''}` };
 }
 
+/** "waits #2212" or "waits 3": the blockers of an issue that are still open. Short, so the title keeps its room. */
+function githubDepPill(item) {
+  const open = openBlockers(item);
+  if (!open.length) return '';
+  const ref = (d) => `${d.repo === item.repo ? '' : githubRepoName(d.repo)}#${d.number}`;
+  const text = open.length > 1 ? `waits ${open.length}` : `waits #${open[0].number}`;
+  const title = `Waits on, still open:\n${open.map(d => `${ref(d)} ${d.title}`).join('\n')}`;
+  return `<span class="gh-dep" title="${githubAttr(title)}">${escapeHtml(text)}</span>`;
+}
+
 /** The open PRs that work on an issue (links that only mention it count when there is nothing else). */
 function githubOpenPrKeys(item) {
   const all = item.pullRequests || [];
@@ -171,6 +181,7 @@ function githubItemRow(item, prefix, showRepo, selectedKey, releases) {
   const ref = item.number ? `${showRepo ? escapeHtml(githubRepoName(item.repo)) : ''}#${item.number}` : 'draft';
   const prs = (item.isPullRequest ? [] : item.pullRequests || []).map(pr => githubPrChip(pr, key)).join('');
   const done = item.status === 'done' || item.status === 'dropped';
+  const waits = done ? '' : githubDepPill(item);
   const isIssue = item.number && !item.isPullRequest;
   // ▶ starts a session; ⋯ moves it between phases. Issues are closed by the
   // sessions that do the work, never ticked off here.
@@ -182,6 +193,7 @@ function githubItemRow(item, prefix, showRepo, selectedKey, releases) {
     + `<span class="gh-item-title">${escapeHtml(title)}</span>`
     + `<span class="gh-item-badge"></span>`
     + who
+    + waits
     + `<span class="gh-item-prs">${prs}</span>`
     + (releases ? githubItemReleasePill(item, releases) : '')
     + actions
@@ -273,6 +285,7 @@ function githubTrackerCard(project, refText, state) {
   let html = `<div class="ws-card gh-card">`
     + `<div class="ws-card-h"><button type="button" class="gh-title" data-url="${escapeHtml(result.url)}" title="Open on GitHub">${escapeHtml(result.title)}</button>`
     + `${result.state === 'CLOSED' ? '<span class="gh-closed">closed</span>' : ''}<span class="ws-flex"></span>`
+    + `<span class="gh-viewtoggle" title="The issues as a list, or as a graph of what waits on what">${['list', 'graph'].map(v => `<button type="button" class="ws-ghost${githubPlanView(project) === v ? ' active' : ''}" data-plan-view="${v}">${v === 'list' ? 'List' : 'Graph'}</button>`).join('')}</span>`
     + `<button type="button" class="ws-ghost gh-groupby" data-ref="${escapeHtml(refText)}" title="How the issues are grouped">Group: ${escapeHtml(groupByLabel(project, result))} ${PICONS.chevronDown(10)}</button>`
     // The plan was folded away: this brings it back beside the list.
     + (typeof githubPlanHidden === 'function' && githubPrimaryRef(project) === refText && githubPlanHidden(project) && result.plan
@@ -283,7 +296,9 @@ function githubTrackerCard(project, refText, state) {
     + `<div class="gh-counts">${counts}</div>`;
 
   const selectedKey = state.selection?.itemKey || null;
-  for (const group of githubListGroups(project, result)) {
+  if (githubPlanView(project) === 'graph') {
+    html += result.items.length ? githubGraphHtml(project, result, refText, prefix, selectedKey) : '';
+  } else for (const group of githubListGroups(project, result)) {
     const key = `${refText}|${group.id}`;
     const open = state.open.has(key) ? state.open.get(key) : !group.collapsed;
     const ph = group.phase;
@@ -299,6 +314,115 @@ function githubTrackerCard(project, refText, state) {
   }
   if (!result.items.length) html += '<div class="ws-card-text muted">No linked issues found. Link issues in its description, or add them as sub-issues.</div>';
   return html + '</div>';
+}
+
+// --- Graph: what waits on what, in columns per phase ---
+
+/** escapeHtml for an attribute value: it leaves quotes as they are. */
+const githubAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
+
+const GITHUB_PLAN_VIEW_KEY = (projectId) => `githubPlanView:${projectId}`;
+
+function githubPlanView(project) {
+  try { return localStorage.getItem(GITHUB_PLAN_VIEW_KEY(project.id)) === 'graph' ? 'graph' : 'list'; } catch { return 'list'; }
+}
+
+function setGithubPlanView(project, view) {
+  try { localStorage.setItem(GITHUB_PLAN_VIEW_KEY(project.id), view); } catch {}
+  paintGithubList(project);
+}
+
+/**
+ * Columns: the plan's phases, or the depth of the chain when it has none.
+ * Blockers from outside the plan get a column of their own, first.
+ */
+function githubGraphHtml(project, result, refText, prefix, selectedKey) {
+  const { edges, outside } = depEdges(result.items);
+  const byKey = new Map(result.items.map(i => [depKey(i), i]));
+  let columns;
+  const phased = typeof githubPhases === 'function' ? githubPhases(project, result) : null;
+  if (phased?.phases.length) {
+    columns = phased.phases.map(p => ({ id: 'ph:' + p.title, label: p.title, keys: p.items.map(depKey) }));
+    if (phased.unphased.length) columns.push({ id: 'ph:none', label: 'No phase', keys: phased.unphased.map(depKey) });
+  } else {
+    columns = depthColumns(result.items.map(depKey), edges);
+  }
+  if (outside.size) columns.unshift({ id: 'outside', label: 'Outside the plan', keys: [...outside.keys()] });
+  const laid = layoutGraph(columns, edges);
+  const card = (key) => {
+    const item = byKey.get(key);
+    if (!item) {
+      const d = outside.get(key);
+      return `<button type="button" class="gh-gcard gh-gcard--outside${d.state === 'CLOSED' ? ' gh-gcard--done' : ''}" data-key="${githubAttr(key)}" data-url="${githubAttr(d.url || '')}" title="${githubAttr(`${key} ${d.title || ''}`)}\nNot in this plan: open on GitHub">`
+        + `<span class="gh-gcard-ref">${escapeHtml(githubRepoName(d.repo))}#${d.number}</span><span class="gh-gcard-title">${escapeHtml(d.title || '')}</span></button>`;
+    }
+    const title = prefix && item.title.startsWith(prefix) ? item.title.slice(prefix.length) : item.title;
+    const done = item.status === 'done' || item.status === 'dropped';
+    const waits = !done && openBlockers(item).length;
+    return `<button type="button" class="gh-gcard gh-gcard--${item.status}${done ? ' gh-gcard--done' : ''}${waits ? ' gh-gcard--waits' : ''}${key === selectedKey ? ' selected' : ''}" data-key="${githubAttr(key)}" data-item="${githubAttr(key)}" title="${githubAttr(item.title)}${waits ? '\nWaits on an open issue' : ''}">`
+      + `<span class="gh-gcard-ref">#${item.number}</span><span class="gh-gcard-title">${escapeHtml(title)}</span></button>`;
+  };
+  const back = laid.edges.filter(e => e.back).length;
+  return `<div class="gh-graph" data-ref="${githubAttr(refText)}">`
+    + (back ? `<div class="gh-graph-warn">${back} blocker${back === 1 ? ' is' : 's are'} planned after what ${back === 1 ? 'it blocks' : 'they block'} (red arrows)</div>` : '')
+    + `<div class="gh-graph-cols">${laid.columns.map(c => `<div class="gh-gcol"><div class="gh-gcol-h" title="${githubAttr(c.label)}">${escapeHtml(c.label)}</div>${c.keys.map(card).join('')}</div>`).join('')}</div>`
+    + `<svg class="gh-graph-edges" data-edges="${githubAttr(JSON.stringify(laid.edges))}"></svg></div>`;
+}
+
+/** Arrows from each blocker to what it blocks, drawn once the cards are laid out. */
+function drawGithubGraphEdges(graph) {
+  const svg = graph.querySelector('.gh-graph-edges');
+  if (!svg) return;
+  const edges = JSON.parse(svg.dataset.edges || '[]');
+  const box = graph.getBoundingClientRect();
+  const cards = new Map([...graph.querySelectorAll('.gh-gcard')].map(c => [c.dataset.key, c]));
+  svg.setAttribute('width', graph.scrollWidth);
+  svg.setAttribute('height', graph.scrollHeight);
+  const at = (el) => {
+    const r = el.getBoundingClientRect();
+    return { l: r.left - box.left + graph.scrollLeft, r: r.right - box.left + graph.scrollLeft, y: r.top - box.top + graph.scrollTop + r.height / 2 };
+  };
+  svg.innerHTML = edges.map(e => {
+    const from = cards.get(e.from), to = cards.get(e.to);
+    if (!from || !to) return '';
+    const a = at(from), b = at(to);
+    // Same column: out of the right side and back in. Otherwise right to left.
+    const x1 = a.r, y1 = a.y, x2 = e.same ? b.r : b.l, y2 = b.y;
+    const bend = e.same ? 28 : Math.max(24, Math.abs(x2 - x1) / 2);
+    const c1 = x1 + bend, c2 = e.same ? x2 + bend : x2 - bend;
+    const head = e.same ? `M${x2 + 6},${y2 - 4} L${x2},${y2} L${x2 + 6},${y2 + 4}` : `M${x2 - 6},${y2 - 4} L${x2},${y2} L${x2 - 6},${y2 + 4}`;
+    const closed = from.classList.contains('gh-gcard--done');
+    const cls = `gh-gedge${e.back ? ' gh-gedge--back' : ''}${closed ? ' gh-gedge--met' : ''}`;
+    return `<g class="${cls}" data-from="${escapeHtml(e.from)}" data-to="${escapeHtml(e.to)}"><path d="M${x1},${y1} C${c1},${y1} ${c2},${y2} ${x2},${y2}"/><path d="${head}"/></g>`;
+  }).join('');
+}
+
+function bindGithubGraph(project, list) {
+  list.querySelectorAll('.gh-graph').forEach(graph => {
+    drawGithubGraphEdges(graph);
+    // Cards move with the panel's width and with fonts loading.
+    new ResizeObserver(() => drawGithubGraphEdges(graph)).observe(graph);
+    graph.querySelectorAll('.gh-gcard').forEach(card => {
+      card.onclick = () => {
+        if (card.dataset.item) selectGithubItem(project, card.dataset.item, null);
+        else if (card.dataset.url) window.api.openExternal(card.dataset.url);
+      };
+      card.onmouseenter = () => {
+        graph.classList.add('gh-graph--focus');
+        card.classList.add('gh-gcard--lit');
+        graph.querySelectorAll('.gh-gedge').forEach(g => {
+          if (g.dataset.from !== card.dataset.key && g.dataset.to !== card.dataset.key) return;
+          g.classList.add('gh-gedge--lit');
+          const other = g.dataset.from === card.dataset.key ? g.dataset.to : g.dataset.from;
+          graph.querySelector(`.gh-gcard[data-key="${CSS.escape(other)}"]`)?.classList.add('gh-gcard--lit');
+        });
+      };
+      card.onmouseleave = () => {
+        graph.classList.remove('gh-graph--focus');
+        graph.querySelectorAll('.gh-gcard--lit, .gh-gedge--lit').forEach(el => el.classList.remove('gh-gcard--lit', 'gh-gedge--lit'));
+      };
+    });
+  });
 }
 
 // --- List ---
@@ -334,6 +458,15 @@ function paintGithubList(project) {
   });
   list.querySelectorAll('.gh-item[data-item]').forEach(row => {
     row.onclick = () => selectGithubItem(project, row.dataset.item, null);
+    // Hovering a row lights up what it waits on and what waits on it.
+    row.onmouseenter = () => {
+      const item = findGithubItem(state, row.dataset.item);
+      if (!item) return;
+      const mark = (deps, cls) => deps.forEach(d => list.querySelectorAll(`.gh-item[data-item="${CSS.escape(depKey(d))}"]`).forEach(r => r.classList.add(cls)));
+      mark(item.blockedBy || [], 'gh-item--blocker');
+      mark(item.blocking || [], 'gh-item--blocked');
+    };
+    row.onmouseleave = () => list.querySelectorAll('.gh-item--blocker, .gh-item--blocked').forEach(r => r.classList.remove('gh-item--blocker', 'gh-item--blocked'));
   });
   list.querySelectorAll('.gh-pr[data-pr]').forEach(chip => {
     chip.onclick = (e) => { e.stopPropagation(); selectGithubItem(project, chip.dataset.item, chip.dataset.pr); };
@@ -347,6 +480,8 @@ function paintGithubList(project) {
     };
   });
   bindGithubPlanActions(project, list, state);
+  list.querySelectorAll('[data-plan-view]').forEach(btn => { btn.onclick = () => setGithubPlanView(project, btn.dataset.planView); });
+  bindGithubGraph(project, list);
   list.querySelectorAll('.gh-show-plan').forEach(btn => { btn.onclick = () => setGithubPlanHidden(project, false); });
   list.querySelectorAll('.gh-refresh').forEach(btn => {
     btn.onclick = () => loadGithubTracker(project, btn.dataset.ref, { force: true });
@@ -387,7 +522,7 @@ function bindGithubPlanActions(project, list, state) {
     btn.onclick = (e) => {
       e.stopPropagation();
       const found = rowItem(btn);
-      if (found) showGithubStartMenu(project, { repo: found.item.repo, prompt: githubItemPrompt(found.result, found.item), itemText: `${found.item.repo}#${found.item.number}`, prs: githubOpenPrKeys(found.item) }, btn);
+      if (found) showGithubStartMenu(project, { repo: found.item.repo, prompt: githubItemPrompt(found.result, found.item), itemText: `${found.item.repo}#${found.item.number}`, prs: githubOpenPrKeys(found.item), waits: openBlockers(found.item) }, btn);
     };
   });
   list.querySelectorAll('.gh-act-more').forEach(btn => {
@@ -989,6 +1124,21 @@ function prSessionRowInner(id) {
     ${last ? `<div class="gh-sess-last" title="${escapeHtml(last)}">${typeof renderJsonlText === 'function' ? renderJsonlText(last) : escapeHtml(last)}</div>` : ''}`;
 }
 
+/** What an issue waits on and what waits on it, each a link to that issue. */
+function githubDepsSection(item, state) {
+  const lists = [['Waits on', item.blockedBy || []], ['Blocks', item.blocking || []]].filter(([, deps]) => deps.length);
+  if (!lists.length) return '';
+  const row = (d) => {
+    const inPlan = !!findGithubItem(state, depKey(d));
+    const closed = d.state === 'CLOSED';
+    return `<button type="button" class="gh-deprow${closed ? ' gh-deprow--closed' : ''}" data-dep="${githubAttr(depKey(d))}" data-url="${githubAttr(d.url || '')}" ${inPlan ? 'data-in-plan' : ''} title="${inPlan ? 'Show it here' : 'Not in this plan: open on GitHub'}">`
+      + `<span class="gh-deprow-ref">${d.repo === item.repo ? '' : escapeHtml(githubRepoName(d.repo))}#${d.number}</span>`
+      + `<span class="gh-deprow-title">${escapeHtml(d.title || '')}</span>`
+      + `<span class="gh-state gh-state--${closed ? 'ok' : 'warn'}">${closed ? 'closed' : 'open'}</span></button>`;
+  };
+  return `<div class="gh-sec gh-deps">${lists.map(([head, deps]) => `<div class="gh-sec-h">${head}</div>${deps.map(row).join('')}`).join('')}</div>`;
+}
+
 function githubSessionsSection(project, pr) {
   const ids = prSessionIds(project, `${pr.repo}#${pr.number}`);
   const open = pr.state === 'OPEN';
@@ -1219,6 +1369,7 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
         <div class="gh-pr-title"><span class="gh-pill gh-pill--${pill}">${detail.state === 'CLOSED' ? 'closed' : 'open'}</span>${escapeHtml(detail.title)}</div>
         <div class="gh-muted">Opened by <span class="gh-who">${escapeHtml(detail.author)}</span> ${escapeHtml(githubAgo(detail.createdAt))}${(item.pullRequests || []).length ? '' : ' · no pull request yet'}</div>
       </div>
+      ${githubDepsSection(item, state)}
       <div class="gh-sec"><div class="gh-sec-h">Description</div><div class="gh-md">${githubMarkdown(detail.body)}</div></div>
       ${githubConversation(detail)}`;
   }
@@ -1259,6 +1410,12 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
     h.onclick = () => {
       const fold = h.parentElement;
       state.open.set(fold.dataset.key, fold.classList.toggle('collapsed') === false);
+    };
+  });
+  panel.querySelectorAll('.gh-deprow').forEach(btn => {
+    btn.onclick = () => {
+      if (btn.hasAttribute('data-in-plan')) selectGithubItem(project, btn.dataset.dep, 'issue');
+      else if (btn.dataset.url) window.api.openExternal(btn.dataset.url);
     };
   });
   if (detail?.kind === 'pr' && !detail.error) {

@@ -7274,6 +7274,67 @@ body { display: flex; flex-direction: column; }
 .gh-rel--production { color: #6fcf8f; border-color: rgba(111,207,143,0.3); }
 .gh-rel-detail { font-size: 11px; line-height: 1.5; color: #8a8aa0; }
 
+/* "waits on #2212": an issue whose blockers are still open. */
+.gh-dep {
+  flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 10px; white-space: nowrap;
+  color: #e08a8a; border: 1px solid rgba(224,138,138,0.3); background: rgba(224,138,138,0.06); cursor: default;
+}
+/* Hovering a row: what it waits on, and what waits on it. */
+.gh-item--blocker { box-shadow: inset 2px 0 0 #e08a8a; background: rgba(224,138,138,0.07); }
+.gh-item--blocked { box-shadow: inset 2px 0 0 #8fb4ff; background: rgba(143,180,255,0.07); }
+
+/* An issue's dependencies in the panel. */
+.gh-deps .gh-sec-h:not(:first-child) { margin-top: 12px; }
+.gh-deprow {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 6px; margin: 0 -6px;
+  background: none; border: 0; border-radius: 4px; text-align: left; font: inherit; font-size: 12px; color: #c4c4d8; cursor: pointer;
+}
+.gh-deprow:hover { background: rgba(255,255,255,0.04); }
+.gh-deprow--closed { color: #8a8aa0; }
+.gh-deprow-ref { flex: none; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 10.5px; color: #7f86c8; }
+.gh-deprow-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* List or graph, in the plan's heading. */
+.gh-viewtoggle { display: inline-flex; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; }
+.gh-viewtoggle .ws-ghost { border-radius: 0; }
+.gh-viewtoggle .ws-ghost.active { background: rgba(120,130,255,0.16); color: #c0c4ff; }
+
+/* The graph: a column per phase, arrows from a blocker to what it blocks. */
+.gh-graph { position: relative; overflow-x: auto; padding: 8px 14px 14px; }
+.gh-graph-warn { font-size: 11px; color: #e08a8a; margin-bottom: 8px; }
+.gh-graph-cols { position: relative; z-index: 1; display: flex; gap: 44px; align-items: flex-start; }
+.gh-gcol { flex: none; width: 180px; display: flex; flex-direction: column; gap: 6px; }
+.gh-gcol-h {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #7a7a92;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px;
+}
+.gh-gcard {
+  display: flex; flex-direction: column; gap: 2px; padding: 5px 8px; text-align: left; font: inherit; cursor: pointer;
+  background: #1c1c26; border: 1px solid rgba(255,255,255,0.08); border-left: 3px solid #6a6a80; border-radius: 6px;
+  font-size: 11.5px; color: #c4c4d8;
+}
+.gh-gcard:hover, .gh-gcard.selected { border-color: rgba(120,130,255,0.5); }
+.gh-gcard-ref { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 10px; color: #7f86c8; }
+.gh-gcard-title { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+.gh-gcard--review { border-left-color: #8fb4ff; }
+.gh-gcard--merged { border-left-color: #c49cf5; }
+.gh-gcard--progress { border-left-color: #e0b860; }
+/* Faded by their text only: the card itself stays solid over the arrows. */
+.gh-gcard--done { border-left-color: rgba(111,207,143,0.45); }
+.gh-gcard--done > * { opacity: 0.45; }
+.gh-gcard--waits { box-shadow: inset 0 0 0 1px rgba(224,138,138,0.35); }
+.gh-gcard--outside { border-style: dashed; border-left-style: solid; background: transparent; }
+.gh-graph-edges { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; overflow: visible; }
+.gh-gedge path { fill: none; stroke: rgba(160,166,232,0.55); stroke-width: 1.4; transition: opacity 0.12s; }
+.gh-gedge--met path { stroke: rgba(160,166,232,0.2); }
+.gh-gedge--back path { stroke: #e08a8a; }
+/* Hovering a card: its own arrows and neighbours stay, the rest fades. */
+.gh-graph--focus .gh-gcard:not(.gh-gcard--lit) > * { opacity: 0.3; }
+.gh-graph--focus .gh-gedge:not(.gh-gedge--lit) path { opacity: 0.12; }
+.gh-gedge--lit path { stroke-width: 2; stroke: #a8b0ff; }
+.gh-gedge--lit.gh-gedge--back path { stroke: #ff9a9a; }
+
 /* Your own review on a PR chip, and its row in the panel (github-my-review.js). */
 .gh-mine { font-size: 9.5px; letter-spacing: 0.02em; }
 .gh-mine--reviewed { color: #6fcf8f; }

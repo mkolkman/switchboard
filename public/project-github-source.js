@@ -205,6 +205,8 @@ function showGithubStartMenu(project, spec, anchor) {
   // implementing again sits below them.
   const prs = spec.prs || [];
   const items = [];
+  // Still blocked: said first, so a session is not started on it by accident.
+  if (spec.waits?.length) items.push({ head: `Waits on ${spec.waits.map(d => `#${d.number}`).join(', ')} (open)` });
   for (const key of prs) {
     const number = key.slice(key.indexOf('#'));
     if (prs.length === 1) items.push({ head: `PR ${number}` }, ...prSessionMenuRows(project, key, { itemKey: spec.itemText }));
