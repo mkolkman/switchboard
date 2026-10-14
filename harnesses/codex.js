@@ -644,9 +644,10 @@ function buildLaunchArgs({ sessionId, isNew, options }) {
   }
 
   // A first prompt, as codex's positional argument. Fresh sessions only; a
-  // resume or fork already has a conversation.
+  // resume or fork already has a conversation. After "--", so a prompt that
+  // starts with "-" is never read as a flag.
   if (isNew && !options?.forkFrom && options?.initialPrompt) {
-    args.push(String(options.initialPrompt));
+    args.push('--', String(options.initialPrompt));
   }
 
   return args;

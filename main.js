@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, safeStorage, screen, session: electronSession, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, protocol, safeStorage, screen, session: electronSession, shell } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
@@ -14,6 +14,7 @@ const { fetchAndTransformUsage } = require('./claude-auth');
 const { runStatsCommand, refreshStatsCache } = require('./stats-refresh');
 const { readHead } = require('./jsonl-scan');
 const codexAuth = require('./codex-auth');
+const { SCHEME, ensureLaunchToken, parseLaunchUrl } = require('./url-launch');
 
 // SWITCHBOARD_DATA_DIR isolates a dev/test instance from the installed app:
 // db.js puts switchboard.db under it, and pointing userData there gives the
@@ -101,7 +102,7 @@ const {
 } = require('./db');
 const dbModule = require('./db');
 
-const { getHarness, DEFAULT_HARNESS, transcriptPath, availableHarnesses, allHarnesses, progressBusyState,
+const { getHarness, DEFAULT_HARNESS, transcriptPath, availableHarnesses, allHarnesses, progressBusyState, withLaunchFlags,
         harnessForFolder: getHarnessForFolder } = require('./harnesses');
 const claudeHarness = getHarness(DEFAULT_HARNESS);
 const PROJECTS_DIR = claudeHarness.sessionsRoot();
@@ -148,6 +149,69 @@ const ptyClient = new PtyClient({
   // A lost daemon connection ends every session we knew. If the daemon was
   // still there, the sessions it runs come back as adopted ones.
   onReconnect: () => adoptDaemonSessions(),
+});
+
+// --- switchboard:// launches (see url-launch.js) ---
+// macOS delivers the URL through open-url, also when it starts the app for it,
+// so open-url is registered before ready and launches are queued until the
+// renderer has subscribed (launch-session-ready).
+let launchRendererReady = false;
+let windowStartupDone = false;
+const queuedLaunches = [];
+
+function rejectLaunch(reason) {
+  log.warn(`[launch] rejected: ${reason}`);
+  const show = () => {
+    if (Notification.isSupported()) {
+      new Notification({ title: 'Switchboard refused to start a session', body: reason }).show();
+    }
+  };
+  if (app.isReady()) show(); else app.whenReady().then(show);
+}
+
+function handleLaunchUrl(rawUrl) {
+  let token;
+  try {
+    token = ensureLaunchToken(app.getPath('userData'));
+  } catch (err) {
+    rejectLaunch(`cannot read launch-token: ${err.message}`);
+    return;
+  }
+  const result = parseLaunchUrl(rawUrl, { token });
+  if (!result.ok) {
+    rejectLaunch(result.reason);
+    return;
+  }
+  log.info(`[launch] new session in ${result.projectPath}`);
+  queuedLaunches.push({ projectPath: result.projectPath, prompt: result.prompt });
+  flushLaunches();
+}
+
+function flushLaunches() {
+  // On macOS the app keeps running with every window closed: reopen one, and its
+  // renderer drains the queue once it subscribes.
+  if (windowStartupDone && (!mainWindow || mainWindow.isDestroyed())) {
+    createWindow();
+    return;
+  }
+  if (!launchRendererReady || !mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  while (queuedLaunches.length) {
+    mainWindow.webContents.send('launch-session', queuedLaunches.shift());
+  }
+}
+
+app.on('open-url', (event, rawUrl) => {
+  event.preventDefault();
+  handleLaunchUrl(rawUrl);
+});
+
+ipcMain.on('launch-session-ready', (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  launchRendererReady = true;
+  flushLaunches();
 });
 
 /**
@@ -355,6 +419,8 @@ function createWindow() {
     mainWindow.setBounds({ ...restorePosition, width: bounds.width, height: bounds.height });
   }
 
+  launchRendererReady = false;
+  mainWindow.webContents.on('did-start-loading', () => { launchRendererReady = false; });
   mainWindow.loadFile(path.join(__dirname, 'public', 'index.html'));
 
   // Open external links in the system browser instead of a child BrowserWindow
@@ -1965,24 +2031,19 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         sessionId, isNew: startFresh, options: sessionOptions,
       });
 
-      let claudeCmd = harness.binary;
-      if (cliArgs.length) claudeCmd += ' ' + quoteArgvForShell(shell, cliArgs);
-
       // preLaunchCmd is raw shell by design (e.g. "aws-vault exec profile --") — block newlines only
-      if (sessionOptions?.preLaunchCmd) {
-        const pre = String(sessionOptions.preLaunchCmd);
-        if (/[\r\n]/.test(pre)) {
-          return { ok: false, error: 'preLaunchCmd must not contain newlines' };
-        }
-        claudeCmd = pre + ' ' + claudeCmd;
+      const pre = sessionOptions?.preLaunchCmd ? String(sessionOptions.preLaunchCmd) : '';
+      if (/[\r\n]/.test(pre)) {
+        return { ok: false, error: 'preLaunchCmd must not contain newlines' };
       }
 
+      const launchFlags = [];
       // Start MCP server for this session so Claude CLI sends diffs/file opens to Switchboard
       // (skip if user disabled IDE emulation in global settings)
       if (isClaudeSession && sessionOptions?.mcpEmulation !== false) {
         try {
           mcpServer = await startMcpServer(sessionId, [projectPath], mainWindow, log);
-          claudeCmd += ' --ide';
+          launchFlags.push('--ide');
         } catch (err) {
           log.error(`[mcp] Failed to start MCP server for ${sessionId}: ${err.message}`);
         }
@@ -1991,11 +2052,16 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // other than diagnostics never reach the model.
       if (isClaudeSession) {
         try {
-          claudeCmd += ' ' + quoteArgvForShell(shell, await previewMcp.launchArgs(sessionId));
+          launchFlags.push(...await previewMcp.launchArgs(sessionId));
         } catch (err) {
           log.error(`[preview-mcp] Could not start: ${err.message}`);
         }
       }
+
+      const launchArgs = withLaunchFlags(cliArgs, launchFlags);
+      let claudeCmd = harness.binary;
+      if (launchArgs.length) claudeCmd += ' ' + quoteArgvForShell(shell, launchArgs);
+      if (pre) claudeCmd = pre + ' ' + claudeCmd;
 
       const ptyEnv = {
         ...cleanPtyEnv,
@@ -2578,6 +2644,11 @@ function startScheduleTicker() {
     protocol.handle(PREVIEW_SCHEME, handlePreviewAssetRequest);
     buildMenu();
 
+    // Dev runs (electron .) register the Electron binary; only the packaged app
+    // claims the scheme so a dev instance doesn't steal it from the installed one.
+    if (app.isPackaged) app.setAsDefaultProtocolClient(SCHEME);
+    try { ensureLaunchToken(app.getPath('userData')); } catch (err) { log.error(`[launch] token: ${err.message}`); }
+
     // Reach the pty daemon before showing a window: any session still running
     // from a previous app run has to be adopted first, or the sidebar would show
     // it as stopped and a click would try to spawn a second process for it.
@@ -2592,6 +2663,7 @@ function startScheduleTicker() {
 
     initializeHiddenProjectTimestamps();
     createWindow();
+    windowStartupDone = true;
     startProjectsWatcher();
     startHarnessWatchers();
     // Retry legacy imports each launch; successful files are remembered in

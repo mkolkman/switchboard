@@ -1606,6 +1606,13 @@ loadProjects().then(async () => {
     }
     else setActiveSession(null);
   }
+  // switchboard://new launches (url-launch.js) — subscribe once the sidebar is
+  // loaded so the injected pending session isn't overwritten by the first load.
+  window.api.onLaunchSession(async ({ projectPath, prompt }) => {
+    const project = { projectPath };
+    const options = await resolveDefaultSessionOptions(project);
+    launchNewSession(project, { ...options, initialPrompt: prompt || null });
+  });
 });
 
 // Live-reload sidebar when filesystem changes are detected
