@@ -7,6 +7,13 @@
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="whats-new.css">
+  <script>
+    // The window is frameless and the native controls overlay the app's own headers,
+    // which have to inset around them: left on macOS, right on Windows/Linux. Set
+    // here rather than in app.js so the inset is in place for the first paint;
+    // applying it later reflows the whole chrome in front of the user.
+    document.documentElement.classList.add('platform-' + (window.api ? window.api.platform : 'unknown'));
+  </script>
 </head>
 <body>
   <div id="app-container">

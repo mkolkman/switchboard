@@ -109,6 +109,12 @@ const pendingSessions = new Map(); // sessionId → { session, projectPath, fold
 // Bridge functions for settings-panel.js
 window._setVisibleSessionCount = (v) => { visibleSessionCount = v; };
 window._setSessionMaxAge = (v) => { sessionMaxAgeDays = v; };
+// Fullscreen hides the macOS traffic lights, so the space the sidebar header reserves
+// for them is dead weight: style.css reclaims it off this class.
+window.api.onFullscreenChanged((isFullscreen) => {
+  document.documentElement.classList.toggle('fullscreen', isFullscreen);
+});
+
 window._applyTerminalFont = applyTerminalFont; // defined in terminal-manager.js
 window._refitOpenTerminals = refitOpenTerminals; // defined in terminal-manager.js
 window._applyTerminalTheme = (themeName) => {

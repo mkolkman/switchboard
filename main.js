@@ -349,6 +349,33 @@ async function adoptDaemonSessions() {
   }
 }
 
+// Sidebar background: the window controls sit over the sidebar, so the overlay on
+// Windows/Linux has to be painted the same colour or it shows as a lighter block.
+// Kept in sync with #sidebar in style.css.
+const CHROME_BG = '#18181f';
+const CHROME_SYMBOL = '#9090a8';
+
+// Per-platform frameless window options. macOS keeps its traffic lights and we place
+// them ourselves; Windows/Linux draw their controls into a titleBarOverlay we colour
+// to match. Anything else falls back to the native title bar rather than shipping a
+// window with no way to close it.
+function windowChromeOptions() {
+  if (process.platform === 'darwin') {
+    return {
+      titleBarStyle: 'hidden',
+      // Vertically centred in the 44px strip the headers reserve for it.
+      trafficLightPosition: { x: 18, y: 15 },
+    };
+  }
+  if (process.platform === 'win32' || process.platform === 'linux') {
+    return {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { color: CHROME_BG, symbolColor: CHROME_SYMBOL, height: 40 },
+    };
+  }
+  return {};
+}
+
 function createWindow() {
   // Restore saved window bounds
   const savedBounds = getSetting('global')?.windowBounds;
@@ -379,6 +406,12 @@ function createWindow() {
     minHeight: 500,
     title: 'Switchboard',
     icon: path.join(__dirname, 'build', 'icon.png'),
+    // Frameless chrome: the app's own sidebar/terminal headers fill the strip the
+    // native title bar used to occupy. The window controls stay native and sit on
+    // top of that strip, which is why the renderer insets around them per platform
+    // (see the .platform-* rules in style.css) and marks header areas as drag
+    // regions, or the window would have nothing left to grab.
+    ...windowChromeOptions(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -481,6 +514,16 @@ function createWindow() {
   };
   mainWindow.on('resize', saveBounds);
   mainWindow.on('move', saveBounds);
+
+  // In fullscreen macOS hides the traffic lights, so the space the headers reserve
+  // for them becomes a dead gap. Tell the renderer to reclaim it.
+  const sendFullscreen = (isFullscreen) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('fullscreen-changed', isFullscreen);
+    }
+  };
+  mainWindow.on('enter-full-screen', () => sendFullscreen(true));
+  mainWindow.on('leave-full-screen', () => sendFullscreen(false));
 
   // Also save immediately before close (debounce may not have flushed)
   mainWindow.on('close', () => {

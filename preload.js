@@ -182,6 +182,9 @@ contextBridge.exposeInMainWorld('api', {
   onProjectTasksChanged: (callback) => {
     ipcRenderer.on('project-tasks-changed', (_event, projectPath) => callback(projectPath));
   },
+  onFullscreenChanged: (callback) => {
+    ipcRenderer.on('fullscreen-changed', (_event, isFullscreen) => callback(isFullscreen));
+  },
 
   // File drag-and-drop
   getPathForFile: (file) => webUtils.getPathForFile(file),

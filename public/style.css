@@ -17,6 +17,87 @@ body { display: flex; flex-direction: column; }
   overflow: hidden;
 }
 
+/* ========== WINDOW CHROME ==========
+   The window is frameless (see windowChromeOptions in main.js) and the app's own
+   headers now fill the strip the native title bar used to own. Two consequences are
+   handled here.
+
+   1. Dragging. A frameless window can only be moved by regions marked as drag, and a
+      drag region swallows clicks from anything inside it, so every control within
+      one has to opt back out with no-drag. Text the user may want to select must opt
+      out too, since a drag region can't be selected either.
+   2. The native controls float over the app. macOS draws its traffic lights top-left,
+      over the sidebar; Windows/Linux draw theirs top-right, over the terminal header.
+      Each platform insets only the header the controls actually land on. */
+
+/* Every view puts its own header in the top strip, so all of them are drag handles , 
+   otherwise the window becomes immovable depending on which view is open. */
+#sidebar-header,
+#terminal-header,
+#grid-viewer-header,
+#stats-viewer-header,
+#settings-viewer-header,
+#jsonl-viewer-header,
+.viewer-toolbar {
+  -webkit-app-region: drag;
+}
+
+/* Anything interactive or selectable inside a drag region has to opt out: a drag
+   region eats clicks and cannot be text-selected. */
+#sidebar-header button,
+#sidebar-header input,
+#terminal-header button,
+#terminal-header input,
+#terminal-header #terminal-header-info > span,
+#grid-viewer-header span,
+#stats-viewer-header span,
+#settings-viewer-header span,
+#jsonl-viewer-header span,
+#jsonl-viewer-header button,
+.viewer-toolbar button,
+.viewer-toolbar input,
+.viewer-toolbar .viewer-toolbar-title,
+.viewer-toolbar .viewer-toolbar-path {
+  -webkit-app-region: no-drag;
+}
+
+/* macOS: clear the traffic lights, which sit at x:18 y:15 (see main.js). */
+.platform-darwin #sidebar-header {
+  padding-top: 44px;
+}
+
+/* Collapsed to a 42px rail, the sidebar is narrower than the traffic lights, so the
+   expand button would sit underneath them. Push it below instead. */
+.platform-darwin #sidebar.collapsed #sidebar-expand-btn {
+  margin-top: 44px;
+}
+
+/* Fullscreen hides the traffic lights entirely: reclaim their space. */
+.platform-darwin.fullscreen #sidebar-header {
+  padding-top: 16px;
+}
+.platform-darwin.fullscreen #sidebar.collapsed #sidebar-expand-btn {
+  margin-top: 12px;
+}
+
+/* Windows/Linux: the overlay controls are top-right, above whichever header is
+   showing. 138px clears the three-button cluster at the overlay height set in
+   main.js. */
+.platform-win32 #terminal-header,
+.platform-linux #terminal-header,
+.platform-win32 #grid-viewer-header,
+.platform-linux #grid-viewer-header,
+.platform-win32 #stats-viewer-header,
+.platform-linux #stats-viewer-header,
+.platform-win32 #settings-viewer-header,
+.platform-linux #settings-viewer-header,
+.platform-win32 #jsonl-viewer-header,
+.platform-linux #jsonl-viewer-header,
+.platform-win32 .viewer-toolbar,
+.platform-linux .viewer-toolbar {
+  padding-right: 138px;
+}
+
 /* ========== UPDATE TOAST ========== */
 #update-toast {
   position: fixed;
