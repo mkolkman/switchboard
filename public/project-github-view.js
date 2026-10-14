@@ -941,7 +941,7 @@ function githubAutoMergeHtml(pr, state, method, canMergeNow) {
       <button type="button" class="ws-ghost ws-ghost--sm" id="gh-automerge-off" ${state.busy ? 'disabled' : ''} title="Turn auto-merge off">${state.busy === 'automerge' ? 'Turning off…' : 'Disable'}</button>`;
   }
   if (canMergeNow || !method) return '';
-  return `<button type="button" class="ws-btn" id="gh-automerge" ${state.busy ? 'disabled' : ''} title="${githubAttr(`GitHub will ${MERGE_LABELS[method].toLowerCase()} into ${pr.baseRef} by itself once checks and reviews pass`)}">${state.busy === 'automerge' ? 'Enabling…' : 'Enable auto-merge'}</button>`;
+  return `<button type="button" class="ws-btn ws-btn--sm" id="gh-automerge" ${state.busy ? 'disabled' : ''} title="${githubAttr(`GitHub will ${MERGE_LABELS[method].toLowerCase()} into ${pr.baseRef} by itself once checks and reviews pass`)}">${state.busy === 'automerge' ? 'Enabling…' : 'Enable auto-merge'}</button>`;
 }
 
 function githubMergeRow(pr, state, project) {
@@ -954,37 +954,44 @@ function githubMergeRow(pr, state, project) {
   }
   if (pr.state !== 'OPEN') return githubStatusRow('Merge', '<div class="gh-srow-line"><span class="gh-state gh-state--bad">Closed without merging</span></div>');
   const [kind, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
-  const autorebase = pr.autorebase.available ? `
-    <label class="gh-toggle" title="Adds or removes the ${escapeHtml(pr.autorebase.label)} label; the AutoRebase workflow keeps the branch on top of ${escapeHtml(pr.baseRef)}">
-      <span class="settings-toggle gh-switch"><input type="checkbox" id="gh-autorebase" ${pr.autorebase.on ? 'checked' : ''} ${state.busy === 'autorebase' ? 'disabled' : ''}><span class="settings-toggle-slider"></span></span><span>Auto-rebase</span>
-    </label>${pr.autorebase.failed ? '<span class="gh-state gh-state--bad" title="The bot added autorebase:non-rebaseable: the last rebase hit conflicts">rebase failed</span>' : ''}`
-    : '<span class="gh-muted" title="This repository has no autorebase:opt-in label">No auto-rebase in this repo</span>';
   const resolve = pr.mergeState === 'DIRTY' || pr.autorebase.failed
-    ? `<span class="ws-flex"></span><button type="button" class="ws-btn" id="gh-resolve" ${resolving ? 'disabled' : ''} title="${resolving ? 'A Claude session is already working on this PR; see below' : `Start a Claude session in your local clone that rebases ${escapeHtml(pr.headRef)} onto ${escapeHtml(pr.baseRef)} in a worktree, resolves the conflicts, runs the tests and force-pushes with lease`}">${ICONS.claude(13)}<span>${resolving ? 'Resolving with Claude…' : 'Resolve conflicts with Claude'}</span></button>`
+    ? `<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm" id="gh-resolve" ${resolving ? 'disabled' : ''} title="${resolving ? 'A Claude session is already working on this PR; see below' : `Start a Claude session in your local clone that rebases ${escapeHtml(pr.headRef)} onto ${escapeHtml(pr.baseRef)} in a worktree, resolves the conflicts, runs the tests and force-pushes with lease`}">${ICONS.claude(11)}<span>${resolving ? 'Resolving with Claude…' : 'Resolve conflicts with Claude'}</span></button>`
     : '';
   return githubStatusRow('Merge', `<div class="gh-srow-line"><span class="gh-state gh-state--${kind}">${escapeHtml(text)}</span>${resolve}</div>`
-    + (pr.defaultBranch && pr.baseRef !== pr.defaultBranch ? `<div class="gh-srow-line"><span class="gh-state gh-state--warn" title="This PR is stacked: merging lands it in ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}">Merges into ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}</span></div>` : '')
-    + `<div class="gh-srow-line">${autorebase}</div>`);
+    + (pr.defaultBranch && pr.baseRef !== pr.defaultBranch ? `<div class="gh-srow-line"><span class="gh-state gh-state--warn" title="This PR is stacked: merging lands it in ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}">Merges into ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}</span></div>` : ''));
 }
 
-/** The card's last line: auto-merge and the merge button, on an open PR. */
-function githubMergeButtons(pr, state) {
+function githubAutorebaseHtml(pr, state) {
+  if (!pr.autorebase.available) return '<span class="gh-muted" title="This repository has no autorebase:opt-in label">No auto-rebase in this repo</span>';
+  return `<label class="gh-toggle" title="Adds or removes the ${escapeHtml(pr.autorebase.label)} label; the AutoRebase workflow keeps the branch on top of ${escapeHtml(pr.baseRef)}">
+      <span class="settings-toggle gh-switch"><input type="checkbox" id="gh-autorebase" ${pr.autorebase.on ? 'checked' : ''} ${state.busy === 'autorebase' ? 'disabled' : ''}><span class="settings-toggle-slider"></span></span><span>Auto-rebase</span>
+    </label>${pr.autorebase.failed ? '<span class="gh-state gh-state--bad" title="The bot added autorebase:non-rebaseable: the last rebase hit conflicts">rebase failed</span>' : ''}`;
+}
+
+/**
+ * The card's last line, on an open PR: auto-rebase and (while no session
+ * has its own block below) Start session on the left, auto-merge and the
+ * merge button on the right.
+ */
+function githubMergeButtons(pr, state, project) {
   if (pr.state !== 'OPEN') return '';
   const method = state.mergeMethod && pr.mergeMethods.includes(state.mergeMethod) ? state.mergeMethod : pr.mergeMethods[0];
   const can = !pr.isDraft && MERGEABLE_STATES.has(pr.mergeState) && !!method && state.busy !== 'merge';
   const [, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
+  const session = project && !prSessionIds(project, `${pr.repo}#${pr.number}`).length ? githubPrSessionButton(pr) : '';
   return `<div class="gh-merge-row">
+      ${githubAutorebaseHtml(pr, state)}${session}
       <span class="ws-flex"></span>
       ${githubAutoMergeHtml(pr, state, method, can)}
       <div class="gh-merge-btns">
-        <button type="button" class="ws-btn ws-btn--primary gh-merge-btn" id="gh-merge" ${can ? '' : 'disabled'} title="${can ? `${MERGE_LABELS[method]} into ${escapeHtml(pr.baseRef)}` : escapeHtml(text)}">${state.busy === 'merge' ? 'Merging…' : MERGE_LABELS[method] || 'Merge'}</button>
-        ${pr.mergeMethods.length > 1 ? `<button type="button" class="ws-btn ws-btn--primary gh-merge-more" id="gh-merge-method" title="Choose how to merge">${PICONS.chevronDown(11)}</button>` : ''}
+        <button type="button" class="ws-btn ws-btn--sm ws-btn--primary gh-merge-btn" id="gh-merge" ${can ? '' : 'disabled'} title="${can ? `${MERGE_LABELS[method]} into ${escapeHtml(pr.baseRef)}` : escapeHtml(text)}">${state.busy === 'merge' ? 'Merging…' : MERGE_LABELS[method] || 'Merge'}</button>
+        ${pr.mergeMethods.length > 1 ? `<button type="button" class="ws-btn ws-btn--sm ws-btn--primary gh-merge-more" id="gh-merge-method" title="Choose how to merge">${PICONS.chevronDown(11)}</button>` : ''}
       </div>
     </div>`;
 }
 
 function githubStatusCard(pr, state, project) {
-  return `<div class="gh-sec gh-status">${githubChecksRow(pr, state)}${githubReviewsRow(pr, state)}${githubMergeRow(pr, state, project)}${githubMergeButtons(pr, state)}`
+  return `<div class="gh-sec gh-status">${githubChecksRow(pr, state)}${githubReviewsRow(pr, state)}${githubMergeRow(pr, state, project)}${githubMergeButtons(pr, state, project)}`
     + `${state.notice ? `<div class="gh-notice gh-notice--${state.notice.kind}">${escapeHtml(state.notice.text)}</div>` : ''}</div>`;
 }
 
@@ -1153,6 +1160,8 @@ async function startPrSession(project, pr, state, { prompt, label, focus }) {
   if (!state.prSessions) state.prSessions = new Map();
   state.prSessions.set(prKey, [sessionId, ...(state.prSessions.get(prKey) || []).filter(id => id !== sessionId)]);
   prSessionLabels.set(sessionId, label);
+  // The session block appears now, instead of the card's Start button.
+  if (githubTabShown(project)) paintGithubPanel(project);
   // Pick up the stored link for the next restart's list.
   if (!project.isGithubView) loadProjectPlan(project).catch(() => {});
 }
@@ -1232,13 +1241,16 @@ function githubDepsSection(item, state) {
   return `<div class="gh-sec gh-deps">${lists.map(([head, deps]) => `<div class="gh-sec-h">${head}</div>${deps.map(row).join('')}`).join('')}</div>`;
 }
 
+function githubPrSessionButton(pr) {
+  return `<button type="button" class="ws-btn ws-btn--sm gh-pr-session" id="gh-pr-session" title="Start a Claude session on this PR: review it, work through its review, or one that waits for you">${ICONS.claude(12)}<span>Start session</span>${PICONS.chevronDown(10)}</button>`;
+}
+
 function githubSessionsSection(project, pr) {
   const ids = prSessionIds(project, `${pr.repo}#${pr.number}`);
   const open = pr.state === 'OPEN';
-  if (!ids.length && !open) return '';
-  const start = open ? `<button type="button" class="ws-btn gh-pr-session" id="gh-pr-session" title="Start a Claude session on this PR: review it, work through its review, or one that waits for you">${ICONS.claude(13)}<span>Start session</span>${PICONS.chevronDown(11)}</button>` : '';
-  // Without sessions it is just the button, no heading over an empty list.
-  if (!ids.length) return `<div class="gh-sec gh-sessions gh-sessions--none">${start}</div>`;
+  // Without sessions the Start button sits in the status card instead.
+  if (!ids.length) return '';
+  const start = open ? githubPrSessionButton(pr) : '';
   return `<div class="gh-sec gh-sessions"><div class="gh-sec-h">Claude on this PR<span class="ws-flex"></span>${start}</div>${ids.map(id =>
     `<div class="gh-sess-row" data-session="${escapeHtml(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
 }

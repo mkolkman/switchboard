@@ -7632,21 +7632,21 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-state--merged { color: #c49cf5; }
 
 /* The status card: a label column, and per row a line with its action on the right. */
-.gh-status { display: flex; flex-direction: column; gap: 10px; background: rgba(120,130,255,0.04); }
+.gh-status { display: flex; flex-direction: column; gap: 6px; background: rgba(120,130,255,0.04); }
 .gh-srow { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
-.gh-srow-label { padding-top: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #7a7a92; }
+.gh-srow-label { padding-top: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #7a7a92; }
 .gh-srow-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.gh-srow-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 24px; }
+.gh-srow-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 22px; }
 button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .gh-srow-line .arrow { color: #7a7a92; }
-.gh-srow-line #gh-resolve { gap: 6px; }
+.gh-srow-line #gh-resolve { gap: 5px; }
 .gh-status .gh-fold-body { padding: 2px 0 4px; }
 .gh-thread-show { flex-shrink: 0; margin-left: auto; }
 .gh-review-mode { display: inline-flex; margin-left: 8px; }
 .gh-review-mode .ws-ghost.active { background: rgba(120,130,255,0.16); color: #c0c4ff; }
 .gh-diff-row.filler .gh-code { opacity: 0.85; }
 .gh-thread-inline--focus { box-shadow: 0 0 0 2px rgba(128,136,255,0.7); transition: box-shadow 0.4s; }
-.gh-merge-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gh-merge-row { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.045); }
 .gh-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #c8c8dc; }
 .gh-switch { transform: scale(0.8); transform-origin: left center; margin-right: -8px; }
 .gh-merge-btns { display: inline-flex; }
@@ -7743,7 +7743,6 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 
 /* ---- Claude sessions on a PR, with the terminal in the panel ---- */
 .gh-sessions { background: rgba(120,130,255,0.03); }
-.gh-sessions--none { display: flex; justify-content: flex-end; padding-top: 8px; padding-bottom: 8px; }
 .gh-sess-row { display: flex; min-width: 0; }
 .gh-sess-name { color: #d0d0e8; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gh-sess-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #55556a; }
@@ -7775,7 +7774,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-sess-activity--idle { color: #8a8aa0; }
 /* A Claude session is already on it: the button says so and looks it. */
 #gh-resolve:disabled { opacity: 0.5; cursor: default; }
-#gh-resolve:disabled:hover { background: rgba(255,255,255,0.04); color: inherit; }
+#gh-resolve:disabled:hover { background: none; color: inherit; }
 
 /* ---- PR review: changed files beside their diff ---- */
 .gh-pr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: #6a6a80; }
