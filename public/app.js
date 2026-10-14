@@ -453,6 +453,8 @@ window.api.onProcessExited((sessionId, exitCode, signal, userStopped) => {
     setActiveSession(null);
     terminalHeader.style.display = 'none';
     placeholder.style.display = '';
+    // A session on a Help Scout ticket hands the screen back to that ticket.
+    if (typeof returnToHelpscoutTicket === 'function') returnToHelpscoutTicket(sessionId);
   }
 
   // Drop the sidebar row for sessions with nothing to reopen: plain terminals,
@@ -764,6 +766,7 @@ function closeArchivedSession(sessionId) {
     setActiveSession(null);
     terminalHeader.style.display = 'none';
     placeholder.style.display = '';
+    if (typeof returnToHelpscoutTicket === 'function') returnToHelpscoutTicket(sessionId);
   }
 }
 
@@ -1198,12 +1201,25 @@ function openNewSession(project) {
   return launchNewSession(project);
 }
 
+// A session started from a Help Scout ticket links back to it
+// (helpscout-view.js keeps the links).
+const terminalHeaderTicket = document.getElementById('terminal-header-ticket');
+function updateTerminalHeaderTicket() {
+  const link = activeSessionId && typeof helpscoutLinkFor === 'function' ? helpscoutLinkFor(activeSessionId) : null;
+  terminalHeaderTicket.style.display = link ? '' : 'none';
+  if (!link) return;
+  terminalHeaderTicket.textContent = `Ticket #${link.number}`;
+  terminalHeaderTicket.title = `Back to the Help Scout ticket this session works on: ${link.subject || ''}`;
+  terminalHeaderTicket.onclick = () => openHelpscoutTicket(link.conversation);
+}
+
 async function showTerminalHeader(session) {
   const displayName = cleanDisplayName(session.name || session.aiTitle || session.summary);
   terminalHeaderName.textContent = displayName;
   terminalHeaderId.textContent = session.sessionId;
   terminalHeader.style.display = '';
   updateTerminalHeader();
+  updateTerminalHeaderTicket();
 
   // Show active shell profile
   try {

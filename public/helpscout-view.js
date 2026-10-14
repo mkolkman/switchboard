@@ -8,7 +8,8 @@
 // API calls (helpscout.js).
 // Depends on: utils.js (escapeHtml, formatDate), projects-view.js (PICONS,
 // showContextMenu), dialogs.js (resolveDefaultSessionOptions), app.js
-// (launchNewSession, encodeProjectPath).
+// (launchNewSession, openSession, encodeProjectPath), project-github-view.js
+// (prSessionRowInner, refreshPrLastMessage, prSessionLabels, currentSession).
 
 const helpscoutViewContent = document.getElementById('helpscout-content');
 const helpscoutViewer = document.getElementById('helpscout-viewer');
@@ -95,7 +96,53 @@ async function helpscoutViewWrite(label, call, done) {
 
 // --- Sessions ---
 
-async function helpscoutViewSession(prompt) {
+// --- Sessions on a ticket ---
+// A session started from a ticket (its Claude session, or logging one of its
+// suggestions) stays linked to it: the ticket lists it with its state and last
+// step (the PR panel's rows, project-github-view.js), the session header links
+// back to the ticket, and when the session closes the ticket comes back.
+
+const HELPSCOUT_SESSIONS_KEY = 'helpscoutSessionLinks';
+const HELPSCOUT_SESSIONS_KEEP = 300;
+const helpscoutSessionLinks = new Map(); // sessionId → { conversation, number, subject }
+let helpscoutSessionTicker = null;
+
+window.api.getSetting(HELPSCOUT_SESSIONS_KEY).then((saved) => {
+  for (const [id, link] of Object.entries(saved || {})) helpscoutSessionLinks.set(id, link);
+}).catch(() => {});
+
+function linkHelpscoutSession(sessionId, conv) {
+  helpscoutSessionLinks.delete(sessionId);
+  helpscoutSessionLinks.set(sessionId, { conversation: conv.id, number: conv.number, subject: conv.subject });
+  const kept = [...helpscoutSessionLinks].slice(-HELPSCOUT_SESSIONS_KEEP);
+  window.api.setSetting(HELPSCOUT_SESSIONS_KEY, Object.fromEntries(kept)).catch(() => {});
+}
+
+/** The ticket a session works on, or null. */
+function helpscoutLinkFor(sessionId) {
+  return helpscoutSessionLinks.get(sessionId) || null;
+}
+
+/** A ticket's sessions that still exist, newest first. */
+function helpscoutSessionIds(conversationId) {
+  return [...helpscoutSessionLinks].filter(([, link]) => link.conversation === conversationId).map(([id]) => id)
+    .filter(id => openSessions.has(id) || sessionMap.has(id)).reverse();
+}
+
+/** Show a ticket in the Help Scout tab, from anywhere. */
+function openHelpscoutTicket(conversationId) {
+  const tab = document.querySelector('.sidebar-tab[data-tab="helpscout"]');
+  if (tab && activeTab !== 'helpscout') tab.click();
+  openHelpscoutConversation(conversationId);
+}
+
+/** A linked session closed while on screen: show its ticket again. */
+function returnToHelpscoutTicket(sessionId) {
+  const link = helpscoutLinkFor(sessionId);
+  if (link && activeTab === 'sessions') openHelpscoutTicket(link.conversation);
+}
+
+async function helpscoutViewSession(conv, prompt, label) {
   const folder = await window.api.getChatFolder();
   if (!folder || folder.error) { alert(`Could not create the chat folder: ${folder?.error || 'unknown error'}`); return; }
   const target = { folder: encodeProjectPath(folder), projectPath: folder, sessions: [] };
@@ -104,19 +151,51 @@ async function helpscoutViewSession(prompt) {
   options.initialPrompt = prompt;
   delete options.worktree;
   delete options.worktreeName;
-  launchNewSession(target, options, { focus: true });
+  const sessionId = await launchNewSession(target, options, { focus: true });
+  if (!sessionId) return;
+  linkHelpscoutSession(sessionId, conv);
+  prSessionLabels.set(sessionId, label);
+  if (typeof updateTerminalHeaderTicket === 'function') updateTerminalHeaderTicket();
 }
 
 function helpscoutSupportSession(conv) {
-  helpscoutViewSession(`${HELPSCOUT_SUPPORT_SKILL} Help Scout ticket #${conv.number}: ${conv.url}`);
+  helpscoutViewSession(conv, `${HELPSCOUT_SUPPORT_SKILL} Help Scout ticket #${conv.number}: ${conv.url}`, `Support on #${conv.number}`);
 }
 
 function helpscoutLogSession(sug) {
   const skill = HELPSCOUT_LOG_SKILLS[sug.kind];
   const close = `When it is logged, mark suggestion ${sug.id} as logged with the customer-support skill's helpscout_api.py: \`close ${sug.id}\`.`;
-  helpscoutViewSession(skill
+  helpscoutViewSession({ id: sug.conversation, number: sug.number, subject: sug.subject }, skill
     ? `${skill} ${sug.text}\n\nFrom Help Scout ticket #${sug.number} (${sug.url}). ${close}`
-    : `${HELPSCOUT_SUPPORT_SKILL} Log this saved ${sug.kind} suggestion from Help Scout ticket #${sug.number} (${sug.url}):\n\n${sug.text}\n\n${close}`);
+    : `${HELPSCOUT_SUPPORT_SKILL} Log this saved ${sug.kind} suggestion from Help Scout ticket #${sug.number} (${sug.url}):\n\n${sug.text}\n\n${close}`, `Logging the ${sug.kind} from #${sug.number}`);
+}
+
+function helpscoutSessionsSection(conv) {
+  const ids = helpscoutSessionIds(conv.id);
+  if (!ids.length) return '';
+  return `<div class="gh-sec gh-sessions hsv-sessions"><div class="gh-sec-h">Claude on this ticket</div>${ids.map(id =>
+    `<div class="gh-sess-row" data-session="${hsvAttr(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
+}
+
+function bindHelpscoutSessionRow(row) {
+  row.querySelector('[data-act="open"]').onclick = () => {
+    const session = currentSession(row.dataset.session);
+    if (session) openSession(session);
+  };
+}
+
+// Every 3 s while a ticket with sessions is on screen: redraw just its rows.
+function tickHelpscoutSessions() {
+  clearInterval(helpscoutSessionTicker);
+  helpscoutSessionTicker = setInterval(async () => {
+    const rows = helpscoutViewer.querySelectorAll('.hsv-sessions .gh-sess-row');
+    if (activeTab !== 'helpscout' || !rows.length) { clearInterval(helpscoutSessionTicker); helpscoutSessionTicker = null; return; }
+    for (const row of rows) {
+      await refreshPrLastMessage(row.dataset.session);
+      const html = prSessionRowInner(row.dataset.session);
+      if (row.innerHTML !== html) { row.innerHTML = html; bindHelpscoutSessionRow(row); }
+    }
+  }, 3000);
 }
 
 async function helpscoutSetSuggestion(sid, status) {
@@ -244,6 +323,7 @@ function renderHelpscoutViewMain() {
       </div>
     </div>
     ${s.notice ? `<div class="hsv-notice${s.notice.bad ? ' gh-error' : ''}">${escapeHtml(s.notice.text)}</div>` : ''}
+    ${helpscoutSessionsSection(c)}
     ${c.suggestions.length ? `<div class="hsv-sugs">${c.suggestions.map(helpscoutSuggestion).join('')}</div>` : ''}
     <div class="hsv-composer">
       <div class="hsv-tabs">
@@ -302,6 +382,14 @@ function bindHelpscoutViewMain(c, draft) {
       btn.onclick = () => (btn.dataset.sugAct === 'log' ? helpscoutLogSession(sug) : helpscoutSetSuggestion(sug.id, btn.dataset.sugAct));
     });
   });
+  const sessionRows = helpscoutViewer.querySelectorAll('.hsv-sessions .gh-sess-row');
+  sessionRows.forEach(row => {
+    bindHelpscoutSessionRow(row);
+    refreshPrLastMessage(row.dataset.session).then(changed => {
+      if (changed && row.isConnected) { row.innerHTML = prSessionRowInner(row.dataset.session); bindHelpscoutSessionRow(row); }
+    });
+  });
+  if (sessionRows.length) tickHelpscoutSessions();
   helpscoutViewer.querySelectorAll('a.hsv-link').forEach(a => {
     a.onclick = (e) => { e.preventDefault(); if (/^https?:/i.test(a.href)) window.api.openExternal(a.href); };
   });
