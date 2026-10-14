@@ -240,6 +240,7 @@ function setActivity(sessionId, active) {
 
   if (wasActive && !active) {
     bumpSessionEvent(sessionId);
+    if (typeof reloadWebPreview === 'function') reloadWebPreview(sessionId);
     // Activity ended → response-ready if user isn't looking at this session
     if (sessionId !== activeSessionId) {
       responseReadySessions.add(sessionId);

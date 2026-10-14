@@ -48,6 +48,8 @@ const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
 const { createTaskManager } = require('./task-manager');
 const { lastAssistantMessage, currentActivity } = require('./session-preview');
+const { createPreviewWatcher } = require('./preview-urls');
+const { createPreviewMcpServer } = require('./preview-mcp');
 const { repoInfoForPaths, findLocalClones } = require('./repo-info');
 const githubTracker = require('./github-tracker');
 
@@ -109,6 +111,16 @@ const STATS_CACHE_PATH = path.join(CLAUDE_DIR, 'stats-cache.json');
 // Active PTY sessions. The pty processes themselves belong to the daemon; each
 // entry here is the app's view of one — bookkeeping plus a handle to write to it.
 const activeSessions = new Map();
+
+// A page to show beside a session: from Claude's open_preview tool, or a
+// dev-server or artifact link seen in its output (preview-urls.js).
+function sendPreview(sessionId, url, source) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const session = activeSessions.get(sessionId);
+  mainWindow.webContents.send('preview-open', session?.realSessionId || sessionId, url, source);
+  return true;
+}
+const previewMcp = createPreviewMcpServer({ onOpen: (sessionId, url) => sendPreview(sessionId, url, 'tool'), log });
 let mainWindow = null;
 let appIsQuitting = false;
 
@@ -229,6 +241,8 @@ async function adoptDaemonSessions() {
       runtime: state.isPlainTerminal ? null : (state.runtime || DEFAULT_HARNESS),
       forkFrom: state.forkFrom || null,
       activity: state.isPlainTerminal ? createTerminalActivity({ canPollProcess: false }) : null,
+      // Watches the output for dev-server and artifact links (preview-urls.js).
+      previewWatcher: state.isPlainTerminal ? null : createPreviewWatcher(),
       projectId: state.projectId || null,
       trackId: state.trackId || null,
       formerTrackName: state.formerTrackName || null,
@@ -290,7 +304,27 @@ function createWindow() {
       nodeIntegration: false,
       nodeIntegrationInSubFrames: false,
       contextIsolation: true,
+      // The preview browser beside a session (file-panel.js); locked down below.
+      webviewTag: true,
     },
+  });
+
+  // A preview page gets no preload and no Node, in its own lasting partition
+  // (a claude.ai login there stays), and opens new windows in the system browser.
+  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    webPreferences.nodeIntegration = false;
+    webPreferences.nodeIntegrationInSubFrames = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    params.partition = 'persist:preview';
+    if (!/^(https?|file):/i.test(params.src || '')) event.preventDefault();
+  });
+  mainWindow.webContents.on('did-attach-webview', (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+      return { action: 'deny' };
+    });
   });
 
   // Set position after creation to prevent macOS from clamping size
@@ -1433,6 +1467,11 @@ function handleSessionData(session, sessionId, data, meta = {}) {
     return;
   }
 
+  // Every chunk, not just those with "://": a URL can be split across two.
+  if (session.previewWatcher) {
+    for (const url of session.previewWatcher.feed(data)) sendPreview(currentId, url, 'output');
+  }
+
   // Prompt marks for a plain terminal. Cheap on every chunk: the parse
   // returns immediately unless the chunk actually contains an OSC 133.
   if (session.activity) {
@@ -1809,6 +1848,15 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
           claudeCmd += ' --ide';
         } catch (err) {
           log.error(`[mcp] Failed to start MCP server for ${sessionId}: ${err.message}`);
+        }
+      }
+      // The open_preview tool, from a server of its own: an IDE server's tools
+      // other than diagnostics never reach the model.
+      if (isClaudeSession) {
+        try {
+          claudeCmd += ' ' + quoteArgvForShell(shell, await previewMcp.launchArgs(sessionId));
+        } catch (err) {
+          log.error(`[preview-mcp] Could not start: ${err.message}`);
         }
       }
 
@@ -2438,6 +2486,7 @@ app.on('before-quit', () => {
   appIsQuitting = true;
   // Shut down all MCP servers
   shutdownAllMcp();
+  previewMcp.stop();
   taskManager.shutdown();
 
   // Close filesystem watcher

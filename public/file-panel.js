@@ -40,6 +40,11 @@ let diffBodyEl = null;
 let diffActionsEl = null;
 let diffToggleBtn = null;
 
+// Web preview tab: a toolbar and the webview it shows (see openWebTab)
+let fpWebContainer = null;
+let fpWebHost = null;
+let fpWebUrlInput = null;
+
 const PANEL_WIDTH_KEY = 'filePanelWidth';
 const DEFAULT_PANEL_WIDTH = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10) || 450;
 const MIN_PANEL_WIDTH = 280;
@@ -146,6 +151,8 @@ function initFilePanel() {
   diffActionsEl.style.display = 'none';
   diffContainer.appendChild(diffActionsEl);
 
+  createWebPreview();
+
   terminalSplitEl.appendChild(filePanelEl);
   terminalArea.appendChild(terminalSplitEl);
 
@@ -173,6 +180,11 @@ function handleClose() {
     if (tab.type === 'file') {
       fpViewerPanel.destroy();
       state.selectedPath = '';
+    }
+    // Closed by hand: the same link in the output does not bring it back.
+    if (tab.type === 'web') {
+      state.closedPreviews.add(tab.openedUrl);
+      clearWebPreview();
     }
     state.currentTab = null;
   }
@@ -233,6 +245,10 @@ function wireIpcListeners() {
     openFileTab(sessionId, data);
   });
 
+  window.api.onPreviewOpen((sessionId, url, source) => {
+    openWebTab(sessionId, url, { auto: source === 'output' });
+  });
+
   window.api.onMcpCloseAllDiffs((sessionId) => {
     closeAllDiffs(sessionId);
   });
@@ -259,6 +275,7 @@ function getSessionState(sessionId) {
       selectedPath: '',
       browserError: '',
       browserGeneration: 0,
+      closedPreviews: new Set(),
     });
   }
   return filePanelState.get(sessionId);
@@ -358,6 +375,8 @@ function destroyCurrentTab(state) {
   if (tab.type === 'file') {
     fpViewerPanel.destroy();
   }
+  // The webview is shared: only the session on screen has its page in it.
+  if (tab.type === 'web' && filePanelState.get(currentPanelSessionId) === state) clearWebPreview();
 }
 
 async function openFileInPanel(sessionId, filePath, location = {}) {
@@ -442,6 +461,119 @@ function closeDiffByDiffId(sessionId, diffId) {
   }
 }
 
+// ── Web Preview ─────────────────────────────────────────────────────
+//
+// A page beside the session: a prototype on a dev server, a local HTML file
+// or a claude.ai artifact. Opened by Claude's open_preview tool, or by such a
+// link showing up in the session's output (preview-urls.js in main). It
+// reloads when the session's turn ends, so what Claude changed shows.
+
+const WEB_PREVIEW_MIN_SHARE = 0.5; // of the split, so the page is usable beside the terminal
+
+function createWebPreview() {
+  fpWebContainer = document.createElement('div');
+  fpWebContainer.id = 'file-panel-web';
+  fpWebContainer.style.display = 'none';
+
+  const bar = document.createElement('div');
+  bar.className = 'viewer-toolbar fp-web-bar';
+  const btn = (title, svg, onClick) => {
+    const b = document.createElement('button');
+    b.className = 'fp-toolbar-btn fp-icon-btn';
+    b.title = title;
+    b.innerHTML = svg;
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  const icon = (d) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const webview = () => fpWebHost.querySelector('webview');
+  bar.appendChild(btn('Back', icon('<path d="M15 18l-6-6 6-6"/>'), () => { if (webview()?.canGoBack()) webview().goBack(); }));
+  bar.appendChild(btn('Forward', icon('<path d="M9 18l6-6-6-6"/>'), () => { if (webview()?.canGoForward()) webview().goForward(); }));
+  bar.appendChild(btn('Reload', icon('<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>'), () => webview()?.reload()));
+
+  fpWebUrlInput = document.createElement('input');
+  fpWebUrlInput.className = 'fp-web-url';
+  fpWebUrlInput.spellcheck = false;
+  fpWebUrlInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !currentPanelSessionId) return;
+    let url = fpWebUrlInput.value.trim();
+    if (!/^(https?|file):/i.test(url)) url = 'http://' + url;
+    const tab = getSessionState(currentPanelSessionId).currentTab;
+    if (tab?.type === 'web') { tab.url = url; showWebPreview(tab, { force: true }); }
+  });
+  bar.appendChild(fpWebUrlInput);
+
+  bar.appendChild(btn('Open in your browser', icon('<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>'), () => {
+    const url = webview()?.getURL();
+    if (url) window.api.openExternal(url);
+  }));
+  const close = btn('Close panel', icon('<path d="M18 6L6 18M6 6l12 12"/>'), handleClose);
+  close.classList.add('fp-close-btn');
+  bar.appendChild(close);
+  fpWebContainer.appendChild(bar);
+
+  fpWebHost = document.createElement('div');
+  fpWebHost.className = 'fp-web-host';
+  fpWebContainer.appendChild(fpWebHost);
+  filePanelWorkspaceEl.appendChild(fpWebContainer);
+}
+
+/** Show a page beside a session. An open, unanswered diff is never pushed aside. */
+function openWebTab(sessionId, url, { auto = false } = {}) {
+  const state = getSessionState(sessionId);
+  if (auto && state.closedPreviews.has(url)) return;
+  if (state.currentTab?.type === 'diff' && !state.currentTab.resolved) return;
+  if (state.currentTab?.type === 'web' && state.currentTab.openedUrl === url && state.panelVisible) return;
+  destroyCurrentTab(state);
+  state.currentTab = { type: 'web', label: url, openedUrl: url, url };
+  state.panelVisible = true;
+  // Wide enough to look at: half the split, unless it was made wider.
+  const split = terminalSplitEl?.offsetWidth || 0;
+  if (split) state.panelWidth = Math.max(state.panelWidth || DEFAULT_PANEL_WIDTH, Math.round(split * WEB_PREVIEW_MIN_SHARE));
+  if (currentPanelSessionId === sessionId) {
+    showPanel(state);
+    renderPanel(sessionId);
+  }
+}
+
+/**
+ * Put the tab's page in the shared webview: a new one when the page differs
+ * from what is loaded (a webview cannot be attached without a src).
+ */
+function showWebPreview(tab, { force = false } = {}) {
+  fpWebUrlInput.value = tab.url;
+  const current = fpWebHost.querySelector('webview');
+  if (current && !force && current.dataset.tabUrl === tab.openedUrl) return;
+  fpWebHost.innerHTML = '';
+  const view = document.createElement('webview');
+  view.setAttribute('partition', 'persist:preview');
+  view.setAttribute('src', tab.url);
+  view.dataset.tabUrl = tab.openedUrl;
+  // The address bar follows the page; the tab remembers it for a session switch.
+  const follow = (e) => {
+    if (!e.url) return;
+    tab.url = e.url;
+    if (document.activeElement !== fpWebUrlInput) fpWebUrlInput.value = e.url;
+  };
+  view.addEventListener('did-navigate', follow);
+  view.addEventListener('did-navigate-in-page', (e) => { if (e.isMainFrame) follow(e); });
+  fpWebHost.appendChild(view);
+}
+
+function clearWebPreview() {
+  if (fpWebHost) fpWebHost.innerHTML = '';
+}
+
+/** A turn ended: what Claude changed should show. Only the session on screen has a live page. */
+function reloadWebPreview(sessionId) {
+  if (currentPanelSessionId !== sessionId) return;
+  const tab = getSessionState(sessionId).currentTab;
+  const view = fpWebHost?.querySelector('webview');
+  if (tab?.type === 'web' && view && view.isConnected) {
+    try { view.reload(); } catch {}
+  }
+}
+
 // ── Panel Show/Hide ─────────────────────────────────────────────────
 
 function showPanel(state) {
@@ -513,6 +645,7 @@ function renderTabContent(sessionId, tab) {
   const vpContainer = document.getElementById('file-panel-viewer');
   const diffContainer = document.getElementById('file-panel-diff');
 
+  fpWebContainer.style.display = tab?.type === 'web' ? 'flex' : 'none';
   if (!tab) {
     filePanelContentEl.classList.add('browser-only');
     filePanelWorkspaceEl.style.display = 'none';
@@ -524,7 +657,11 @@ function renderTabContent(sessionId, tab) {
   filePanelContentEl.classList.remove('browser-only');
   filePanelWorkspaceEl.style.display = 'flex';
 
-  if (tab.type === 'file') {
+  if (tab.type === 'web') {
+    vpContainer.style.display = 'none';
+    diffContainer.style.display = 'none';
+    showWebPreview(tab);
+  } else if (tab.type === 'file') {
     // Use ViewerPanel
     diffContainer.style.display = 'none';
     vpContainer.style.display = 'flex';
@@ -914,6 +1051,8 @@ function setupPanelResizeHandle() {
     startX = e.clientX;
     startWidth = filePanelEl.offsetWidth;
     filePanelResizeHandle.classList.add('dragging');
+    // A webview takes the mouse moves over it; let them reach the document.
+    document.body.classList.add('fp-resizing');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMouseMove);
@@ -928,6 +1067,7 @@ function setupPanelResizeHandle() {
 
   function onMouseUp() {
     filePanelResizeHandle.classList.remove('dragging');
+    document.body.classList.remove('fp-resizing');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
     document.removeEventListener('mousemove', onMouseMove);
