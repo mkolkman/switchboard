@@ -86,6 +86,8 @@ contextBridge.exposeInMainWorld('api', {
   getGithubReviewComments: (target) => ipcRenderer.invoke('github-review-comments', target),
   createGithubReviewComment: (target, spec) => ipcRenderer.invoke('github-create-review-comment', target, spec),
   replyGithubReviewComment: (target, id, body) => ipcRenderer.invoke('github-reply-review-comment', target, id, body),
+  addGithubComment: (target, body) => ipcRenderer.invoke('github-add-comment', target, body),
+  setGithubThreadResolved: (threadId, resolved) => ipcRenderer.invoke('github-set-thread-resolved', threadId, resolved),
   markGithubReviewed: (target, headOid) => ipcRenderer.invoke('github-mark-reviewed', target, headOid),
   getGithubReviewCandidates: (target) => ipcRenderer.invoke('github-review-candidates', target),
   setGithubReviewRequest: (target, login, on) => ipcRenderer.invoke('github-set-review-request', target, login, on),

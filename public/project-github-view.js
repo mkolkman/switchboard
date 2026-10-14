@@ -53,7 +53,7 @@ function githubTabState(projectId) {
     githubTabStates.set(projectId, {
       results: new Map(), loading: new Set(), open: new Map(),
       selection: null, details: new Map(), detailLoading: new Set(), busy: null, notice: null,
-      releases: new Map(),
+      releases: new Map(), panelComposer: null,
     });
   }
   return githubTabStates.get(projectId);
@@ -1384,26 +1384,53 @@ function githubTimelineComment(c) {
   return `<div class="gh-comment"><div class="gh-comment-h"><span class="gh-who">${escapeHtml(c.author)}</span>${review ? `<span class="gh-muted">${escapeHtml(review)}</span>` : ''}<span class="ws-flex"></span><a class="gh-muted" href="${escapeHtml(c.url)}">${escapeHtml(githubAgo(c.at))}</a></div><div class="gh-md">${githubMarkdown(c.body)}</div></div>`;
 }
 
+// The panel's one composer: a reply to a thread (replyTo, a comment id) or,
+// with replyTo null, the new comment at the bottom of the conversation. Its
+// draft lives in the tab state, so live repaints keep what is being typed.
+function githubPanelComposer(state, key, replyTo = null) {
+  const c = state.panelComposer;
+  return c && c.key === key && c.replyTo === replyTo ? c : null;
+}
+
+function githubPanelComposerHtml(state, key, replyTo = null) {
+  const c = githubPanelComposer(state, key, replyTo) || { draft: '' };
+  return `<div class="gh-composer gh-composer--panel" data-reply="${replyTo ?? ''}">
+    <textarea class="ws-input gh-composer-input" rows="${replyTo ? 3 : 2}" placeholder="${replyTo ? 'Reply…' : 'Leave a comment…'}">${escapeHtml(c.draft || '')}</textarea>
+    ${c.error ? `<div class="gh-error gh-composer-error">${escapeHtml(c.error)}</div>` : ''}
+    <div class="gh-composer-acts"><span class="gh-muted">Markdown · ⌘↵ to post · posted to GitHub right away</span><span class="ws-flex"></span>
+      ${replyTo ? '<button type="button" class="ws-ghost ws-ghost--sm" data-act="cancel-comment">Cancel</button>' : ''}
+      <button type="button" class="ws-btn ws-btn--primary" data-act="send-comment" ${c.sending ? 'disabled' : ''}>${c.sending ? 'Posting…' : replyTo ? 'Reply' : 'Comment'}</button></div>
+  </div>`;
+}
+
 // A review thread folds shut once resolved; opening or closing one by hand
 // holds across the live repaints.
-function githubTimelineThread(t, state) {
+function githubTimelineThread(t, state, detailKey) {
   const key = `thread:${t.comments[0]?.url || t.path}`;
+  const root = t.comments[0]?.id;
+  const resolveBtn = t.id ? `<button type="button" class="ws-ghost ws-ghost--sm gh-thread-resolve" data-thread="${githubAttr(t.id)}" data-resolve="${!t.resolved}" ${state.busy ? 'disabled' : ''} title="${t.resolved ? 'Open this thread again on GitHub' : 'Mark this thread resolved on GitHub'}">${state.busy === `thread:${t.id}` ? '…' : t.resolved ? 'Unresolve' : 'Resolve'}</button>` : '';
+  const reply = !root ? ''
+    : githubPanelComposer(state, detailKey, root) ? githubPanelComposerHtml(state, detailKey, root)
+    : `<button type="button" class="ws-ghost ws-ghost--sm gh-reply-btn" data-reply-to="${root}">Reply</button>`;
   const open = state.open.has(key) ? state.open.get(key) : !t.resolved;
   return `<details class="gh-thread" data-key="${githubAttr(key)}" data-resolved="${t.resolved}" ${open ? 'open' : ''}>
-    <summary><span class="gh-path">${escapeHtml(t.path)}${t.line ? ':' + t.line : ''}</span>${t.resolved ? '<span class="gh-muted">resolved</span>' : ''}${t.outdated ? '<span class="gh-muted">outdated</span>' : ''}<span class="ws-flex"></span>${t.comments[0]?.url ? `<button type="button" class="ws-ghost ws-ghost--sm gh-thread-show" data-thread-url="${githubAttr(t.comments[0].url)}" data-path="${githubAttr(t.path)}" title="Show this thread in its file, in Files changed">Show in file ${PICONS.chevronRight(10)}</button>` : ''}</summary>
+    <summary><span class="gh-path">${escapeHtml(t.path)}${t.line ? ':' + t.line : ''}</span>${t.resolved ? '<span class="gh-muted">resolved</span>' : ''}${t.outdated ? '<span class="gh-muted">outdated</span>' : ''}<span class="ws-flex"></span>${resolveBtn}${t.comments[0]?.url ? `<button type="button" class="ws-ghost ws-ghost--sm gh-thread-show" data-thread-url="${githubAttr(t.comments[0].url)}" data-path="${githubAttr(t.path)}" title="Show this thread in its file, in Files changed">Show in file ${PICONS.chevronRight(10)}</button>` : ''}</summary>
     ${t.comments.map(c => githubTimelineComment(c)).join('')}
+    ${reply}
   </details>`;
 }
 
 /** Comments and review threads as one conversation, oldest first; a thread sits where it started. */
 function githubTimeline(detail, state) {
+  const key = `${detail.repo}#${detail.number}`;
   const entries = [
     ...(detail.comments || []).map(c => ({ at: c.at, html: githubTimelineComment(c) })),
-    ...(detail.threads || []).map(t => ({ at: t.comments[0]?.at, html: githubTimelineThread(t, state) })),
+    ...(detail.threads || []).map(t => ({ at: t.comments[0]?.at, html: githubTimelineThread(t, state, key) })),
   ].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
   const open = (detail.threads || []).filter(t => !t.resolved).length;
   return `<div class="gh-sec gh-timeline"><div class="gh-sec-h">Conversation <span class="gh-muted">${entries.length}${open ? `, ${open} unresolved thread${open === 1 ? '' : 's'}` : ''}</span></div>`
     + (entries.length ? entries.map(e => e.html).join('') : '<div class="gh-muted">No comments.</div>')
+    + githubPanelComposerHtml(state, key)
     + '</div>';
 }
 
@@ -1434,6 +1461,9 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
   split.classList.add('has-panel');
 
   const scroll = resetScroll ? 0 : panel.scrollTop;
+  // A live repaint must not take the cursor out of a comment being typed.
+  const typing = panel.querySelector('.gh-composer-input:focus');
+  const caret = typing ? { reply: typing.closest('.gh-composer').dataset.reply, at: typing.selectionStart } : null;
   const key = selectedDetailKey(state);
   const detail = state.details.get(key);
   const loading = state.detailLoading.has(key);
@@ -1491,6 +1521,10 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
     ${tabs}
     <div class="gh-panel-body">${body}</div>`;
   panel.scrollTop = scroll;
+  if (caret) {
+    const input = [...panel.querySelectorAll('.gh-composer')].find(c => c.dataset.reply === caret.reply)?.querySelector('.gh-composer-input');
+    if (input) { input.focus({ preventScroll: true }); input.setSelectionRange(caret.at, caret.at); }
+  }
 
   panel.querySelector('#gh-panel-close').onclick = () => closeGithubPanel(project);
   panel.querySelector('#gh-panel-refresh').onclick = () => loadGithubDetail(project);
@@ -1515,6 +1549,7 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
       state.open.set(fold.dataset.key, fold.classList.toggle('collapsed') === false);
     };
   });
+  if (detail && !detail.error) bindGithubPanelComments(project, panel, detail);
   panel.querySelectorAll('.gh-thread').forEach(t => {
     // Only a choice that differs from the default is kept, so a thread
     // resolved later still folds shut (toggle also fires on first paint).
@@ -1664,6 +1699,74 @@ function bindGithubPrActions(project, panel, pr) {
       paintGithubPanel(project);
     };
   }
+}
+
+// --- Commenting from the panel: new comments, replies, resolving threads ---
+
+/** Posts the open composer's text: a reply to its thread, or a new comment. */
+async function postGithubPanelComment(project, detail) {
+  const state = githubTabState(project.id);
+  const c = state.panelComposer;
+  if (!c || c.sending || !c.draft.trim()) return;
+  c.sending = true;
+  c.error = null;
+  paintGithubPanel(project);
+  const target = githubTarget(`${detail.repo}#${detail.number}`);
+  const result = c.replyTo
+    ? await window.api.replyGithubReviewComment(target, c.replyTo, c.draft)
+    : await window.api.addGithubComment(target, c.draft);
+  if (result?.error) { c.sending = false; c.error = result.error; paintGithubPanel(project); return; }
+  state.panelComposer = null;
+  await loadGithubDetail(project, { quiet: true });
+  paintGithubPanel(project);
+}
+
+async function setGithubPanelThreadResolved(project, threadId, resolved) {
+  const state = githubTabState(project.id);
+  state.busy = `thread:${threadId}`;
+  paintGithubPanel(project);
+  const result = await window.api.setGithubThreadResolved(threadId, resolved);
+  state.busy = null;
+  state.notice = result?.error ? { kind: 'bad', text: result.error } : null;
+  await loadGithubDetail(project, { quiet: true });
+  paintGithubPanel(project);
+}
+
+function bindGithubPanelComments(project, panel, detail) {
+  const state = githubTabState(project.id);
+  const key = `${detail.repo}#${detail.number}`;
+  panel.querySelectorAll('.gh-reply-btn[data-reply-to]').forEach(btn => {
+    btn.onclick = () => {
+      state.panelComposer = { key, replyTo: Number(btn.dataset.replyTo), draft: '' };
+      paintGithubPanel(project);
+      panel.querySelector(`.gh-composer[data-reply="${btn.dataset.replyTo}"] .gh-composer-input`)?.focus();
+    };
+  });
+  panel.querySelectorAll('.gh-thread-resolve').forEach(btn => {
+    btn.onclick = (e) => {
+      // Inside the thread's summary: do not fold it as well.
+      e.preventDefault();
+      e.stopPropagation();
+      setGithubPanelThreadResolved(project, btn.dataset.thread, btn.dataset.resolve === 'true');
+    };
+  });
+  panel.querySelectorAll('.gh-composer--panel').forEach(box => {
+    const replyTo = box.dataset.reply ? Number(box.dataset.reply) : null;
+    const input = box.querySelector('.gh-composer-input');
+    // Typing into a composer makes it the open one (the bottom box is always there).
+    const own = () => {
+      if (!githubPanelComposer(state, key, replyTo)) state.panelComposer = { key, replyTo, draft: input.value };
+      return state.panelComposer;
+    };
+    input.oninput = () => { own().draft = input.value; };
+    input.onkeydown = (e) => {
+      if (e.key === 'Escape' && replyTo) { e.preventDefault(); e.stopPropagation(); state.panelComposer = null; paintGithubPanel(project); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); box.querySelector('[data-act="send-comment"]').click(); }
+    };
+    const cancel = box.querySelector('[data-act="cancel-comment"]');
+    if (cancel) cancel.onclick = () => { state.panelComposer = null; paintGithubPanel(project); };
+    box.querySelector('[data-act="send-comment"]').onclick = () => { own().draft = input.value; postGithubPanelComment(project, detail); };
+  });
 }
 
 /** On a file-based Plan tab: make a GitHub tracking issue or Project the plan. */

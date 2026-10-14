@@ -7846,6 +7846,11 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-rc-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
 .gh-rc-h a { text-decoration: none; }
 .gh-reply-btn { margin-top: 4px; }
+/* The PR panel's composers: the new comment under the conversation, a reply in its thread. */
+.gh-composer--panel { margin: 10px 0 0; max-width: none; }
+.gh-thread .gh-composer--panel { margin: 6px 0 4px; padding: 0; border: 0; background: none; }
+.gh-thread-resolve { flex-shrink: 0; }
+.gh-thread-resolve[disabled] { opacity: 0.45; cursor: not-allowed; }
 .gh-composer-input { width: 100%; box-sizing: border-box; min-height: 64px; padding: 8px; resize: vertical; font: 12.5px/1.45 -apple-system, BlinkMacSystemFont, sans-serif; }
 .gh-composer-acts { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .gh-composer-error { margin-top: 4px; font-size: 11.5px; }

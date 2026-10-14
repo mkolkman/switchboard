@@ -862,7 +862,7 @@ async function getPullRequest(owner, repo, number) {
         comments(last: 50) { nodes { ${COMMENT_FIELDS} } }
         reviews(last: 30) { nodes { author { login } state body submittedAt url } }
         mine: reviews(last: 20, author: $me) { nodes { state body submittedAt commit { oid } } }
-        reviewThreads(last: 50) { nodes { isResolved isOutdated path line comments(first: 20) { nodes { ${COMMENT_FIELDS} } } } }
+        reviewThreads(last: 50) { nodes { id isResolved isOutdated path line comments(first: 20) { nodes { databaseId ${COMMENT_FIELDS} } } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
           ... on CheckRun { name status conclusion detailsUrl isRequired(pullRequestNumber: $number) }
@@ -915,9 +915,10 @@ async function getPullRequest(owner, repo, number) {
       ...(pr.comments?.nodes || []).map(c => ({ kind: 'comment', author: c.author?.login || 'ghost', body: c.body, at: c.createdAt, url: c.url })),
       ...(pr.reviews?.nodes || []).filter(rv => rv.body).map(rv => ({ kind: 'review', state: rv.state, author: rv.author?.login || 'ghost', body: rv.body, at: rv.submittedAt, url: rv.url })),
     ].sort((a, b) => new Date(a.at) - new Date(b.at)),
+    // id resolves the thread; a comment's id is what a reply goes to (REST).
     threads: (pr.reviewThreads?.nodes || []).map(t => ({
-      path: t.path, line: t.line, resolved: t.isResolved, outdated: t.isOutdated,
-      comments: (t.comments?.nodes || []).map(c => ({ author: c.author?.login || 'ghost', body: c.body, at: c.createdAt, url: c.url })),
+      id: t.id, path: t.path, line: t.line, resolved: t.isResolved, outdated: t.isOutdated,
+      comments: (t.comments?.nodes || []).map(c => ({ id: c.databaseId, author: c.author?.login || 'ghost', body: c.body, at: c.createdAt, url: c.url })),
     })),
     checks: {
       state: commit?.statusCheckRollup?.state || null,
@@ -1383,6 +1384,21 @@ async function replyToReviewComment(owner, repo, number, commentId, body) {
   return { ok: true, id: c.id };
 }
 
+/** A comment on the conversation of an issue or PR (PRs share the issue comments endpoint). */
+async function addComment(owner, repo, number, body) {
+  const text = String(body || '').trim();
+  if (!text) throw new Error('A comment needs some text.');
+  const c = await rest('POST', `/repos/${owner}/${repo}/issues/${number}/comments`, { body: text });
+  return { ok: true, id: c.id };
+}
+
+async function setThreadResolved(threadId, resolved) {
+  if (!threadId) throw new Error('This thread has no id; refresh and try again.');
+  const mutation = resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
+  await graphql(`mutation($id: ID!) { ${mutation}(input: { threadId: $id }) { thread { isResolved } } }`, { id: String(threadId) });
+  return { ok: true };
+}
+
 /**
  * The GitHub view's two lists: open PRs you opened, and open PRs that ask for
  * your review. Shaped like a tracker's items (one PR each), so the PR panel
@@ -1440,7 +1456,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,
