@@ -102,6 +102,8 @@
     // Global-only: where new projects get their folder (projects.js). Empty
     // means the default, ~/Switchboard.
     const projectsRootValue = (!isProject && typeof current.projectsRoot === 'string') ? current.projectsRoot : '';
+    // Global-only: where a quick session starts (sidebar-keyboard.js).
+    const quickSessionPathValue = (!isProject && typeof current.quickSessionPath === 'string') ? current.quickSessionPath : '';
     const shellProfileValue = fieldValue('shellProfile', 'auto');
     // Global-only: the Notion todo list (notion-todo.js). The token itself
     // never comes back from main, only whether one is saved.
@@ -309,6 +311,16 @@
 
         <div class="settings-field">
           <div class="settings-field-info">
+            <span class="settings-label">Quick Session Folder</span>
+            <div class="settings-description">Where the lightning button, ${isMac ? '\u2318N' : 'Ctrl+N'} and N (outside a session) start Claude straight away: a full path. Empty hides the button.</div>
+          </div>
+          <div class="settings-field-control">
+            <input type="text" class="settings-input" id="sv-quick-session-path" placeholder="/Users/you/Sources" value="${escapeHtml(quickSessionPathValue)}" spellcheck="false">
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <div class="settings-field-info">
             <span class="settings-label">Projects Folder</span>
             <div class="settings-description">Where new projects are created. Existing projects stay where they are.</div>
           </div>
@@ -496,6 +508,7 @@
         settings.mcpEmulation = settingsViewerBody.querySelector('#sv-mcp-emulation').checked;
         settings.shellProfile = settingsViewerBody.querySelector('#sv-shell-profile').value || 'auto';
         settings.projectsRoot = settingsViewerBody.querySelector('#sv-projects-root').value.trim();
+        settings.quickSessionPath = settingsViewerBody.querySelector('#sv-quick-session-path').value.trim();
         settings.customers = parseCustomerMapping(settingsViewerBody.querySelector('#sv-customers').value);
       }
 
@@ -528,6 +541,7 @@
           window._setSessionMaxAge(settings.sessionMaxAgeDays);
         }
         if (typeof window._setCustomerMapping === 'function') window._setCustomerMapping(settings.customers);
+        if (typeof syncQuickSessionButton === 'function') syncQuickSessionButton();
         if (settings.terminalTheme && typeof window._applyTerminalTheme === 'function') {
           window._applyTerminalTheme(settings.terminalTheme);
         }

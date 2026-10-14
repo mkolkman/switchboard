@@ -79,6 +79,12 @@ function setupTerminalKeyBindings(terminal, container, getSessionId, { onFind } 
       return false;
     }
 
+    // Cmd+A picker, Cmd+E archive, Cmd+N quick session (sidebar-keyboard.js).
+    if (e.type === 'keydown' && typeof handleSessionShortcut === 'function' && handleSessionShortcut(e)) {
+      e._handled = true;
+      return false;
+    }
+
     // Session navigation: Cmd+Shift+[/], Cmd+Arrow
     if (isSessionNavKey(e)) {
       if (e.type === 'keydown') { e._handled = true; handleSessionNavKey(e); }

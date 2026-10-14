@@ -2916,6 +2916,8 @@ body { display: flex; flex-direction: column; }
 }
 
 /* ========== ADD PROJECT BUTTON ========== */
+#quick-session-btn[hidden] { display: none; }
+#quick-session-btn,
 #new-session-btn,
 #group-mode-btn,
 #grid-toggle-btn,
@@ -2940,18 +2942,13 @@ body { display: flex; flex-direction: column; }
 }
 
 #group-mode-btn { margin-left: auto; }
+#quick-session-btn,
 #new-session-btn,
 #grid-toggle-btn,
 #resort-btn,
 #add-project-btn { margin-left: 3px; }
 
-/* New session carries a chevron: it opens a menu, not a session. */
-#new-session-btn {
-  width: auto;
-  padding: 0 4px 0 5px;
-  gap: 1px;
-}
-
+#quick-session-btn:hover,
 #new-session-btn:hover,
 #group-mode-btn:hover,
 #grid-toggle-btn:hover,
