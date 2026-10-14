@@ -53,6 +53,18 @@ function decodeOsc52Payload(payload) {
   return new TextDecoder().decode(bytes);
 }
 
+// A modified Enter as the kitty CSI-u sequence Claude Code expects, or null
+// when it is not one we translate (plain Enter, or with Alt or Cmd, goes to
+// xterm). A terminal cannot tell these apart from a bare \r otherwise.
+//   Shift+Enter → CSI 13;2u : a newline instead of submit.
+//   Ctrl+Enter  → CSI 13;5u : "send now" (a queued message, mid-turn).
+function enterKittySequence(e) {
+  if (e.key !== 'Enter' || e.altKey || e.metaKey) return null;
+  if (e.shiftKey && !e.ctrlKey) return '\x1b[13;2u';
+  if (e.ctrlKey && !e.shiftKey) return '\x1b[13;5u';
+  return null;
+}
+
 function setupTerminalKeyBindings(terminal, container, getSessionId, { onFind } = {}) {
   terminal.attachCustomKeyEventHandler((e) => {
     // Cmd/Ctrl+F → open terminal search bar
@@ -73,19 +85,11 @@ function setupTerminalKeyBindings(terminal, container, getSessionId, { onFind } 
       return false;
     }
 
-    // Shift+Enter → newline (kitty protocol CSI 13;2u) so Claude Code treats it as newline, not submit.
-    if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    // Shift+Enter and Ctrl+Enter → their kitty sequences (enterKittySequence).
+    const enterSequence = enterKittySequence(e);
+    if (enterSequence) {
       if (e.type === 'keydown') {
-        window.api.sendInput(getSessionId(), '\x1b[13;2u');
-      }
-      return false;
-    }
-
-    // Ctrl+Enter → newline on Windows/Linux (matches PowerShell convention).
-    // Send the same Shift+Enter kitty sequence that Claude Code recognizes as newline.
-    if (!isMac && e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-      if (e.type === 'keydown') {
-        window.api.sendInput(getSessionId(), '\x1b[13;2u');
+        window.api.sendInput(getSessionId(), enterSequence);
       }
       return false;
     }
@@ -132,7 +136,7 @@ function setupTerminalKeyBindings(terminal, container, getSessionId, { onFind } 
   const textarea = container.querySelector('.xterm-helper-textarea');
   if (textarea) {
     textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.shiftKey || (!isMac && e.ctrlKey)) && !e.altKey && !e.metaKey) {
+      if (enterKittySequence(e)) {
         e.preventDefault();
       }
     }, { capture: true });
@@ -713,7 +717,7 @@ function setupDragAndDrop(container, getSessionId) {
 // browser, where this file is loaded as a plain <script> and `module` is undefined.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    isImeComposing, shouldSendSpaceDirectly, decodeOsc52Payload, wasIntentionalExit,
+    isImeComposing, shouldSendSpaceDirectly, enterKittySequence, decodeOsc52Payload, wasIntentionalExit,
     terminalBufferText, restoredTerminalHistoryAnsi,
     persistedTerminalRecord, parsePersistedTerminalSessions, forgetTerminalHistory,
   };

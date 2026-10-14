@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { shouldSendSpaceDirectly } = require('../public/terminal-manager');
+const { shouldSendSpaceDirectly, enterKittySequence } = require('../public/terminal-manager');
 
 // Build a keydown-like event with sensible defaults (plain Space, no IME).
 function kd(overrides = {}) {
@@ -45,4 +45,24 @@ test('Space combined with a modifier is not the push-to-talk path', () => {
 
 test('non-Space keys are never on the direct-send path', () => {
   assert.equal(shouldSendSpaceDirectly(kd({ key: 'a', keyCode: 65 })), false);
+});
+
+// A modified Enter, as enterKittySequence sees it.
+function enter(overrides = {}) {
+  return { key: 'Enter', ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...overrides };
+}
+
+test('Shift+Enter is a newline (CSI 13;2u), Ctrl+Enter is "send now" (CSI 13;5u)', () => {
+  assert.equal(enterKittySequence(enter({ shiftKey: true })), '\x1b[13;2u');
+  // On macOS Ctrl+Enter used to reach xterm as a bare \r, which Claude Code
+  // cannot tell from Enter, so "send now" never fired.
+  assert.equal(enterKittySequence(enter({ ctrlKey: true })), '\x1b[13;5u');
+});
+
+test('plain Enter, Enter with Alt or Cmd, and Ctrl+Shift+Enter go to xterm', () => {
+  assert.equal(enterKittySequence(enter()), null);
+  assert.equal(enterKittySequence(enter({ altKey: true })), null);
+  assert.equal(enterKittySequence(enter({ metaKey: true })), null);
+  assert.equal(enterKittySequence(enter({ ctrlKey: true, shiftKey: true })), null);
+  assert.equal(enterKittySequence(enter({ key: 'a', ctrlKey: true })), null);
 });
