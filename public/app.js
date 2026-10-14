@@ -1432,6 +1432,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
       memoryContent.style.display = '';
       loadMemories();
     }
+    renderSidebarRail();
   });
 });
 
@@ -1459,7 +1460,7 @@ initGridObservers();
   const collapseBtn = document.getElementById('sidebar-collapse-btn');
   const expandBtn = document.getElementById('sidebar-expand-btn');
 
-  collapseBtn.addEventListener('click', () => sidebar.classList.add('collapsed'));
+  collapseBtn.addEventListener('click', () => { sidebar.classList.add('collapsed'); renderSidebarRail(); });
   expandBtn.addEventListener('click', () => sidebar.classList.remove('collapsed'));
 }
 

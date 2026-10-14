@@ -203,6 +203,7 @@ function renderTodoViewList() {
   todoViewContent.querySelectorAll('.tdv-nav').forEach(nav => {
     nav.onclick = () => todoViewer.querySelector(`.tdv-section[data-section="${CSS.escape(nav.dataset.section)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   });
+  if (typeof renderSidebarRail === 'function') renderSidebarRail();
 }
 
 /** A todo's text: its links, and GitHub links as chips that know their state and plan. */

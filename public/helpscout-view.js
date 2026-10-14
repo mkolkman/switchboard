@@ -266,6 +266,7 @@ function renderHelpscoutViewList() {
   });
   helpscoutViewContent.querySelectorAll('[data-conv]').forEach(row => { row.onclick = () => openHelpscoutConversation(Number(row.dataset.conv)); });
   helpscoutViewContent.querySelectorAll('[data-sug-conv]').forEach(row => { row.onclick = () => openHelpscoutConversation(Number(row.dataset.sugConv)); });
+  if (typeof renderSidebarRail === 'function') renderSidebarRail();
 }
 
 // --- One conversation ---

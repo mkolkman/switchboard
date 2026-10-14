@@ -414,6 +414,7 @@ function renderProjects(projects, resort) {
   if (activeSessionId && openSessions.has(activeSessionId) && !isUserTyping && !listHasKeyboard) {
     openSessions.get(activeSessionId).terminal.focus();
   }
+  if (typeof renderSidebarRail === 'function') renderSidebarRail();
 }
 
 // Folder mode: one group per folder, Claude worktrees nested under their parent.

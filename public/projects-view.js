@@ -856,6 +856,7 @@ function renderProjectList() {
   const all = tree?.projects || [];
   projectsUi.snoozedKey = projectSnoozedKey(all);
   armProjectWakeTimer(all);
+  if (typeof renderSidebarRail === 'function') renderSidebarRail();
 }
 
 function bindProjectList() {

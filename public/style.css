@@ -1378,9 +1378,33 @@ body { display: flex; flex-direction: column; }
   min-width: 42px;
   max-width: 42px;
 }
-#sidebar.collapsed > *:not(#sidebar-expand-btn) {
+#sidebar.collapsed > *:not(#sidebar-expand-btn, #sidebar-rail) {
   display: none;
 }
+
+/* ---- The collapsed rail (sidebar-rail.js): the mode, then its short list ---- */
+#sidebar-rail { display: none; }
+#sidebar.collapsed #sidebar-rail { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; min-height: 0; padding: 6px 0 10px; }
+.rail-mode { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: none; border-radius: 8px; background: rgba(128,136,255,0.14); color: #c0c4ff; cursor: pointer; flex-shrink: 0; }
+.rail-mode:hover { background: rgba(128,136,255,0.24); }
+.rail-list { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; flex: 1; min-height: 0; overflow-y: auto; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06); scrollbar-width: none; }
+.rail-list::-webkit-scrollbar { display: none; }
+.rail-item { position: relative; display: flex; align-items: center; justify-content: center; width: 32px; min-height: 30px; padding: 0; border: none; border-radius: 7px; background: transparent; color: #a0a0b8; font: inherit; cursor: pointer; flex-shrink: 0; }
+.rail-item:hover { background: rgba(255,255,255,0.06); color: #e0e0f0; }
+.rail-item.active { background: rgba(128,136,255,0.16); color: #d0d4ff; box-shadow: inset 2px 0 0 #8088ff; }
+.rail-item .proj-mark { border-radius: 7px; }
+.rail-initials { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
+.rail-dot { position: absolute; right: 3px; bottom: 4px; width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.rail-dot--needs { background: #e0a830; }
+.rail-dot--working { background: #8088ff; }
+.rail-dot--ready { background: #7ee2a0; }
+.rail-dot--idle { background: #4ec98f; opacity: 0.6; }
+.rail-num { font-size: 9.5px; font-weight: 600; letter-spacing: -0.02em; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; color: #9aa2ff; }
+.rail-num--mine { color: #7ee2a0; }
+.rail-num--assigned { color: #8a8aa0; }
+.rail-todo { flex-direction: column; min-height: 38px; gap: 1px; }
+.rail-emoji { font-size: 16px; line-height: 1; }
+.rail-count { font-size: 9.5px; font-weight: 700; color: #8a8aa0; }
 #sidebar.collapsed #sidebar-expand-btn {
   display: flex;
 }

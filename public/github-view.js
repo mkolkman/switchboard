@@ -101,6 +101,7 @@ function renderGithubViewList() {
   githubViewContent.querySelectorAll('.gh-pr[data-pr]').forEach(chip => {
     chip.onclick = (e) => { e.stopPropagation(); openGithubViewItem(chip.dataset.item, chip.dataset.pr); };
   });
+  if (typeof renderSidebarRail === 'function') renderSidebarRail();
 }
 
 function openGithubViewItem(itemKey, prKey) {
