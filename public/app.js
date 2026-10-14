@@ -778,6 +778,8 @@ async function confirmAndStopSession(sessionId) {
     setActiveSession(null);
     terminalHeader.style.display = 'none';
     placeholder.style.display = '';
+    // A session on a Help Scout ticket hands the screen back to that ticket.
+    if (typeof returnToHelpscoutTicket === 'function') returnToHelpscoutTicket(sessionId);
   }
   refreshSidebar();
 }
