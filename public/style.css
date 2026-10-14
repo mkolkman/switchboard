@@ -7314,7 +7314,8 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-viewtoggle .ws-ghost.active { background: rgba(120,130,255,0.16); color: #c0c4ff; }
 
 /* The graph: a column per phase, arrows from a blocker to what it blocks. */
-.gh-graph { position: relative; overflow-x: auto; padding: 8px 14px 14px; }
+/* Room on the left for arrows within the first column, which bend out that way. */
+.gh-graph { position: relative; overflow-x: auto; padding: 8px 14px 14px 26px; }
 .gh-graph::-webkit-scrollbar { height: 8px; }
 .gh-graph::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
 .gh-graph::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }

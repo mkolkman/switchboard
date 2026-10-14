@@ -412,11 +412,12 @@ function drawGithubGraphEdges(graph) {
     if (drawn.has(pair)) return '';
     drawn.add(pair);
     const a = at(from), b = at(to);
-    // Same column: out of the right side and back in. Otherwise right to left.
-    const x1 = a.r, y1 = a.y, x2 = e.same ? b.r : b.l, y2 = b.y;
-    const bend = e.same ? 28 : Math.max(24, Math.abs(x2 - x1) / 2);
-    const c1 = x1 + bend, c2 = e.same ? x2 + bend : x2 - bend;
-    const head = e.same ? `M${x2 + 6},${y2 - 4} L${x2},${y2} L${x2 + 6},${y2 + 4}` : `M${x2 - 6},${y2 - 4} L${x2},${y2} L${x2 - 6},${y2 + 4}`;
+    // Same column: out of the left side and back in, in the gap before it.
+    // Otherwise from the blocker's right side to the blocked one's left.
+    const x1 = e.same ? a.l : a.r, y1 = a.y, x2 = b.l, y2 = b.y;
+    const bend = e.same ? 20 : Math.max(24, Math.abs(x2 - x1) / 2);
+    const c1 = e.same ? x1 - bend : x1 + bend, c2 = x2 - bend;
+    const head = `M${x2 - 6},${y2 - 4} L${x2},${y2} L${x2 - 6},${y2 + 4}`;
     const closed = from.classList.contains('gh-gcard--done') || from.classList.contains('gh-gstub');
     const cls = `gh-gedge${e.back ? ' gh-gedge--back' : ''}${closed ? ' gh-gedge--met' : ''}`;
     return `<g class="${cls}" data-from="${escapeHtml(e.from)}" data-to="${escapeHtml(e.to)}"><path d="M${x1},${y1} C${c1},${y1} ${c2},${y2} ${x2},${y2}"/><path d="${head}"/></g>`;
