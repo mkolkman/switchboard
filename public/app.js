@@ -742,6 +742,20 @@ function dismissSession(sessionId) {
   refreshSidebar();
 }
 
+/**
+ * An archived session leaves the screen: its terminal is torn down rather than
+ * staying behind with an exit banner for a session that is no longer listed.
+ */
+function closeArchivedSession(sessionId) {
+  if (openSessions.has(sessionId)) destroySession(sessionId);
+  else forgetTerminalHistory(sessionId);
+  if (activeSessionId === sessionId && !gridViewActive) {
+    setActiveSession(null);
+    terminalHeader.style.display = 'none';
+    placeholder.style.display = '';
+  }
+}
+
 async function confirmAndStopSession(sessionId) {
   if (!confirm('Stop this session?')) return;
   await window.api.stopSession(sessionId);

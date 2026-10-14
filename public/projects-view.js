@@ -538,7 +538,7 @@ async function toggleArchiveSession(session) {
   const newVal = session.archived ? 0 : 1;
   if (newVal && activePtyIds.has(session.sessionId)) { await window.api.stopSession(session.sessionId); pollActiveSessions(); }
   await window.api.archiveSession(session.sessionId, newVal);
-  if (newVal) forgetTerminalHistory(session.sessionId);
+  if (newVal) closeArchivedSession(session.sessionId);
   session.archived = newVal;
   loadProjects();
 }
@@ -3441,7 +3441,7 @@ async function deleteTrackFlow(project, track) {
     session.formerTrackName = result.formerTrackName;
     if (choice.archiveSessions) {
       session.archived = 1;
-      forgetTerminalHistory(session.sessionId);
+      closeArchivedSession(session.sessionId);
       if (session.type === 'terminal') forgetPersistedTerminalSession(session.sessionId);
     } else if (session.type === 'terminal') persistTerminalSession(session);
   }
