@@ -153,6 +153,13 @@ function githubMineMark(pr) {
   return { kind, text: kind === 'reviewed' ? 'Reviewed by you' : `Changed since your review${files ? ` (${files} file${files === 1 ? '' : 's'})` : ''}` };
 }
 
+/** The open PRs that work on an issue (links that only mention it count when there is nothing else). */
+function githubOpenPrKeys(item) {
+  const all = item.pullRequests || [];
+  const direct = all.filter(p => p.link !== 'mentions');
+  return (direct.length ? direct : all).filter(p => p.state === 'OPEN').map(p => `${p.repo}#${p.number}`);
+}
+
 function githubItemKey(item) {
   return item.number ? `${item.repo}#${item.number}` : `draft:${item.title}`;
 }
@@ -380,7 +387,7 @@ function bindGithubPlanActions(project, list, state) {
     btn.onclick = (e) => {
       e.stopPropagation();
       const found = rowItem(btn);
-      if (found) showGithubStartMenu(project, { repo: found.item.repo, prompt: githubItemPrompt(found.result, found.item), itemText: `${found.item.repo}#${found.item.number}` }, btn);
+      if (found) showGithubStartMenu(project, { repo: found.item.repo, prompt: githubItemPrompt(found.result, found.item), itemText: `${found.item.repo}#${found.item.number}`, prs: githubOpenPrKeys(found.item) }, btn);
     };
   });
   list.querySelectorAll('.gh-act-more').forEach(btn => {
@@ -815,7 +822,76 @@ async function resolveConflictsWithClaude(project, pr) {
   }
 }
 
+// --- Sessions on a PR: review it, work through its review, or talk about it ---
+
+// The session never touches the main checkout: the same rule as conflictPrompt.
+const prWorktreeLine = (pr) => `Work in a git worktree for \`${pr.headRef}\` under \`.worktrees/\` in this repository (reuse one if it already exists, after \`git fetch origin\`), never in the main checkout.`;
+
+const PR_SESSION_KINDS = {
+  // A fresh session has not seen the implementation, which is what a review needs.
+  review: {
+    label: 'Review',
+    hint: 'review-pr, comments on GitHub',
+    running: 'Reviewing',
+    focus: false,
+    prompt: (pr) => `/movelab-claude-skills:review-pr ${pr.url}\n\nTo read the code at the PR's head: ${prWorktreeLine(pr)}`,
+  },
+  resolve: {
+    label: 'Work through the review',
+    hint: 'resolve-pr-reviews',
+    running: 'Working through the review',
+    focus: false,
+    prompt: (pr) => `/movelab-claude-skills:resolve-pr-reviews ${pr.url}\n\nBefore you start: ${prWorktreeLine(pr)} Make sure it is at \`origin/${pr.headRef}\`, and run everything from there.`,
+  },
+  // You type the instruction yourself, so this one comes to the front.
+  context: {
+    label: 'Session on this PR',
+    hint: 'loads the PR, then waits',
+    running: 'On this PR',
+    focus: true,
+    prompt: (pr) => [
+      `Context: pull request ${pr.repo}#${pr.number} (${pr.url}): "${pr.title}", branch \`${pr.headRef}\` into \`${pr.baseRef}\`.`,
+      `Read it first, review comments included: \`gh pr view ${pr.number} -R ${pr.repo} --comments\` and \`gh pr diff ${pr.number} -R ${pr.repo}\`.`,
+      `${prWorktreeLine(pr)} Changes go on that branch and are pushed to it.`,
+      '',
+      'Then tell me in a few lines what the PR does and where it stands, and wait for my instruction.',
+    ].join('\n'),
+  },
+};
+
+/** Context-menu rows that start each kind of session on an open PR. */
+function prSessionMenuRows(project, prKey, { unresolved, itemKey } = {}) {
+  return Object.entries(PR_SESSION_KINDS).map(([kind, k]) => ({
+    label: k.label,
+    hint: kind === 'resolve' && unresolved ? `${unresolved} open thread${unresolved === 1 ? '' : 's'}` : k.hint,
+    icon: ICONS.claude(14),
+    onClick: () => startPrSessionByKey(project, prKey, kind, itemKey),
+  }));
+}
+
+/**
+ * Start a kind of session on a PR by its key, reading the PR first when it is
+ * not on screen. Started from the list (itemKey) in the background, the PR
+ * opens in the panel, where the session's status shows.
+ */
+async function startPrSessionByKey(project, prKey, kind, itemKey) {
+  const state = githubTabState(project.id);
+  let pr = state.details.get(`pr:${prKey}`);
+  if (!pr || pr.error || !pr.headRef) {
+    pr = await window.api.getGithubPullRequest(githubTarget(prKey)).catch(err => ({ error: err?.message || String(err) }));
+    if (!pr || pr.error) { alert(`Could not read ${prKey}: ${pr?.error || 'no answer from GitHub.'}`); return; }
+  }
+  const k = PR_SESSION_KINDS[kind];
+  await startPrSession(project, pr, state, { prompt: k.prompt(pr), label: k.running, focus: k.focus });
+  if (itemKey && !k.focus && state.selection?.view !== prKey) selectGithubItem(project, itemKey, prKey);
+  else if (state.selection) paintGithubPanel(project);
+}
+
 async function startConflictSession(project, pr, state) {
+  return startPrSession(project, pr, state, { prompt: conflictPrompt(pr), label: 'Resolving conflicts', focus: false });
+}
+
+async function startPrSession(project, pr, state, { prompt, label, focus }) {
   let clone = await findLocalClone(project, pr.repo);
   if (!clone) {
     if (!confirm(`No local clone of ${pr.repo} found.\n\nPick the folder where it is checked out?`)) return;
@@ -835,20 +911,20 @@ async function startConflictSession(project, pr, state) {
   const target = project.isGithubView ? { projectPath: clone } : { ...launchTargetFor(project, null), projectPath: clone };
   const options = await resolveDefaultSessionOptions(target);
   options.runtime = 'claude';
-  options.initialPrompt = conflictPrompt(pr);
+  options.initialPrompt = prompt;
   // The session makes its own worktree under .worktrees/ (see the prompt).
   delete options.worktree;
   delete options.worktreeName;
-  // Linked to the PR (as a plan item, so it survives a restart) and started in
-  // the background: the PR stays on screen, with the session's status in it.
+  // Linked to the PR (as a plan item, so it survives a restart). In the
+  // background the PR stays on screen, with the session's status in it.
   const prKey = `${pr.repo}#${pr.number}`;
   if (!project.isGithubView) options.planItem = { file: 'todos', itemText: prKey };
   state.notice = null;
-  const sessionId = await launchNewSession(target, options, { focus: false });
+  const sessionId = await launchNewSession(target, options, { focus });
   if (!sessionId) return;
   if (!state.prSessions) state.prSessions = new Map();
   state.prSessions.set(prKey, [sessionId, ...(state.prSessions.get(prKey) || []).filter(id => id !== sessionId)]);
-  prSessionLabels.set(sessionId, 'Resolving conflicts');
+  prSessionLabels.set(sessionId, label);
   // Pick up the stored link for the next restart's list.
   if (!project.isGithubView) loadProjectPlan(project).catch(() => {});
 }
@@ -886,9 +962,10 @@ function currentSession(id) {
   return sessionMap.get(id) || openSessions.get(id)?.session || null;
 }
 
-/** What the session is for, as its heading: sessions on a PR resolve its conflicts. */
+/** What the session is for, as its heading: what it was started for, else its title. */
 function prSessionName(id) {
-  return prSessionLabels.get(id) || 'Resolving conflicts';
+  const session = currentSession(id);
+  return prSessionLabels.get(id) || (session && cleanDisplayName(session.name || session.aiTitle)) || 'Claude on this PR';
 }
 
 function prSessionRowInner(id) {
@@ -914,8 +991,10 @@ function prSessionRowInner(id) {
 
 function githubSessionsSection(project, pr) {
   const ids = prSessionIds(project, `${pr.repo}#${pr.number}`);
-  if (!ids.length) return '';
-  return `<div class="gh-sec gh-sessions"><div class="gh-sec-h">Claude on this PR</div>${ids.map(id =>
+  const open = pr.state === 'OPEN';
+  if (!ids.length && !open) return '';
+  const start = open ? `<button type="button" class="ws-btn gh-pr-session" id="gh-pr-session" title="Start a Claude session on this PR: review it, work through its review, or one that waits for you">${ICONS.claude(13)}<span>Start session</span>${PICONS.chevronDown(11)}</button>` : '';
+  return `<div class="gh-sec gh-sessions"><div class="gh-sec-h">Claude on this PR<span class="ws-flex"></span>${start}</div>${ids.map(id =>
     `<div class="gh-sess-row" data-session="${escapeHtml(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
 }
 
@@ -1256,6 +1335,12 @@ function bindGithubPrActions(project, panel, pr) {
   }
   const resolveBtn = panel.querySelector('#gh-resolve');
   if (resolveBtn) resolveBtn.onclick = () => resolveConflictsWithClaude(project, pr);
+  const sessionBtn = panel.querySelector('#gh-pr-session');
+  if (sessionBtn) {
+    sessionBtn.onclick = (e) => showContextMenu(
+      prSessionMenuRows(project, `${pr.repo}#${pr.number}`, { unresolved: (pr.threads || []).filter(t => !t.resolved).length }),
+      { anchor: e.currentTarget });
+  }
   const methodBtn = panel.querySelector('#gh-merge-method');
   if (methodBtn) {
     methodBtn.onclick = (e) => showContextMenu(pr.mergeMethods.map(m => ({

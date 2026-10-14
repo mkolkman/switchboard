@@ -201,7 +201,17 @@ function showGithubStartMenu(project, spec, anchor) {
     { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: () => launchGithubItem(project, track, 'codex', spec) },
   ];
   const clone = spec.repo ? (githubClones.get(project.id) || {})[spec.repo.toLowerCase()] : null;
-  const items = [{ head: clone ? `Start in ${pathBasename(clone)}` : 'Start a session on this' }, ...rows(null)];
+  // With an open PR the work is done: the PR's sessions come first, and
+  // implementing again sits below them.
+  const prs = spec.prs || [];
+  const items = [];
+  for (const key of prs) {
+    const number = key.slice(key.indexOf('#'));
+    if (prs.length === 1) items.push({ head: `PR ${number}` }, ...prSessionMenuRows(project, key, { itemKey: spec.itemText }));
+    else items.push({ label: `PR ${number}`, icon: PICONS.list(13), submenu: prSessionMenuRows(project, key, { itemKey: spec.itemText }) });
+  }
+  if (prs.length) items.push({ sep: true });
+  items.push({ head: prs.length ? 'Implement again' : clone ? `Start in ${pathBasename(clone)}` : 'Start a session on this' }, ...rows(null));
   const tracks = (project.tracks || []).filter(t => t.status !== 'done');
   if (tracks.length) {
     items.push({ sep: true }, { head: 'In a track' });

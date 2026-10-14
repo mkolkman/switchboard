@@ -7289,6 +7289,9 @@ body { display: flex; flex-direction: column; }
 .gh-unrequest { padding: 0 4px; opacity: 0.55; }
 .gh-unrequest:hover { opacity: 1; }
 .gh-request-review[disabled], .gh-unrequest[disabled] { opacity: 0.35; cursor: not-allowed; }
+/* Starting a session on a PR, in the heading of its sessions. */
+.gh-pr-session { gap: 4px; text-transform: none; letter-spacing: 0; }
+.gh-sessions .gh-sec-h:last-child { margin-bottom: 0; }
 .gh-review { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 10px; }
 .gh-review--approved { color: #6fcf8f; }
 .gh-review--changes { color: #e08a8a; }
