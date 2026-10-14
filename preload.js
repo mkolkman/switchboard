@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld('api', {
   getGithubIssue: (target) => ipcRenderer.invoke('github-issue', target),
   getGithubPullRequestFiles: (target) => ipcRenderer.invoke('github-pr-files', target),
   getMyGithubPullRequests: () => ipcRenderer.invoke('github-my-prs'),
+  getSleepDisabled: () => ipcRenderer.invoke('get-sleep-disabled'),
+  setSleepDisabled: (disabled) => ipcRenderer.invoke('set-sleep-disabled', disabled),
   getHelpscoutInbox: () => ipcRenderer.invoke('helpscout-inbox'),
   getHelpscoutConversation: (id) => ipcRenderer.invoke('helpscout-conversation', id),
   saveHelpscoutDraft: (id, spec) => ipcRenderer.invoke('helpscout-save-draft', id, spec),

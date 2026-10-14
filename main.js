@@ -55,6 +55,7 @@ const { repoInfoForPaths, findLocalClones } = require('./repo-info');
 const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
+const sleepControl = require('./sleep-control');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -795,6 +796,10 @@ ipcMain.handle('github-clone-repo', (_e, repoFull) => {
 ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTracker.mergePullRequest(...ghTarget(t), {
   method: String(opts?.method || ''), expectedHeadOid: String(opts?.expectedHeadOid || ''),
 })));
+// --- IPC: the Mac's sleep switch (sleep-control.js), the status bar's button ---
+ipcMain.handle('get-sleep-disabled', () => sleepControl.isSleepDisabled());
+ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisabled(!!disabled, log));
+
 // --- IPC: Help Scout (helpscout.js) ---
 // Each write is a click in the Help Scout tab. A reply is always a draft:
 // you send it in Help Scout itself.
