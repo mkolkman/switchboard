@@ -7555,6 +7555,8 @@ body.fp-resizing webview { pointer-events: none; }
 @container (max-width: 900px) {
   .gh-split.has-panel { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 0.8fr) minmax(0, 1.2fr); }
   .gh-split.has-panel .gh-panel { margin-top: 2px; }
+  /* The GitHub tab has no list above the panel: it takes the whole height. */
+  .gh-split--solo.has-panel { grid-template-rows: minmax(0, 1fr); }
 }
 /* With the panel open the list drops the assignee and long repo refs. */
 .gh-split.has-panel .gh-item-who { display: none; }
