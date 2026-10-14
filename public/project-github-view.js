@@ -13,6 +13,11 @@
 // An eye: someone has been asked to review this pull request.
 const GITHUB_REQUESTED_ICON = '<svg class="gh-requested" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-label="review requested"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 
+// A person with a check: you marked this pull request reviewed. With a
+// turning arrow instead: its files changed since you did.
+const GITHUB_MINE_REVIEWED_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="reviewed by you"><circle cx="9" cy="7" r="4"/><path d="M2 21v-1.5A4.5 4.5 0 0 1 6.5 15h5a4.5 4.5 0 0 1 4.5 4.5V21"/><path d="m16 11 2 2 4-4"/></svg>';
+const GITHUB_MINE_CHANGED_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="changed since your review"><circle cx="9" cy="7" r="4"/><path d="M2 21v-1.5A4.5 4.5 0 0 1 6.5 15h5a4.5 4.5 0 0 1 4.5 4.5V21"/><path d="M22.5 10a3.5 3.5 0 1 1-1.2-2.6"/><path d="M22 4.5v3h-3"/></svg>';
+
 // Two branches joining, GitHub's mark for a merged pull request.
 const GITHUB_MERGED_ICON = '<svg class="gh-ptab-merged" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="merged"><circle cx="6" cy="5" r="2.6"/><circle cx="6" cy="19" r="2.6"/><circle cx="18" cy="12" r="2.6"/><path d="M6 7.6v8.8"/><path d="M6 7.6c0 2.6 2.4 4.4 5.4 4.4h4"/></svg>';
 
@@ -97,7 +102,7 @@ function githubPrChip(pr, itemKey) {
   const title = `${pr.repo}#${pr.number}: ${pr.title}\n${stateText}${review ? ', ' + review[1].toLowerCase() : ''}, ${linkText}${requested.length ? `\nReview requested from ${requested.join(', ')}` : ''}${mine ? '\n' + mine.text : ''}\nClick to review here`;
   return `<button type="button" class="gh-pr gh-pr--${state}${pr.link === 'mentions' ? ' gh-pr--mention' : ''}" data-item="${escapeHtml(itemKey)}" data-pr="${escapeHtml(`${pr.repo}#${pr.number}`)}" title="${escapeHtml(title)}">`
     + `<span class="gh-pr-num">#${pr.number}</span>`
-    + (mine ? `<span class="gh-mine gh-mine--${mine.kind}">${mine.kind === 'reviewed' ? '✓' : '↻'}you</span>` : '')
+    + (mine ? `<span class="gh-mine gh-mine--${mine.kind}">${mine.kind === 'reviewed' ? GITHUB_MINE_REVIEWED_ICON : GITHUB_MINE_CHANGED_ICON}</span>` : '')
     + (review ? `<span class="gh-review gh-review--${review[0]}">${review[0] === 'approved' ? '✓' : '±'}</span>` : '')
     + (requested.length ? GITHUB_REQUESTED_ICON : '')
     + githubChecksDot(pr.state === 'OPEN' ? pr.checks : null)

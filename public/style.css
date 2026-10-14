@@ -7527,7 +7527,7 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-gedge--lit.gh-gedge--back path { stroke: #ff9a9a; }
 
 /* Your own review on a PR chip, and its row in the panel (github-my-review.js). */
-.gh-mine { font-size: 9.5px; letter-spacing: 0.02em; }
+.gh-mine { display: inline-flex; align-items: center; }
 .gh-mine--reviewed { color: #6fcf8f; }
 .gh-mine--changed { color: #e0b860; }
 .gh-myrev-row code { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; color: #c8c8dc; }
