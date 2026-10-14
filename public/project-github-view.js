@@ -290,6 +290,7 @@ function githubTrackerCard(project, refText, state) {
     // The plan was folded away: this brings it back beside the list.
     + (typeof githubPlanHidden === 'function' && githubPrimaryRef(project) === refText && githubPlanHidden(project) && result.plan
       ? `<button type="button" class="ws-ghost gh-show-plan" title="Show the plan beside the list">Plan</button>` : '')
+    + (result.wayfinder && result.state === 'OPEN' && typeof wayfinderNextButton === 'function' ? wayfinderNextButton(refText) : '')
     + `${refreshBtn}${removeBtn}</div>`
     + `<div class="ws-card-row gh-meta"><span class="ws-card-meta mono">${escapeHtml(result.ref)}</span><span class="ws-flex"></span><span class="ws-card-meta" title="${escapeHtml(fetched)}">${escapeHtml(fetched)}</span></div>`
     + `<div class="ws-card-row"><div class="ws-progress ws-progress--sm"><div class="ws-progress-fill" style="width:${pct}%"></div></div><span class="ws-card-meta">${summary.done}/${summary.total} done</span></div>`
@@ -517,6 +518,7 @@ function paintGithubList(project) {
   list.querySelectorAll('[data-plan-view]').forEach(btn => { btn.onclick = () => setGithubPlanView(project, btn.dataset.planView); });
   bindGithubGraph(project, list);
   list.querySelectorAll('.gh-show-plan').forEach(btn => { btn.onclick = () => setGithubPlanHidden(project, false); });
+  list.querySelectorAll('.wf-next').forEach(btn => { btn.onclick = () => pickWayfinderTicket(project, btn.dataset.ref, btn); });
   list.querySelectorAll('.gh-refresh').forEach(btn => {
     btn.onclick = () => loadGithubTracker(project, btn.dataset.ref, { force: true });
   });

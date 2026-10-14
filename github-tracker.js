@@ -10,6 +10,7 @@ const { execFile } = require('child_process');
 
 const CACHE_MS = 2 * 60 * 1000;
 const ITEM_BATCH = 20;
+const WAYFINDER_MAP_LABEL = 'wayfinder:map';
 const API = 'https://api.github.com/graphql';
 
 // --- References ---
@@ -120,6 +121,7 @@ const ISSUE_FIELDS = `
   } }
   repository { nameWithOwner }
   assignees(first: 5) { nodes { login } }
+  labels(first: 10) { nodes { name } }
   blockedBy(first: 20) { nodes { number title url state repository { nameWithOwner } } }
   blocking(first: 20) { nodes { number title url state repository { nameWithOwner } } }
   closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { ${PR_FIELDS} } }
@@ -328,6 +330,7 @@ function shapeIssue(node) {
     stateReason: node.stateReason || null,
     updatedAt: node.updatedAt,
     assignees: (node.assignees?.nodes || []).map(a => a.login),
+    labels: (node.labels?.nodes || []).map(l => l.name),
     pullRequests: [...prs.values()].sort((a, b) => b.number - a.number),
     // GitHub's "blocked by" relations, both ways (see github-deps.js).
     blockedBy: shapeDeps(node.blockedBy),
@@ -423,6 +426,7 @@ async function fetchTrackingIssue(ref) {
       issue(number: $number) {
         id number title url state stateReason body updatedAt
         repository { nameWithOwner }
+        labels(first: 20) { nodes { name } }
         subIssues(first: 100) { nodes { number repository { owner { login } name } } }
       }
     }
@@ -432,9 +436,11 @@ async function fetchTrackingIssue(ref) {
   // Body links keep the author's order; sub-issues not mentioned there follow.
   const refs = linkedIssueRefs(root.body, ref);
   const known = new Set(refs.map(r => formatRef(r).toLowerCase()));
+  const subIssueKeys = [];
   for (const sub of root.subIssues?.nodes || []) {
     const r = { kind: 'issue', owner: sub.repository.owner.login, repo: sub.repository.name, number: sub.number };
     const key = formatRef(r).toLowerCase();
+    subIssueKeys.push(key);
     if (!known.has(key)) { known.add(key); refs.push(r); }
   }
   const issues = await fetchIssues(refs);
@@ -456,6 +462,10 @@ async function fetchTrackingIssue(ref) {
     // Phases are worked out in the renderer (public/github-phases.js), from
     // one of these fields or from milestones.
     issueFields,
+    // A /wayfinder map: its tickets are the sub-issues, in this order
+    // ("owner/repo#n" in lower case), and the frontier is worked out from them
+    // (public/github-wayfinder.js).
+    wayfinder: (root.labels?.nodes || []).some(l => l.name === WAYFINDER_MAP_LABEL) ? { tickets: subIssueKeys } : null,
   };
 }
 
