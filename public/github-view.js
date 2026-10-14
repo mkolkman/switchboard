@@ -20,7 +20,30 @@ function githubViewItems() {
 /** Put the lists where the PR panel finds its items (findGithubItem). */
 function syncGithubViewResults() {
   const state = githubTabState(GITHUB_VIEW_PROJECT.id);
+  // A PR opened from elsewhere (the Todo tab) stays findable across refreshes.
+  const opened = state.results.get('github-opened');
   state.results = new Map([['github-view', { items: githubViewItems() }]]);
+  if (opened) state.results.set('github-opened', opened);
+}
+
+/**
+ * Open any PR in this tab's panel, also one that is not in its lists.
+ * The panel reads the PR itself; the item here only has to exist.
+ */
+function openGithubViewPullRequest(key, { url = '', title = '' } = {}) {
+  const target = githubTarget(key);
+  if (!target) return;
+  const repo = `${target.owner}/${target.repo}`;
+  const tab = document.querySelector('.sidebar-tab[data-tab="github"]');
+  if (tab && activeTab !== 'github') tab.click();
+  if (!findGithubItem(githubTabState(GITHUB_VIEW_PROJECT.id), key)) {
+    const pr = { repo, number: target.number, title: title || `#${target.number}`, url, state: 'OPEN', link: 'linked' };
+    const opened = githubTabState(GITHUB_VIEW_PROJECT.id).results.get('github-opened') || { items: [] };
+    opened.items = [...opened.items.filter(i => githubItemKey(i) !== key),
+      { repo, number: target.number, title: pr.title, url, isPullRequest: true, pullRequests: [pr], status: 'open' }];
+    githubTabState(GITHUB_VIEW_PROJECT.id).results.set('github-opened', opened);
+  }
+  openGithubViewItem(key, key);
 }
 
 async function loadGithubView({ quiet = false } = {}) {

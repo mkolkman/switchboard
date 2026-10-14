@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, screen, session: electronSession, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, safeStorage, screen, session: electronSession, shell } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
@@ -52,6 +52,7 @@ const { createPreviewWatcher } = require('./preview-urls');
 const { createPreviewMcpServer } = require('./preview-mcp');
 const { repoInfoForPaths, findLocalClones } = require('./repo-info');
 const githubTracker = require('./github-tracker');
+const notionTodo = require('./notion-todo');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -727,6 +728,120 @@ ipcMain.handle('github-clone-repo', (_e, repoFull) => {
 ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTracker.mergePullRequest(...ghTarget(t), {
   method: String(opts?.method || ''), expectedHeadOid: String(opts?.expectedHeadOid || ''),
 })));
+// --- IPC: the Notion todo list (notion-todo.js) ---
+// The token is the first secret Switchboard keeps, so it is stored encrypted
+// with safeStorage and never sent to the renderer.
+const NOTION_TODO_KEY = 'notionTodo';
+const NOTION_TODO_AUTO_KEY = 'notionTodoAutoChecked';
+const NOTION_TODO_POLL_MS = 5 * 60 * 1000;
+function notionTodoConfig() {
+  const saved = getSetting(NOTION_TODO_KEY) || {};
+  let token = null;
+  if (saved.token) {
+    try { token = safeStorage.decryptString(Buffer.from(saved.token, 'base64')); } catch (err) { log.warn('[notion-todo] token unreadable', err.message); }
+  }
+  return { token, pageId: saved.pageId || null };
+}
+const notionPageUrl = (pageId) => (pageId ? `https://www.notion.so/${pageId.replace(/-/g, '')}` : null);
+ipcMain.handle('notion-todo-config', guarded(() => {
+  const { token, pageId } = notionTodoConfig();
+  return { hasToken: !!token, pageId, pageUrl: notionPageUrl(pageId) };
+}));
+// spec.token: a new token, '' to forget it, absent to keep it. spec.page: a page URL or id.
+ipcMain.handle('notion-todo-set-config', guarded((spec = {}) => {
+  const saved = { ...(getSetting(NOTION_TODO_KEY) || {}) };
+  if (typeof spec.token === 'string') {
+    if (!spec.token.trim()) delete saved.token;
+    else {
+      if (!safeStorage.isEncryptionAvailable()) return { error: 'This Mac cannot encrypt the token (safeStorage is unavailable).' };
+      saved.token = safeStorage.encryptString(spec.token.trim()).toString('base64');
+    }
+  }
+  if (spec.page !== undefined) {
+    const pageId = notionTodo.notionId(spec.page);
+    if (spec.page && !pageId) return { error: 'That is not a Notion page link or id.' };
+    if (pageId !== saved.pageId) setSetting(NOTION_TODO_AUTO_KEY, []);
+    saved.pageId = pageId;
+  }
+  setSetting(NOTION_TODO_KEY, saved);
+  return { ok: true };
+}));
+
+// One run at a time: the timer and your edits read and write the same page.
+let notionTodoQueue = Promise.resolve();
+function notionTodoRun(opts) {
+  const run = notionTodoQueue.then(() => notionTodoRefresh(opts));
+  notionTodoQueue = run.catch(() => {});
+  return run;
+}
+/**
+ * Read the page and bring it up to date: apply `edit`, run the new-week
+ * rotation when `rotate`, then check off todos whose GitHub links are all
+ * done. A todo is checked off once: unchecking it by hand sticks.
+ */
+async function notionTodoRefresh({ edit = null, rotate = false } = {}) {
+  const { token, pageId } = notionTodoConfig();
+  if (!token || !pageId) return { ok: true, configured: false, hasToken: !!token, pageId };
+  const api = notionTodo.notionClient(token);
+  let { sections } = await notionTodo.readPage(api, pageId);
+  if (edit) {
+    await notionTodo.applyEdit(api, pageId, sections, edit);
+    ({ sections } = await notionTodo.readPage(api, pageId));
+  }
+  let rotated = null;
+  let weekUnreadable = false;
+  if (rotate) {
+    const plan = notionTodo.rotationPlan(sections, new Date());
+    if (plan?.unreadable) weekUnreadable = true;
+    else if (plan) {
+      rotated = await notionTodo.rotate(api, pageId, sections, plan);
+      log.info(`[notion-todo] new week: ${JSON.stringify(rotated)}`);
+      ({ sections } = await notionTodo.readPage(api, pageId));
+    }
+  }
+  const keys = [];
+  const collect = (item) => { item.refs.forEach(r => keys.push(r.key)); item.children.forEach(collect); };
+  sections.forEach(s => s.items.forEach(collect));
+  let states = {};
+  let githubError = null;
+  if (keys.length) {
+    try { states = await githubTracker.getRefStates(keys); } catch (err) { githubError = err.message; }
+  }
+  const checkedOff = [];
+  if (!githubError) {
+    const done = new Set(getSetting(NOTION_TODO_AUTO_KEY) || []);
+    const stateOf = Object.fromEntries(Object.entries(states).map(([k, v]) => [k, v.state]));
+    for (const item of notionTodo.autoCheckCandidates(sections, stateOf)) {
+      if (done.has(item.id)) continue;
+      await notionTodo.applyEdit(api, pageId, sections, { op: 'check', id: item.id, checked: true });
+      item.checked = true;
+      done.add(item.id);
+      checkedOff.push(item.segments.map(seg => seg.text).join(''));
+    }
+    if (checkedOff.length) {
+      log.info(`[notion-todo] checked off ${checkedOff.length}: ${checkedOff.join(' | ')}`);
+      setSetting(NOTION_TODO_AUTO_KEY, [...done].slice(-500));
+    }
+  }
+  return {
+    ok: true, configured: true, pageId, pageUrl: notionPageUrl(pageId), fetchedAt: new Date().toISOString(),
+    sections: notionTodo.publicSections(sections), states, githubError, rotated, weekUnreadable, checkedOff,
+  };
+}
+ipcMain.handle('notion-todo-load', guarded((opts) => notionTodoRun({ rotate: !!opts?.rotate })));
+ipcMain.handle('notion-todo-edit', guarded((edit) => notionTodoRun({ edit: edit || null })));
+// Checks GitHub in the background too, so a todo is ticked off while the tab is shut.
+function startNotionTodoPoll() {
+  const tick = () => {
+    const { token, pageId } = notionTodoConfig();
+    if (!token || !pageId) return;
+    notionTodoRun({}).then((result) => {
+      if (result.checkedOff?.length && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('notion-todo-changed', result);
+    }).catch(err => log.warn('[notion-todo] background check failed:', err.message));
+  };
+  setTimeout(tick, 30 * 1000);
+  setInterval(tick, NOTION_TODO_POLL_MS);
+}
 ipcMain.handle('get-project-git-status', guarded((id, opts) => projects.folderGitStatus(id, opts || {})));
 ipcMain.handle('get-project-git-info', guarded((id) => projects.projectGitInfo(id)));
 ipcMain.handle('get-project-git-diff', guarded((id, folderPath, filePath) => projects.projectGitDiff(id, folderPath, filePath)));
@@ -2487,6 +2602,7 @@ function startScheduleTicker() {
       if (imported) log.info(`[schedule] Imported ${imported} schedule file(s) as folder schedules`);
     } catch (err) { log.error('[schedule] legacy import failed', err); }
     startScheduleTicker();
+    startNotionTodoPoll();
 
     // Re-index search if FTS table was recreated (e.g. tokenizer config change)
     if (searchFtsRecreated) populateCacheViaWorker();

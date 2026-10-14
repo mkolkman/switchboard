@@ -927,6 +927,27 @@ async function getIssue(owner, repo, number) {
   };
 }
 
+/**
+ * The state and title of issues and PRs by `owner/repo#n` (either kind), keyed
+ * by that text in lower case: { state: OPEN|CLOSED|MERGED, title, isPullRequest }.
+ * Refs GitHub does not find are left out.
+ */
+async function getRefStates(keys) {
+  const refs = [...new Set(keys.map(k => String(k).toLowerCase()))].map(k => ({ key: k, ref: parseRef(k) })).filter(r => r.ref?.kind === 'issue');
+  const out = {};
+  for (let i = 0; i < refs.length; i += ITEM_BATCH) {
+    const batch = refs.slice(i, i + ITEM_BATCH);
+    const data = await graphql(`query {\n${batch.map(({ ref }, j) =>
+      `  r${j}: repository(owner: ${JSON.stringify(ref.owner)}, name: ${JSON.stringify(ref.repo)}) { issueOrPullRequest(number: ${ref.number}) { __typename ... on Issue { state title } ... on PullRequest { state title } } }`
+    ).join('\n')}\n}`);
+    batch.forEach(({ key }, j) => {
+      const node = data?.[`r${j}`]?.issueOrPullRequest;
+      if (node) out[key] = { state: node.state, title: node.title, isPullRequest: node.__typename === 'PullRequest' };
+    });
+  }
+  return out;
+}
+
 /** Turn auto-rebase on or off for a PR: the autorebase:opt-in label. */
 async function setAutorebase(owner, repo, number, on) {
   const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
@@ -1354,7 +1375,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,

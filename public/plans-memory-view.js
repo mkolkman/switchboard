@@ -135,6 +135,7 @@ function hideViewerPanels() {
   settingsViewer.style.display = 'none';
   jsonlViewer.style.display = 'none';
   if (typeof hideGithubView === 'function') hideGithubView();
+  if (typeof hideTodoView === 'function') hideTodoView();
   terminalArea.style.display = '';
 }
 

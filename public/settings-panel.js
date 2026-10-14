@@ -103,6 +103,9 @@
     // means the default, ~/Switchboard.
     const projectsRootValue = (!isProject && typeof current.projectsRoot === 'string') ? current.projectsRoot : '';
     const shellProfileValue = fieldValue('shellProfile', 'auto');
+    // Global-only: the Notion todo list (notion-todo.js). The token itself
+    // never comes back from main, only whether one is saved.
+    const notionTodo = !isProject ? await window.api.getNotionTodoConfig().catch(() => null) : null;
 
     // Discover available shell profiles
     let shellProfiles = [];
@@ -349,6 +352,29 @@
       </div>` : ''}
 
       ${!isProject ? `<div class="settings-section">
+        <div class="settings-section-title">Notion todo list</div>
+        <div class="settings-field settings-field-stacked">
+          <div class="settings-field-info">
+            <span class="settings-label">Integration token</span>
+            <div class="settings-description">From an internal integration at notion.so/profile/integrations, with read, update and insert content. Share the todo page with it (••• &gt; Connections). Stored encrypted on this Mac. Leave empty to keep the saved token.</div>
+          </div>
+          <div class="settings-field-control">
+            <input type="password" class="settings-input" id="sv-notion-token" autocomplete="off" spellcheck="false" placeholder="${notionTodo?.hasToken ? 'Saved' : 'ntn_…'}">
+            ${notionTodo?.hasToken ? '<label class="settings-inline-check"><input type="checkbox" id="sv-notion-forget"> Forget the saved token</label>' : ''}
+          </div>
+        </div>
+        <div class="settings-field settings-field-stacked">
+          <div class="settings-field-info">
+            <span class="settings-label">Todo page</span>
+            <div class="settings-description">The link to the page the Todo tab shows: sections as headings (This week, Next week, Later, Thinkering Ideas, Archive), todos as checkboxes.</div>
+          </div>
+          <div class="settings-field-control">
+            <input type="text" class="settings-input" id="sv-notion-page" spellcheck="false" placeholder="https://www.notion.so/…" value="${escapeHtml(notionTodo?.pageUrl || '')}">
+          </div>
+        </div>
+      </div>` : ''}
+
+      ${!isProject ? `<div class="settings-section">
         <div class="settings-section-title">Updates</div>
         <div class="settings-field">
           <div class="settings-field-info">
@@ -480,6 +506,18 @@
       }
 
       await window.api.setSetting(settingsKey, settings);
+
+      if (!isProject) {
+        const token = settingsViewerBody.querySelector('#sv-notion-token').value.trim();
+        const forget = settingsViewerBody.querySelector('#sv-notion-forget')?.checked;
+        const page = settingsViewerBody.querySelector('#sv-notion-page').value.trim();
+        const spec = { page };
+        if (token) spec.token = token;
+        else if (forget) spec.token = '';
+        const saved = await window.api.setNotionTodoConfig(spec);
+        if (saved?.error) alert(saved.error);
+        else if (typeof todoConfigChanged === 'function') todoConfigChanged();
+      }
 
       // Update visibleSessionCount, sessionMaxAgeDays, and theme
       if (!isProject) {

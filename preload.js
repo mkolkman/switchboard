@@ -64,6 +64,13 @@ contextBridge.exposeInMainWorld('api', {
   getGithubIssue: (target) => ipcRenderer.invoke('github-issue', target),
   getGithubPullRequestFiles: (target) => ipcRenderer.invoke('github-pr-files', target),
   getMyGithubPullRequests: () => ipcRenderer.invoke('github-my-prs'),
+  getNotionTodoConfig: () => ipcRenderer.invoke('notion-todo-config'),
+  setNotionTodoConfig: (spec) => ipcRenderer.invoke('notion-todo-set-config', spec),
+  loadNotionTodo: (opts) => ipcRenderer.invoke('notion-todo-load', opts),
+  editNotionTodo: (edit) => ipcRenderer.invoke('notion-todo-edit', edit),
+  onNotionTodoChanged: (callback) => {
+    ipcRenderer.on('notion-todo-changed', (_event, result) => callback(result));
+  },
   getGithubReleaseStatus: (prs, opts) => ipcRenderer.invoke('github-release-status', prs, opts),
   getGithubReviewComments: (target) => ipcRenderer.invoke('github-review-comments', target),
   createGithubReviewComment: (target, spec) => ipcRenderer.invoke('github-create-review-comment', target, spec),

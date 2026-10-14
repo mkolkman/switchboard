@@ -7697,3 +7697,44 @@ body.fp-resizing webview { pointer-events: none; }
 .ghv-row-ref { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 10px; color: #7f86c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ghv-row-author { font-size: 10.5px; color: #6a6a80; }
 .ghv-empty { padding: 6px 8px 10px; font-size: 11.5px; color: #6a6a80; }
+
+/* ---- Todo tab: the Notion todo list, sections in the sidebar, the list in the main area ---- */
+#todo-viewer { position: absolute; inset: 0; display: flex; flex-direction: column; background: #111118; min-height: 0; }
+#todo-content { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; }
+#todo-content::-webkit-scrollbar, .tdv-body::-webkit-scrollbar { width: 5px; }
+#todo-content::-webkit-scrollbar-thumb, .tdv-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+.tdv-nav { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px; color: #c8c8dc; }
+.tdv-nav:hover { background: rgba(255,255,255,0.035); }
+.tdv-nav-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdv-notice { padding: 5px 8px; font-size: 11.5px; line-height: 1.4; color: #a0a0b8; }
+.tdv-setup { margin: 0 8px; }
+.tdv-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px 40px; }
+.tdv-page { max-width: 860px; }
+.tdv-section { margin-bottom: 22px; }
+.tdv-section-h { display: flex; align-items: center; gap: 8px; padding: 4px 6px 8px; font-size: 13px; font-weight: 700; color: #c0c0d8; border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 4px; }
+.tdv-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px; border-radius: 6px; min-height: 26px; }
+.tdv-row:hover { background: rgba(255,255,255,0.03); }
+.tdv-check { margin: 3px 0 0; flex-shrink: 0; accent-color: #8088ff; cursor: pointer; }
+.tdv-bullet { width: 5px; height: 5px; margin: 8px 4px 0; border-radius: 50%; background: #55556a; flex-shrink: 0; }
+.tdv-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; color: #c8c8dc; overflow-wrap: anywhere; }
+.tdv-text code { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11.5px; background: rgba(255,255,255,0.06); padding: 0 3px; border-radius: 3px; }
+.tdv-item--done > .tdv-row .tdv-text { color: #6a6a80; text-decoration: line-through; text-decoration-color: rgba(255,255,255,0.2); }
+.tdv-children { margin-left: 22px; }
+.tdv-acts { display: flex; gap: 2px; opacity: 0; flex-shrink: 0; }
+.tdv-row:hover .tdv-acts { opacity: 1; }
+.tdv-acts .ws-ghost--sm { padding: 0 5px; height: 20px; }
+.tdv-input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: #e0e0f0; background: rgba(255,255,255,0.05); border: 1px solid rgba(128,136,255,0.5); border-radius: 5px; padding: 2px 6px; outline: none; }
+.tdv-row--new .tdv-check { cursor: default; opacity: 0.5; }
+.tdv-add { display: inline-flex; align-items: center; gap: 6px; margin: 4px 6px; padding: 3px 6px; font-size: 12px; color: #6a6a80; background: none; border: none; border-radius: 5px; cursor: pointer; }
+.tdv-add:hover { color: #c0c0d8; background: rgba(255,255,255,0.04); }
+.tdv-link { color: #9aa2ff; text-decoration: none; }
+.tdv-link:hover { text-decoration: underline; }
+.tdv-ref { display: inline-flex; align-items: center; gap: 4px; padding: 0 5px; border-radius: 4px; color: #b0b6ff; background: rgba(128,136,255,0.1); text-decoration: none; white-space: nowrap; }
+.tdv-ref:hover { background: rgba(128,136,255,0.2); }
+.tdv-ref-dot { width: 6px; height: 6px; border-radius: 50%; background: #6a6a80; }
+.tdv-ref--open .tdv-ref-dot { background: #7ee2a0; }
+.tdv-ref--merged .tdv-ref-dot { background: #c49cf5; }
+.tdv-ref--closed .tdv-ref-dot { background: #e08a8a; }
+.tdv-ref--plan { box-shadow: inset 0 0 0 1px rgba(128,136,255,0.35); }
+.tdv-section--archive .tdv-section-h { color: #8a8aa0; }
+.settings-inline-check { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11.5px; color: #a0a0b8; }
