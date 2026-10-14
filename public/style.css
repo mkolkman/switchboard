@@ -3779,6 +3779,11 @@ body { display: flex; flex-direction: column; }
   margin-bottom: 8px;
 }
 
+/* Inline caveat inside a field description (e.g. a font that isn't installed) */
+.settings-warning {
+  color: #e0a830;
+}
+
 .settings-remove-btn {
   background: rgba(255,80,80,0.08);
   border: 1px solid rgba(255,80,80,0.2);

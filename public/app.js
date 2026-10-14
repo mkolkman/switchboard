@@ -109,6 +109,8 @@ const pendingSessions = new Map(); // sessionId → { session, projectPath, fold
 // Bridge functions for settings-panel.js
 window._setVisibleSessionCount = (v) => { visibleSessionCount = v; };
 window._setSessionMaxAge = (v) => { sessionMaxAgeDays = v; };
+window._applyTerminalFont = applyTerminalFont; // defined in terminal-manager.js
+window._refitOpenTerminals = refitOpenTerminals; // defined in terminal-manager.js
 window._applyTerminalTheme = (themeName) => {
   currentThemeName = themeName;
   TERMINAL_THEME = getTerminalTheme();
@@ -1591,6 +1593,13 @@ setTimeout(() => {
       currentThemeName = global.terminalTheme;
       TERMINAL_THEME = getTerminalTheme();
     }
+    // Applied rather than just assigned: session restore can open terminals before
+    // this async read resolves, and those need the stored font too.
+    applyTerminalFont({
+      fontFamily: global.terminalFontFamily,
+      fontSize: global.terminalFontSize,
+      lineHeight: global.terminalLineHeight,
+    });
   }
   // Where New chat runs (main's get-chat-folder), known up front so earlier
   // chats land in "Chats" without creating the folder before it is used.

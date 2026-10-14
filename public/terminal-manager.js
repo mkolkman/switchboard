@@ -8,6 +8,84 @@
 // wrapInGridCard, showGridView (grid-view.js)
 // Depends on: shellEscape (utils.js)
 
+// --- Terminal font ---
+// Global font settings shared by every xterm instance. Mutated by applyTerminalFont
+// when the user saves global settings (or on startup, from the stored settings).
+const DEFAULT_TERMINAL_FONT_FAMILY = "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace";
+const DEFAULT_TERMINAL_FONT_SIZE = 12;
+const DEFAULT_TERMINAL_LINE_HEIGHT = 1;
+
+const TERMINAL_FONT = {
+  fontFamily: DEFAULT_TERMINAL_FONT_FAMILY,
+  fontSize: DEFAULT_TERMINAL_FONT_SIZE,
+  lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
+};
+
+// Always leave a monospace font behind the user's choice. A family the browser cannot
+// resolve (a typo, or a font the user names but hasn't installed) is not an error in
+// CSS: Chromium silently falls back to its default *proportional* font, which destroys
+// the terminal's column alignment. Keeping the default stack as a tail means an
+// unresolvable name degrades to the normal terminal font instead.
+function withMonospaceFallback(family) {
+  if (family === DEFAULT_TERMINAL_FONT_FAMILY) return family;
+  return family + ', ' + DEFAULT_TERMINAL_FONT_FAMILY;
+}
+
+// Coerce stored settings into values xterm accepts. xterm throws outright on
+// lineHeight < 1, so unset/out-of-range values fall back to (or clamp toward) the
+// defaults.
+//
+// The chosen family is always followed by the default stack rather than used alone
+// (see withMonospaceFallback). A name that doesn't resolve (a typo, or a font that
+// isn't installed on this machine) otherwise falls through to the proportional
+// default, and xterm renders that as badly-stretched text with uneven cell widths;
+// see isFontAvailable, which warns about the same mistake up front in the settings
+// panel.
+function normalizeTerminalFont({ fontFamily, fontSize, lineHeight } = {}) {
+  const chosen = typeof fontFamily === 'string' ? fontFamily.trim() : '';
+  const family = chosen || DEFAULT_TERMINAL_FONT_FAMILY;
+  const size = Number(fontSize);
+  const height = Number(lineHeight);
+  return {
+    fontFamily: withMonospaceFallback(family),
+    fontSize: Number.isFinite(size) && size > 0 ? Math.min(32, Math.max(6, size)) : DEFAULT_TERMINAL_FONT_SIZE,
+    lineHeight: Number.isFinite(height) && height > 0 ? Math.min(3, Math.max(1, height)) : DEFAULT_TERMINAL_LINE_HEIGHT,
+  };
+}
+
+// Whether a font family actually resolves to an installed font. There is no API that
+// answers this directly, so compare rendered metrics against a deliberately bogus
+// family: if the two match, the browser fell back rather than finding the font.
+// Used only to warn in settings: rendering itself is safe via withMonospaceFallback.
+function isFontAvailable(family) {
+  if (typeof document === 'undefined') return true;
+  const ctx = document.createElement('canvas').getContext('2d');
+  const measure = (f) => { ctx.font = '72px ' + f; return ctx.measureText('MWil@1%').width; };
+  const missing = '__switchboard_no_such_font__';
+  return measure(family + ', ' + missing) !== measure(missing);
+}
+
+// Refit every open terminal. A terminal with no layout box (hidden behind the settings
+// viewer, or inactive in single view) cannot measure itself: proposeDimensions returns
+// nothing and the fit is silently skipped, so this must be called again once the
+// terminals have size, or they keep stale cols/rows and their output runs off-screen.
+function refitOpenTerminals() {
+  for (const [, entry] of openSessions) fitAndScroll(entry);
+}
+
+// Apply font settings to new terminals and re-render every open one. Changing font
+// metrics changes how many cols/rows fit, so each terminal is refitted (which resizes
+// its PTY through the onResize handler).
+function applyTerminalFont(font) {
+  Object.assign(TERMINAL_FONT, normalizeTerminalFont(font));
+  for (const [, entry] of openSessions) {
+    entry.terminal.options.fontFamily = TERMINAL_FONT.fontFamily;
+    entry.terminal.options.fontSize = TERMINAL_FONT.fontSize;
+    entry.terminal.options.lineHeight = TERMINAL_FONT.lineHeight;
+  }
+  refitOpenTerminals();
+}
+
 // --- Terminal key bindings ---
 // Shift+Enter → kitty protocol (CSI 13;2u) so Claude Code treats it as newline, not submit.
 // Two layers needed:
@@ -446,8 +524,9 @@ function createTerminalEntry(session) {
     .catch(err => console.warn('[terminal] Could not open link:', err));
 
   const terminal = new Terminal({
-    fontSize: 12,
-    fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+    fontSize: TERMINAL_FONT.fontSize,
+    fontFamily: TERMINAL_FONT.fontFamily,
+    lineHeight: TERMINAL_FONT.lineHeight,
     theme: TERMINAL_THEME,
     cursorBlink: false,
     scrollback: 10000,
@@ -726,5 +805,6 @@ if (typeof module !== 'undefined' && module.exports) {
     isImeComposing, shouldSendSpaceDirectly, enterKittySequence, decodeOsc52Payload, wasIntentionalExit,
     terminalBufferText, restoredTerminalHistoryAnsi,
     persistedTerminalRecord, parsePersistedTerminalSessions, forgetTerminalHistory,
+    normalizeTerminalFont, DEFAULT_TERMINAL_FONT_FAMILY,
   };
 }
