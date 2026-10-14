@@ -20,6 +20,11 @@
   <div id="sidebar">
     <button id="sidebar-expand-btn" title="Show sidebar"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 24 24" height="20" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M18 3a3 3 0 0 1 2.995 2.824l.005 .176v12a3 3 0 0 1 -2.824 2.995l-.176 .005h-12a3 3 0 0 1 -2.995 -2.824l-.005 -.176v-12a3 3 0 0 1 2.824 -2.995l.176 -.005h12zm-3 2h-9a1 1 0 0 0 -.993 .883l-.007 .117v12a1 1 0 0 0 .883 .993l.117 .007h9v-14zm-5.387 4.21l.094 .083l2 2a1 1 0 0 1 .083 1.32l-.083 .094l-2 2a1 1 0 0 1 -1.497 -1.32l.083 -.094l1.292 -1.293l-1.292 -1.293a1 1 0 0 1 -.083 -1.32l.083 -.094a1 1 0 0 1 1.32 -.083z"></path></svg></button>
     <div id="sidebar-header">
+      <div id="sidebar-toolbar">
+        <button id="sleep-toggle-btn" type="button" hidden></button>
+        <button id="global-settings-btn" type="button" title="Global settings"></button>
+        <button id="sidebar-collapse-btn" title="Hide sidebar"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 24 24" height="20" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M18 3a3 3 0 0 1 2.995 2.824l.005 .176v12a3 3 0 0 1 -2.824 2.995l-.176 .005h-12a3 3 0 0 1 -2.995 -2.824l-.005 -.176v-12a3 3 0 0 1 2.824 -2.995l.176 -.005h12zm0 2h-9v14h9a1 1 0 0 0 .993 -.883l.007 -.117v-12a1 1 0 0 0 -.883 -.993l-.117 -.007zm-2.293 4.293a1 1 0 0 1 .083 1.32l-.083 .094l-1.292 1.293l1.292 1.293a1 1 0 0 1 .083 1.32l-.083 .094a1 1 0 0 1 -1.32 .083l-.094 -.083l-2 -2a1 1 0 0 1 -.083 -1.32l.083 -.094l2 -2a1 1 0 0 1 1.414 0z"></path></svg></button>
+      </div>
       <div id="sidebar-tabs">
         <button class="sidebar-tab" data-tab="projects" title="Projects: work grouped into projects and tracks"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></button>
         <button class="sidebar-tab active" data-tab="sessions" title="Sessions: every CLI session in the sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="m8 10 2 2-2 2"/><path d="M13 14h3"/></svg></button>
@@ -30,8 +35,6 @@
         <button style="display:none" class="sidebar-tab" data-tab="memory" title="Agent Files"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg></button>
         <button style="display:none" class="sidebar-tab" data-tab="stats" title="Stats"><svg width="18" height="18" viewBox="0 0 512 512" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="M128 496H48V304h80zm224 0h-80V208h80zm112 0h-80V96h80zm-224 0h-80V16h80z"/></svg></button>
         <button class="sidebar-tab" id="sidebar-more-btn" title="More: plans, agent files, stats, settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
-        <button style="display:none" id="global-settings-btn" title="Global settings"></button>
-        <button id="sidebar-collapse-btn" title="Hide sidebar"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 24 24" height="20" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M18 3a3 3 0 0 1 2.995 2.824l.005 .176v12a3 3 0 0 1 -2.824 2.995l-.176 .005h-12a3 3 0 0 1 -2.995 -2.824l-.005 -.176v-12a3 3 0 0 1 2.824 -2.995l.176 -.005h12zm0 2h-9v14h9a1 1 0 0 0 .993 -.883l.007 -.117v-12a1 1 0 0 0 -.883 -.993l-.117 -.007zm-2.293 4.293a1 1 0 0 1 .083 1.32l-.083 .094l-1.292 1.293l1.292 1.293a1 1 0 0 1 .083 1.32l-.083 .094a1 1 0 0 1 -1.32 .083l-.094 -.083l-2 -2a1 1 0 0 1 -.083 -1.32l.083 -.094l2 -2a1 1 0 0 1 1.414 0z"></path></svg></button>
       </div>
       <div id="session-filters">
         <button id="running-toggle" title="Filter: show running sessions only"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4"/></svg></button>
@@ -58,6 +61,10 @@
     <div id="github-content" style="display:none;"></div>
     <div id="todo-content" style="display:none;"></div>
     <div id="helpscout-content" style="display:none;"></div>
+    <div id="sidebar-footer">
+      <div id="sidebar-footer-status"><span id="sidebar-footer-activity"></span><span id="sidebar-footer-updater"></span></div>
+      <div id="sidebar-footer-quota" style="display:none;"></div>
+    </div>
   </div>
   <div id="sidebar-resize-handle"></div>
   <div id="main">
@@ -121,7 +128,6 @@
     <button id="update-restart-btn">Restart</button>
     <button id="update-dismiss-btn">Later</button>
   </div>
-  <div id="status-bar"><span id="status-bar-info"></span><a id="status-bar-slack" href="https://join.slack.com/t/doctly-ai/shared_invite/zt-4948uf70i-_WeI229ehttWfvjWvGxl3Q" target="_blank" rel="noopener noreferrer" title="Join the Switchboard Slack community"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="#36c5f0"><rect x="1" y="8" width="10" height="4" rx="2"/><path d="M9 7a2 2 0 1 1 2-2v2Z"/></g><g fill="#2eb67d"><rect x="12" y="1" width="4" height="10" rx="2"/><path d="M17 9a2 2 0 1 1 2 2h-2Z"/></g><g fill="#ecb22e"><rect x="13" y="12" width="10" height="4" rx="2"/><path d="M15 17a2 2 0 1 1-2 2v-2Z"/></g><g fill="#e01e5a"><rect x="8" y="13" width="4" height="10" rx="2"/><path d="M7 15a2 2 0 1 1-2-2h2Z"/></g></svg><span>Join Slack</span></a><button id="sleep-toggle-btn" type="button" hidden></button><span id="status-bar-quota" style="display:none;"><span class="quota-track"><span class="quota-fill"></span></span><span class="quota-pct"></span></span><span id="status-bar-activity"></span><span id="status-bar-updater"></span></div>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>

@@ -63,7 +63,7 @@ body { display: flex; flex-direction: column; }
 
 /* macOS: clear the traffic lights, which sit at x:18 y:15 (see main.js). */
 .platform-darwin #sidebar-header {
-  padding-top: 44px;
+  padding-top: 7px;
 }
 
 /* Collapsed to a 42px rail, the sidebar is narrower than the traffic lights, so the
@@ -74,7 +74,7 @@ body { display: flex; flex-direction: column; }
 
 /* Fullscreen hides the traffic lights entirely: reclaim their space. */
 .platform-darwin.fullscreen #sidebar-header {
-  padding-top: 16px;
+  padding-top: 7px;
 }
 .platform-darwin.fullscreen #sidebar.collapsed #sidebar-expand-btn {
   margin-top: 12px;
@@ -157,71 +157,30 @@ body { display: flex; flex-direction: column; }
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ========== STATUS BAR ========== */
-#status-bar {
-  height: 22px;
-  min-height: 22px;
-  background: #0e0e14;
+/* ========== SIDEBAR FOOTER ==========
+   Under the lists: what the indexer is doing, and the 5-hour and weekly limit
+   bars side by side, quiet until hovered. Ported from Joris Blaak's fork. */
+#sidebar-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 20px 10px;
   border-top: 1px solid rgba(255,255,255,0.06);
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  font-size: 11px;
+  font-size: 10.5px;
   color: #7a7a90;
-  gap: 12px;
-  z-index: 100;
 }
+#sidebar-footer-status { display: flex; gap: 12px; min-width: 0; }
+#sidebar-footer-status:not(:has(:not(:empty))) { display: none; }
+#sidebar-footer-activity { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #8088ff; }
+#sidebar-footer-activity.status-done { color: #4a9; }
+#sidebar-footer-updater { white-space: nowrap; color: #888; font-style: italic; }
+#sidebar-footer-quota { display: flex; flex-direction: column; gap: 5px; cursor: pointer; opacity: 0.65; transition: opacity 0.15s; }
+#sidebar-footer-quota:hover { opacity: 1; }
+#sidebar-footer-quota .quota-group { gap: 14px; }
+#sidebar-footer-quota .quota-item { flex: 1; min-width: 0; }
+#sidebar-footer-quota .quota-track { flex: 1; width: auto; min-width: 16px; height: 3px; }
 
-#status-bar-info {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#status-bar-slack {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-  color: #9090a8;
-  text-decoration: none;
-  white-space: nowrap;
-}
-#status-bar-slack svg { flex-shrink: 0; }
-#sleep-toggle-btn { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; height: 18px; padding: 0 5px; border: none; border-radius: 4px; background: transparent; color: #6a6a80; font: inherit; font-size: 11px; cursor: pointer; }
-#sleep-toggle-btn[hidden] { display: none; }
-#sleep-toggle-btn:hover { color: #d0d0e0; background: rgba(255,255,255,0.05); }
-/* Sleep disabled: amber, meant to be noticed. */
-#sleep-toggle-btn.sleep-disabled, #sleep-toggle-btn.sleep-disabled:hover { color: #e0a830; background: rgba(224,168,48,0.16); }
-#sleep-toggle-btn:disabled { cursor: progress; opacity: 0.6; }
-#status-bar-slack:hover { color: #d0d0e0; }
-#status-bar-slack:focus-visible { outline: 2px solid #8088ff; outline-offset: 3px; border-radius: 2px; }
-
-#status-bar-activity {
-  white-space: nowrap;
-  color: #8088ff;
-}
-
-#status-bar-activity.status-done {
-  color: #4a9;
-}
-
-#status-bar-updater {
-  white-space: nowrap;
-  color: #888;
-  font-style: italic;
-}
-
-#status-bar-quota {
-  display: flex;
-  align-items: center;
-  gap: 26px;
-  cursor: pointer;
-  opacity: 0.95;
-  flex-shrink: 0;
-  margin-left: auto;
-  transition: opacity 0.15s;
-}
 /* One bar per limit window; count varies with what the usage API reports. */
 .quota-item {
   display: flex;
@@ -233,7 +192,6 @@ body { display: flex; flex-direction: column; }
   color: #b4b8d0;
   white-space: nowrap;
 }
-#status-bar-quota:hover { opacity: 1; }
 .quota-track {
   width: 34px;
   height: 4px;
@@ -264,8 +222,8 @@ body { display: flex; flex-direction: column; }
   background: #18181f;
   display: flex;
   flex-direction: column;
-  /* Stretch to the app container, which stops above the status bar; 100vh
-     overflowed it by the bar's height and let it scroll under the title bar. */
+  /* Stretch to the app container, which fills the window; 100vh could
+     overflow it and let it scroll under the title bar. */
   min-height: 0;
   border-right: none;
   flex-shrink: 0;
@@ -293,6 +251,40 @@ body { display: flex; flex-direction: column; }
   flex-direction: column;
   gap: 10px;
 }
+
+/* ---- Toolbar: sleep, global settings and collapse, right-aligned ----
+   On macOS it shares its row with the traffic lights (main.js places them at
+   y:15), so the header's top padding there centres it on them. Ported from
+   Joris Blaak's fork. */
+#sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 30px;
+}
+#sidebar-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 30px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #7a7a90;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+#sidebar-toolbar button:hover { background: rgba(255,255,255,0.05); color: #c0c0d8; }
+#sidebar-toolbar button[hidden] { display: none; }
+/* Sleep disabled: amber, meant to be noticed. */
+#sleep-toggle-btn.sleep-disabled, #sleep-toggle-btn.sleep-disabled:hover { color: #e0a830; background: rgba(224,168,48,0.16); padding: 0 8px; }
+#sleep-toggle-btn:disabled { cursor: progress; opacity: 0.6; }
 
 /* ---- Sidebar tabs ---- */
 #sidebar-tabs {

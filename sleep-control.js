@@ -1,6 +1,6 @@
 const { execFile } = require('child_process');
 
-// The Mac's "never sleep" switch, `pmset disablesleep`, for the status bar's
+// The Mac's "never sleep" switch, `pmset disablesleep`, for the sidebar toolbar's
 // sleep button. Reading needs no privileges. Writing first tries `sudo -n`,
 // which is silent when sudoers lets pmset through without a password, and
 // otherwise asks through macOS's own administrator dialog; cancelling that

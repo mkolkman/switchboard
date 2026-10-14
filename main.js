@@ -839,7 +839,7 @@ ipcMain.handle('github-clone-repo', (_e, repoFull) => {
 ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTracker.mergePullRequest(...ghTarget(t), {
   method: String(opts?.method || ''), expectedHeadOid: String(opts?.expectedHeadOid || ''),
 })));
-// --- IPC: the Mac's sleep switch (sleep-control.js), the status bar's button ---
+// --- IPC: the Mac's sleep switch (sleep-control.js), the sidebar toolbar's button ---
 ipcMain.handle('get-sleep-disabled', () => sleepControl.isSleepDisabled());
 ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisabled(!!disabled, log));
 

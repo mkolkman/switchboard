@@ -1,4 +1,4 @@
-// --- The status bar's "can this Mac sleep?" button ---
+// --- The sidebar toolbar's "can this Mac sleep?" button ---
 // It mirrors `pmset disablesleep` (sleep-control.js): a faint zzz while the
 // Mac may sleep, an amber coffee cup while sleep is disabled, so a Mac left
 // awake by accident does not go unseen. Clicking flips it. The switch is also
@@ -8,8 +8,8 @@
 
 const SLEEP_TOGGLE_POLL_MS = 60 * 1000;
 const SLEEP_ICONS = {
-  coffee: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v2"/><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/></svg>',
-  sleep: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11h7l-7 9h7"/><path d="M14 3h6l-6 7h6"/></svg>',
+  coffee: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v2"/><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/></svg>',
+  sleep: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11h7l-7 9h7"/><path d="M14 3h6l-6 7h6"/></svg>',
 };
 
 function installSleepToggle() {

@@ -1,5 +1,4 @@
-const statusBarInfo = document.getElementById('status-bar-info');
-const statusBarActivity = document.getElementById('status-bar-activity');
+const statusBarActivity = document.getElementById('sidebar-footer-activity');
 const terminalsEl = document.getElementById('terminals');
 const sidebarContent = document.getElementById('sidebar-content');
 const plansContent = document.getElementById('plans-content');
@@ -598,7 +597,8 @@ function updateMoreButton() {
 }
 
 sidebarMoreBtn.addEventListener('click', (e) => {
-  const slackLink = document.getElementById('status-bar-slack');
+  const slackUrl = 'https://join.slack.com/t/doctly-ai/shared_invite/zt-4948uf70i-_WeI229ehttWfvjWvGxl3Q';
+  const slackIcon = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><g fill="#36c5f0"><rect x="1" y="8" width="10" height="4" rx="2"/><path d="M9 7a2 2 0 1 1 2-2v2Z"/></g><g fill="#2eb67d"><rect x="12" y="1" width="4" height="10" rx="2"/><path d="M17 9a2 2 0 1 1 2 2h-2Z"/></g><g fill="#ecb22e"><rect x="13" y="12" width="10" height="4" rx="2"/><path d="M15 17a2 2 0 1 1-2 2v-2Z"/></g><g fill="#e01e5a"><rect x="8" y="13" width="4" height="10" rx="2"/><path d="M7 15a2 2 0 1 1-2-2h2Z"/></g></svg>';
   const tabItem = (name) => {
     const tab = tabButton(name);
     return { label: tab.title, icon: menuIcon(tab.innerHTML), muted: activeTab === name, onClick: () => tab.click() };
@@ -607,7 +607,7 @@ sidebarMoreBtn.addEventListener('click', (e) => {
     ...MORE_TABS.map(tabItem),
     { sep: true },
     { label: 'Global settings', icon: ICONS.gear(14), onClick: () => globalSettingsBtn.click() },
-    { label: 'Join Slack', icon: slackLink.querySelector('svg').outerHTML, onClick: () => window.api.openExternal(slackLink.href) },
+    { label: 'Join Slack', icon: slackIcon, onClick: () => window.api.openExternal(slackUrl) },
   ], { anchor: e.currentTarget });
 });
 
@@ -1039,7 +1039,6 @@ async function loadProjects({ resort = false, reason = 'project' } = {}) {
   await loadRepoInfo(cachedAllProjects.map(p => p.projectPath));
   await pollActiveSessions();
   refreshSidebar({ resort, reason });
-  renderDefaultStatus();
 }
 
 // Which repo each folder is in, for the repo subtitle and the repository and
@@ -1663,21 +1662,8 @@ window.api.onProjectsChanged((reason) => {
   }, 300);
 });
 
-// Status bar
+// Sidebar footer: what the indexer is doing
 let activityTimer = null;
-
-function renderDefaultStatus() {
-  const totalSessions = cachedAllProjects.reduce((n, p) => n + p.sessions.length, 0);
-  const totalProjects = cachedAllProjects.length;
-  const running = activePtyIds.size;
-  const parts = [];
-  if (running > 0) parts.push(`${running} running`);
-  parts.push(`${totalSessions} sessions`);
-  parts.push(`${totalProjects} folders`);
-  const projectCount = (cachedProjectTreeAll?.projects || []).filter(p => p.status === 'active').length;
-  if (projectCount > 0) parts.push(`${projectCount} project${projectCount === 1 ? '' : 's'}`);
-  statusBarInfo.textContent = parts.join(' \u00b7 ');
-}
 
 window.api.onStatusUpdate((text, type) => {
   if (activityTimer) clearTimeout(activityTimer);
@@ -1692,7 +1678,7 @@ window.api.onStatusUpdate((text, type) => {
 });
 
 // --- Auto-update status + toast ---
-const statusBarUpdater = document.getElementById('status-bar-updater');
+const statusBarUpdater = document.getElementById('sidebar-footer-updater');
 let updaterStatusTimer = null;
 function setUpdaterStatus(text, duration) {
   if (updaterStatusTimer) clearTimeout(updaterStatusTimer);
@@ -1745,9 +1731,9 @@ window.api.onUpdaterEvent(updaterHandler);
 // the day, so showing a single window would read as "plenty left" while a
 // weekly one is the one actually running out. Rows come from the API
 // self-describing, so a newly launched model gets a bar without a code change.
-const quotaGaugeEl = document.getElementById('status-bar-quota');
+const quotaGaugeEl = document.getElementById('sidebar-footer-quota');
 
-// Full labels ("Week (all models)") are too long for a status bar; the tooltip
+// Full labels ("Week (all models)") are too long for the footer; the tooltip
 // carries them in full.
 function shortQuotaLabel(row) {
   // codex names its own windows by length, since it reports a duration in
@@ -1784,7 +1770,7 @@ function buildQuotaBar(row) {
   wrap.appendChild(pctEl);
 
   const who = row.runtime === 'codex' ? 'Codex' : 'Claude';
-  wrap.title = `${who} \u2014 ${row.label}: ${pct}%` + (row.reset ? ` \u2014 resets ${row.reset}` : '');
+  wrap.title = `${who}, ${row.label}: ${pct}%` + (row.reset ? `, resets ${row.reset}` : '');
   return wrap;
 }
 
@@ -1795,7 +1781,11 @@ function quotaRowsFor(usage, runtime) {
     : (usage?.session !== undefined
       ? [{ kind: 'session', label: 'Current session', percent: usage.session, reset: usage.sessionReset }]
       : []);
-  return rows.map(r => ({ runtime, ...r }));
+  // The 5-hour and the all-models weekly window; per-model weekly windows
+  // would not fit the footer. Codex reports only its own two.
+  return rows
+    .filter(r => runtime !== 'claude' || r.kind === 'session' || r.kind === 'weekly_all')
+    .map(r => ({ runtime, ...r }));
 }
 
 /**
