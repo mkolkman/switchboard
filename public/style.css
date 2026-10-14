@@ -67,15 +67,20 @@ body { display: flex; flex-direction: column; }
 }
 
 /* Collapsed to a 42px rail, the sidebar is narrower than the traffic lights
-   (x 18 to about 70), which then cover whatever header the main area shows.
-   The rail widens to hold them, and the expand button goes below them. */
-.platform-darwin:not(.fullscreen) #sidebar.collapsed {
-  width: 80px;
-  min-width: 80px;
-  max-width: 80px;
-}
+   (x 18 to about 70), so they reach into the main area. Push the expand button
+   below them, and move whatever the main area shows at the top clear of them:
+   a header's start, or a whole view that has none. */
 .platform-darwin #sidebar.collapsed #sidebar-expand-btn {
   margin-top: 44px;
+}
+.platform-darwin:not(.fullscreen):has(#sidebar.collapsed) :is(#terminal-header, #grid-viewer-header, #stats-viewer-header, #settings-viewer-header, #jsonl-viewer-header, .viewer-toolbar) {
+  padding-left: 40px;
+}
+.platform-darwin:not(.fullscreen):has(#sidebar.collapsed) :is(#project-viewer .ws-header, #project-strip) {
+  padding-left: 48px;
+}
+.platform-darwin:not(.fullscreen):has(#sidebar.collapsed) :is(#github-viewer, #todo-viewer, #helpscout-viewer, #memory-viewer) {
+  padding-left: 34px;
 }
 
 /* Fullscreen hides the traffic lights entirely: reclaim their space. */
