@@ -1394,7 +1394,13 @@ body { display: flex; flex-direction: column; }
 .rail-item.active { background: rgba(128,136,255,0.16); color: #d0d4ff; box-shadow: inset 2px 0 0 #8088ff; }
 .rail-item .proj-mark { border-radius: 7px; }
 .rail-initials { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
+.rail-session { flex-direction: column; gap: 2px; padding: 3px 0; }
+.rail-empty { color: #55556a; font-size: 12px; padding-top: 6px; }
+.rail-repo { position: relative; display: flex; align-items: center; justify-content: center; width: 30px; height: 20px; border-radius: 5px; font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; }
+.rail-context { display: flex; align-items: center; gap: 2px; height: 10px; color: #8a8aa0; }
+.rail-place { font-size: 8px; font-weight: 600; letter-spacing: -0.01em; max-width: 22px; overflow: hidden; white-space: nowrap; }
 .rail-dot { position: absolute; right: 3px; bottom: 4px; width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.rail-repo .rail-dot { right: -3px; top: -3px; bottom: auto; width: 7px; height: 7px; box-shadow: 0 0 0 2px #18181f; }
 .rail-dot--needs { background: #e0a830; }
 .rail-dot--working { background: #8088ff; }
 .rail-dot--ready { background: #7ee2a0; }

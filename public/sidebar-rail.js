@@ -1,13 +1,15 @@
 // --- The collapsed sidebar: a rail with the current mode and its short list ---
 // Collapsed, the sidebar keeps a 42px rail: the expand button, the icon of the
 // mode (tab) it is in, which opens a menu to switch mode, and below it a short
-// form of that mode's list. Projects show their marks, Sessions their initials
-// with a status dot, GitHub its PR numbers, Todo its section icons and Help
+// form of that mode's list. Projects show their marks, Sessions (only the live
+// ones) their repo's short name with a status dot, the kind of session and its
+// track or branch, GitHub its PR numbers, Todo its section icons and Help
 // Scout its ticket numbers; each one does what its full row does on a click.
 // The lists come from what the expanded sidebar holds, in its order and with
 // its filters, so the two never disagree.
 // Depends on: app.js (activeTab, sidebarContent, openSession), projects-view.js
-// (findTreeProject, markHtml, selectProject, sessionTitle, showContextMenu),
+// (findTreeProject, markHtml, projectHue, selectProject, sessionTitle,
+// showContextMenu), sidebar.js (isChatFolder), session-groups.js (folderBaseName),
 // project-github-view.js (prSessionState, githubItemKey), github-view.js
 // (githubViewItems, openGithubViewItem), todo-view.js (todoViewSections,
 // todoViewer), helpscout-view.js (helpscoutViewState, openHelpscoutConversation).
@@ -39,18 +41,75 @@ function railProjectItems() {
   }).join('');
 }
 
+// Short names for the repositories worked in most; others get their words' initials.
+const RAIL_REPO_ABBREVIATIONS = [
+  [/^movelab-connect/i, 'MLC'],
+  [/^nohrd-account/i, 'NA'],
+  [/^nohrd-connect/i, 'NC'],
+  [/^waterrower.*connect/i, 'WRC'],
+  [/^rp3/i, 'RP3'],
+];
+
+/** "MoveLab-Connect-Web" → "MLC", "switchboard" → "SWI", "my-cool_app" → "MCA". */
+function railRepoAbbrev(name) {
+  const text = String(name || '').trim();
+  if (!text) return '?';
+  const known = RAIL_REPO_ABBREVIATIONS.find(([re]) => re.test(text));
+  if (known) return known[1];
+  const words = text.split(/[-_.\s]+/).filter(Boolean);
+  return (words.length > 1 ? words.map(w => w[0]).join('') : text).slice(0, 3).toUpperCase();
+}
+
+// What kind of session it is, from how it was started.
+const RAIL_KIND_ICONS = {
+  review: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  fix: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+  support: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 3.6 3.6M14.8 14.8l3.6 3.6M14.8 9.2l3.6-3.6M5.6 18.4l3.6-3.6"/>',
+  plan: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+  build: '<path d="m15 12-8.5 8.5a2.1 2.1 0 0 1-3-3L12 9"/><path d="m17.6 15 4.4-4.4-6.6-6.6L11 8.4z"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+  terminal: '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
+};
+const RAIL_KIND_HINTS = { review: 'Review', fix: 'Fixing review or conflicts', support: 'Support', plan: 'Wayfinder', build: 'Building', chat: 'Chat', terminal: 'Terminal' };
+
+function railSessionKind(session) {
+  if (session.type === 'terminal') return 'terminal';
+  if (typeof helpscoutLinkFor === 'function' && helpscoutLinkFor(session.sessionId)) return 'support';
+  const prompt = String(session.firstPrompt || '');
+  if (/review-pr\b/.test(prompt)) return 'review';
+  if (/resolve-pr-reviews|resolve the conflicts|rebase .* onto/i.test(prompt)) return 'fix';
+  if (/customer-support|log-nohrd-faq|log-feature-request|log-machine-incident/.test(prompt)) return 'support';
+  if (/wayfinder/.test(prompt)) return 'plan';
+  if (isChatFolder(session.projectPath)) return 'chat';
+  return 'build';
+}
+
+/** The session's track, else the worktree branch its folder is, as a few letters. */
+function railSessionPlace(session) {
+  const project = session.projectId ? findTreeProject(session.projectId) : null;
+  const track = session.trackId ? (project?.tracks || []).find(t => t.id === session.trackId) : null;
+  if (track) return track.name;
+  const worktree = String(session.projectPath || '').match(/\/(?:\.claude\/)?(?:\.worktrees|worktrees)\/([^/]+)\/?$/);
+  return worktree ? worktree[1] : '';
+}
+
 function railSessionItems() {
-  // The rows the Sessions list shows, in its order; not the ones folded under "older".
-  const rows = [...sidebarContent.querySelectorAll('.session-item[data-session-id]')]
-    .filter(row => !row.closest('.sessions-older, .slug-group-older'));
-  return rows.slice(0, SIDEBAR_RAIL_LIMIT).map(row => {
-    const id = row.dataset.sessionId;
+  // Only the live ones (needs you, unread, working, idle), in the Sessions list's order.
+  const ids = [...new Set([...sidebarContent.querySelectorAll('.session-item[data-session-id]')].map(row => row.dataset.sessionId))]
+    .filter(id => prSessionState(id)[0] !== 'stopped');
+  if (!ids.length) return '<div class="rail-empty" title="No session is running">\u2013</div>';
+  return ids.slice(0, SIDEBAR_RAIL_LIMIT).map(id => {
     const session = sessionMap.get(id);
     if (!session) return '';
-    const title = sessionTitle(session);
-    const [kind, state] = prSessionState(id);
-    return `<button type="button" class="rail-item rail-session${id === activeSessionId ? ' active' : ''}" data-session="${railAttr(id)}" title="${railAttr(`${title}\n${state}`)}">
-        <span class="rail-initials">${escapeHtml(railInitials(title))}</span><span class="rail-dot rail-dot--${kind}"></span></button>`;
+    const repo = repoInfoByPath.get(session.projectPath)?.name || (isChatFolder(session.projectPath) ? 'Chat' : folderBaseName(session.projectPath));
+    const hue = projectHue(repo.toLowerCase());
+    const kind = railSessionKind(session);
+    const place = railSessionPlace(session);
+    const [state, stateText] = prSessionState(id);
+    const tip = `${sessionTitle(session)}\n${repo}${place ? ` \u00b7 ${place}` : ''}\n${RAIL_KIND_HINTS[kind]}, ${stateText}`;
+    return `<button type="button" class="rail-item rail-session${id === activeSessionId ? ' active' : ''}" data-session="${railAttr(id)}" title="${railAttr(tip)}">
+        <span class="rail-repo" style="background:hsla(${hue},70%,60%,0.18);color:hsl(${hue},80%,72%);">${escapeHtml(railRepoAbbrev(repo))}<span class="rail-dot rail-dot--${state}"></span></span>
+        <span class="rail-context"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${RAIL_KIND_ICONS[kind]}</svg>${place ? `<span class="rail-place">${escapeHtml(place.slice(0, 4))}</span>` : ''}</span></button>`;
   }).join('');
 }
 
