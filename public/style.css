@@ -7649,6 +7649,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-merge-row { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.045); }
 .gh-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #c8c8dc; }
 .gh-switch { transform: scale(0.8); transform-origin: left center; margin-right: -8px; }
+.gh-merge-acts { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; white-space: nowrap; }
 .gh-merge-btns { display: inline-flex; }
 .gh-merge-btn[disabled], .gh-merge-more[disabled] { opacity: 0.45; cursor: not-allowed; }
 .gh-merge-btns .gh-merge-btn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
@@ -7742,7 +7743,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-link-card .gh-add-error { padding: 0 14px 8px; }
 
 /* ---- Claude sessions on a PR, with the terminal in the panel ---- */
-.gh-sessions { background: rgba(120,130,255,0.03); }
+.gh-sessions { padding-top: 8px; padding-bottom: 8px; background: rgba(120,130,255,0.03); }
 .gh-sess-row { display: flex; min-width: 0; }
 .gh-sess-name { color: #d0d0e8; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gh-sess-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #55556a; }

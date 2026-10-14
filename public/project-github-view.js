@@ -969,29 +969,29 @@ function githubAutorebaseHtml(pr, state) {
 }
 
 /**
- * The card's last line, on an open PR: auto-rebase and (while no session
- * has its own block below) Start session on the left, auto-merge and the
- * merge button on the right.
+ * The card's last line, on an open PR: auto-rebase on the left, auto-merge
+ * and the merge button on the right. The right pair wraps as one, so in a
+ * narrow panel the merge button never drops below auto-merge on its own.
  */
-function githubMergeButtons(pr, state, project) {
+function githubMergeButtons(pr, state) {
   if (pr.state !== 'OPEN') return '';
   const method = state.mergeMethod && pr.mergeMethods.includes(state.mergeMethod) ? state.mergeMethod : pr.mergeMethods[0];
   const can = !pr.isDraft && MERGEABLE_STATES.has(pr.mergeState) && !!method && state.busy !== 'merge';
   const [, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
-  const session = project && !prSessionIds(project, `${pr.repo}#${pr.number}`).length ? githubPrSessionButton(pr) : '';
   return `<div class="gh-merge-row">
-      ${githubAutorebaseHtml(pr, state)}${session}
-      <span class="ws-flex"></span>
+      ${githubAutorebaseHtml(pr, state)}
+      <div class="gh-merge-acts">
       ${githubAutoMergeHtml(pr, state, method, can)}
       <div class="gh-merge-btns">
         <button type="button" class="ws-btn ws-btn--sm ws-btn--primary gh-merge-btn" id="gh-merge" ${can ? '' : 'disabled'} title="${can ? `${MERGE_LABELS[method]} into ${escapeHtml(pr.baseRef)}` : escapeHtml(text)}">${state.busy === 'merge' ? 'Merging…' : MERGE_LABELS[method] || 'Merge'}</button>
         ${pr.mergeMethods.length > 1 ? `<button type="button" class="ws-btn ws-btn--sm ws-btn--primary gh-merge-more" id="gh-merge-method" title="Choose how to merge">${PICONS.chevronDown(11)}</button>` : ''}
       </div>
+      </div>
     </div>`;
 }
 
 function githubStatusCard(pr, state, project) {
-  return `<div class="gh-sec gh-status">${githubChecksRow(pr, state)}${githubReviewsRow(pr, state)}${githubMergeRow(pr, state, project)}${githubMergeButtons(pr, state, project)}`
+  return `<div class="gh-sec gh-status">${githubChecksRow(pr, state)}${githubReviewsRow(pr, state)}${githubMergeRow(pr, state, project)}${githubMergeButtons(pr, state)}`
     + `${state.notice ? `<div class="gh-notice gh-notice--${state.notice.kind}">${escapeHtml(state.notice.text)}</div>` : ''}</div>`;
 }
 
@@ -1160,7 +1160,7 @@ async function startPrSession(project, pr, state, { prompt, label, focus }) {
   if (!state.prSessions) state.prSessions = new Map();
   state.prSessions.set(prKey, [sessionId, ...(state.prSessions.get(prKey) || []).filter(id => id !== sessionId)]);
   prSessionLabels.set(sessionId, label);
-  // The session block appears now, instead of the card's Start button.
+  // Its row shows now, not at the next poll.
   if (githubTabShown(project)) paintGithubPanel(project);
   // Pick up the stored link for the next restart's list.
   if (!project.isGithubView) loadProjectPlan(project).catch(() => {});
@@ -1248,8 +1248,7 @@ function githubPrSessionButton(pr) {
 function githubSessionsSection(project, pr) {
   const ids = prSessionIds(project, `${pr.repo}#${pr.number}`);
   const open = pr.state === 'OPEN';
-  // Without sessions the Start button sits in the status card instead.
-  if (!ids.length) return '';
+  if (!ids.length && !open) return '';
   const start = open ? githubPrSessionButton(pr) : '';
   return `<div class="gh-sec gh-sessions"><div class="gh-sec-h">Claude on this PR<span class="ws-flex"></span>${start}</div>${ids.map(id =>
     `<div class="gh-sess-row" data-session="${escapeHtml(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
