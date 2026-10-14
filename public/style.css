@@ -7743,6 +7743,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 
 /* ---- Claude sessions on a PR, with the terminal in the panel ---- */
 .gh-sessions { background: rgba(120,130,255,0.03); }
+.gh-sessions--none { display: flex; justify-content: flex-end; padding-top: 8px; padding-bottom: 8px; }
 .gh-sess-row { display: flex; min-width: 0; }
 .gh-sess-name { color: #d0d0e8; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gh-sess-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #55556a; }

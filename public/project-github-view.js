@@ -1237,6 +1237,8 @@ function githubSessionsSection(project, pr) {
   const open = pr.state === 'OPEN';
   if (!ids.length && !open) return '';
   const start = open ? `<button type="button" class="ws-btn gh-pr-session" id="gh-pr-session" title="Start a Claude session on this PR: review it, work through its review, or one that waits for you">${ICONS.claude(13)}<span>Start session</span>${PICONS.chevronDown(11)}</button>` : '';
+  // Without sessions it is just the button, no heading over an empty list.
+  if (!ids.length) return `<div class="gh-sec gh-sessions gh-sessions--none">${start}</div>`;
   return `<div class="gh-sec gh-sessions"><div class="gh-sec-h">Claude on this PR<span class="ws-flex"></span>${start}</div>${ids.map(id =>
     `<div class="gh-sess-row" data-session="${escapeHtml(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
 }
