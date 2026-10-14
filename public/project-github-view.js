@@ -857,9 +857,17 @@ function checkRunState(run) {
   return ['bad', (c || 'failed').toLowerCase().replace('_', ' ')];
 }
 
-function githubChecksSection(pr, state) {
+// --- The status card: one row each for CI, reviews and merging ---
+// A row is a label, a line saying how it stands with its action on the right,
+// and the details under it (checks, each review, the stacked warning).
+
+function githubStatusRow(label, inner, cls = '') {
+  return `<div class="gh-srow"><span class="gh-srow-label">${label}</span><div class="gh-srow-main${cls}">${inner}</div></div>`;
+}
+
+function githubChecksRow(pr, state) {
   const runs = pr.checks?.runs || [];
-  if (!runs.length) return '<div class="gh-sec"><div class="gh-sec-h">Checks</div><div class="gh-muted">No checks on the latest commit.</div></div>';
+  if (!runs.length) return githubStatusRow('CI', '<div class="gh-srow-line"><span class="gh-muted">No checks on the latest commit.</span></div>');
   const by = { ok: 0, bad: 0, pending: 0, muted: 0 };
   for (const r of runs) by[checkRunState(r)[0]]++;
   const summary = [by.bad && `${by.bad} failing`, by.pending && `${by.pending} running`, by.ok && `${by.ok} passed`, by.muted && `${by.muted} skipped`].filter(Boolean).join(', ');
@@ -869,39 +877,35 @@ function githubChecksSection(pr, state) {
   const sorted = [...runs].sort((a, b) => rank[checkRunState(a)[0]] - rank[checkRunState(b)[0]] || (b.required - a.required) || a.name.localeCompare(b.name));
   const openKey = `checks:${pr.repo}#${pr.number}`;
   const open = state.open.has(openKey) ? state.open.get(openKey) : kind !== 'ok';
-  return `<div class="gh-sec gh-fold${open ? '' : ' collapsed'}" data-key="${escapeHtml(openKey)}">
-    <button type="button" class="gh-sec-h gh-fold-h"><span class="arrow">&#9660;</span>Checks <span class="gh-state gh-state--${kind}">${escapeHtml(summary)}</span>
+  return `<div class="gh-srow"><span class="gh-srow-label">CI</span><div class="gh-srow-main gh-fold${open ? '' : ' collapsed'}" data-key="${escapeHtml(openKey)}">
+    <button type="button" class="gh-srow-line gh-fold-h"><span class="gh-state gh-state--${kind}">${escapeHtml(summary)}</span><span class="arrow">&#9660;</span>
       <span class="gh-muted gh-live" title="Refreshed automatically while this PR is open">live</span></button>
     <div class="gh-fold-body">${sorted.map(r => {
       const [k, text] = checkRunState(r);
       return `<a class="gh-check" href="${escapeHtml(r.url || pr.url)}" title="${escapeHtml(r.name)}: ${text}${r.required ? ' (required)' : ''}"><span class="gh-ci gh-ci--${k === 'bad' ? 'fail' : k === 'pending' ? 'pending' : k === 'ok' ? 'ok' : 'skip'}"></span><span class="gh-check-name">${escapeHtml(r.name)}</span>${r.required ? '<span class="gh-req">required</span>' : ''}<span class="gh-check-state">${text}</span></a>`;
-    }).join('')}</div></div>`;
+    }).join('')}</div></div></div>`;
 }
 
 // Your own review: GitHub will not let you approve your own PR, so the button
 // leaves a marked comment review on the commit shown (github-my-review.js).
-function githubMyReviewSection(pr, state) {
+function githubMyReviewRow(pr, state) {
   if (pr.state !== 'OPEN' || !pr.headOid || typeof myReviewState !== 'function') return '';
   const kind = myReviewState(pr);
   const mine = pr.myReview;
   const sha = (oid) => `<code>${escapeHtml(String(oid).slice(0, 7))}</code>`;
   let text;
-  if (kind === 'none') text = '<span class="gh-state gh-state--warn">Not reviewed by you yet</span>';
+  if (kind === 'none') text = '<span class="gh-state gh-state--warn">not reviewed yet</span>';
   else {
-    const when = `${mine.kind === 'approved' ? 'Approved' : 'Reviewed'} by you at ${sha(mine.sha)} <span class="gh-muted">${escapeHtml(githubAgo(mine.at))}</span>`;
-    if (kind === 'reviewed') {
-      text = `<span class="gh-state gh-state--ok">✓</span> ${when}${mine.sha !== pr.headOid ? '<span class="gh-muted">; rebased since, its files are unchanged</span>' : ''}`;
-    } else {
-      const files = mine.changedFiles;
-      text = `<span class="gh-state gh-state--warn">Changed since your review</span> ${when}${files ? `<span class="gh-muted">; ${files} of its files changed</span>` : ''}`;
-    }
+    const when = `<span class="gh-state gh-state--${kind === 'reviewed' ? 'ok' : 'warn'}">${mine.kind === 'approved' ? 'approved' : 'reviewed'}${kind === 'changed' ? ', changed since' : ''}</span> at ${sha(mine.sha)} <span class="gh-muted">${escapeHtml(githubAgo(mine.at))}</span>`;
+    if (kind === 'reviewed') text = `${when}${mine.sha !== pr.headOid ? '<span class="gh-muted">rebased since, its files are unchanged</span>' : ''}`;
+    else text = `${when}${mine.changedFiles ? `<span class="gh-muted">${mine.changedFiles} of its files changed</span>` : ''}`;
   }
-  const button = kind === 'reviewed' ? '' : `<button type="button" class="ws-btn gh-mark-reviewed" id="gh-mark-reviewed" ${state.busy ? 'disabled' : ''}
+  const button = kind === 'reviewed' ? '' : `<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm gh-mark-reviewed" id="gh-mark-reviewed" ${state.busy ? 'disabled' : ''}
       title="Leaves a comment review on GitHub at ${escapeHtml(pr.headOid.slice(0, 7))}, the commit shown here. Collaborators see it.">${state.busy === 'mark' ? 'Marking…' : kind === 'changed' ? 'Mark reviewed again' : 'Mark reviewed'}</button>`;
-  return `<div class="gh-sec gh-myrev"><div class="gh-sec-h">Your review</div><div class="gh-myrev-row"><span class="gh-myrev-text">${text}</span>${button}</div></div>`;
+  return `<div class="gh-review-row gh-myrev-row"><span class="gh-who">you</span>${text}${button}</div>`;
 }
 
-function githubReviewsSection(pr, state) {
+function githubReviewsRow(pr, state) {
   // Decided by people; a bot's approval (movelabbot checks merge rights) does not count.
   const decision = pr.humanReview
     ? { APPROVED: ['ok', 'Approved'], CHANGES_REQUESTED: ['bad', 'Changes requested'] }[pr.humanReview]
@@ -917,10 +921,10 @@ function githubReviewsSection(pr, state) {
       + '</div>');
   }
   const requestBtn = open
-    ? `<span class="ws-flex"></span><button type="button" class="ws-ghost gh-request-review" id="gh-request-review" ${state.busy ? 'disabled' : ''} title="Ask someone to review this pull request">${state.busy === 'request' ? 'Requesting…' : `${PICONS.plus(11)}<span>Request review</span>`}</button>`
+    ? `<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm gh-request-review" id="gh-request-review" ${state.busy ? 'disabled' : ''} title="Ask someone to review this pull request">${state.busy === 'request' ? 'Requesting…' : `${PICONS.plus(11)}<span>Request review</span>`}</button>`
     : '';
-  return `<div class="gh-sec"><div class="gh-sec-h gh-reviews-h">Reviews ${decision ? `<span class="gh-state gh-state--${decision[0]}">${decision[1]}</span>` : ''}${requestBtn}</div>
-    ${rows.length ? rows.join('') : '<div class="gh-muted">No reviews yet.</div>'}</div>`;
+  return githubStatusRow('Reviews', `<div class="gh-srow-line"><span class="gh-state gh-state--${decision[0]}">${decision[1]}</span>${requestBtn}</div>`
+    + githubMyReviewRow(pr, state) + rows.join(''));
 }
 
 /**
@@ -940,40 +944,48 @@ function githubAutoMergeHtml(pr, state, method, canMergeNow) {
   return `<button type="button" class="ws-btn" id="gh-automerge" ${state.busy ? 'disabled' : ''} title="${githubAttr(`GitHub will ${MERGE_LABELS[method].toLowerCase()} into ${pr.baseRef} by itself once checks and reviews pass`)}">${state.busy === 'automerge' ? 'Enabling…' : 'Enable auto-merge'}</button>`;
 }
 
-function githubMergeSection(pr, state, project) {
+function githubMergeRow(pr, state, project) {
   const prKey = `${pr.repo}#${pr.number}`;
   const resolving = state.busy === 'resolve' || (!!project && prSessionIds(project, prKey).some(id => prSessionState(id)[0] !== 'stopped'));
   if (pr.merged) {
     const release = state.releases.get(`${pr.repo}#${pr.number}`);
-    return `<div class="gh-sec gh-merge"><div class="gh-merge-state"><span class="gh-state gh-state--merged">Merged ${escapeHtml(githubAgo(pr.mergedAt))}</span>${githubReleasePill(release)}</div>`
-      + (release ? `<div class="gh-rel-detail">${escapeHtml(releaseDetail(release)).replace(/\n/g, '<br>')}</div>` : '')
-      + '</div>';
+    return githubStatusRow('Merge', `<div class="gh-srow-line"><span class="gh-state gh-state--merged">Merged ${escapeHtml(githubAgo(pr.mergedAt))}</span>${githubReleasePill(release)}</div>`
+      + (release ? `<div class="gh-rel-detail">${escapeHtml(releaseDetail(release)).replace(/\n/g, '<br>')}</div>` : ''));
   }
-  if (pr.state !== 'OPEN') return '<div class="gh-sec gh-merge"><span class="gh-state gh-state--bad">Closed without merging</span></div>';
+  if (pr.state !== 'OPEN') return githubStatusRow('Merge', '<div class="gh-srow-line"><span class="gh-state gh-state--bad">Closed without merging</span></div>');
   const [kind, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
-  const method = state.mergeMethod && pr.mergeMethods.includes(state.mergeMethod) ? state.mergeMethod : pr.mergeMethods[0];
-  const can = !pr.isDraft && MERGEABLE_STATES.has(pr.mergeState) && !!method && state.busy !== 'merge';
   const autorebase = pr.autorebase.available ? `
     <label class="gh-toggle" title="Adds or removes the ${escapeHtml(pr.autorebase.label)} label; the AutoRebase workflow keeps the branch on top of ${escapeHtml(pr.baseRef)}">
       <span class="settings-toggle gh-switch"><input type="checkbox" id="gh-autorebase" ${pr.autorebase.on ? 'checked' : ''} ${state.busy === 'autorebase' ? 'disabled' : ''}><span class="settings-toggle-slider"></span></span><span>Auto-rebase</span>
     </label>${pr.autorebase.failed ? '<span class="gh-state gh-state--bad" title="The bot added autorebase:non-rebaseable: the last rebase hit conflicts">rebase failed</span>' : ''}`
     : '<span class="gh-muted" title="This repository has no autorebase:opt-in label">No auto-rebase in this repo</span>';
-  return `<div class="gh-sec gh-merge">
-    <div class="gh-merge-state"><span class="gh-state gh-state--${kind}">${escapeHtml(text)}</span>
-      ${pr.defaultBranch && pr.baseRef !== pr.defaultBranch ? `<span class="gh-state gh-state--warn" title="This PR is stacked: merging lands it in ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}">Merges into ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}</span>` : ''}
-      ${pr.mergeState === 'DIRTY' || pr.autorebase.failed ? `<span class="ws-flex"></span>
-      <button type="button" class="ws-btn" id="gh-resolve" ${resolving ? 'disabled' : ''} title="${resolving ? 'A Claude session is already working on this PR; see below' : `Start a Claude session in your local clone that rebases ${escapeHtml(pr.headRef)} onto ${escapeHtml(pr.baseRef)} in a worktree, resolves the conflicts, runs the tests and force-pushes with lease`}">${ICONS.claude(13)}<span>${resolving ? 'Resolving with Claude\u2026' : 'Resolve conflicts with Claude'}</span></button>` : ''}</div>
-    <div class="gh-merge-row">
-      ${autorebase}
+  const resolve = pr.mergeState === 'DIRTY' || pr.autorebase.failed
+    ? `<span class="ws-flex"></span><button type="button" class="ws-btn" id="gh-resolve" ${resolving ? 'disabled' : ''} title="${resolving ? 'A Claude session is already working on this PR; see below' : `Start a Claude session in your local clone that rebases ${escapeHtml(pr.headRef)} onto ${escapeHtml(pr.baseRef)} in a worktree, resolves the conflicts, runs the tests and force-pushes with lease`}">${ICONS.claude(13)}<span>${resolving ? 'Resolving with Claude…' : 'Resolve conflicts with Claude'}</span></button>`
+    : '';
+  return githubStatusRow('Merge', `<div class="gh-srow-line"><span class="gh-state gh-state--${kind}">${escapeHtml(text)}</span>${resolve}</div>`
+    + (pr.defaultBranch && pr.baseRef !== pr.defaultBranch ? `<div class="gh-srow-line"><span class="gh-state gh-state--warn" title="This PR is stacked: merging lands it in ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}">Merges into ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}</span></div>` : '')
+    + `<div class="gh-srow-line">${autorebase}</div>`);
+}
+
+/** The card's last line: auto-merge and the merge button, on an open PR. */
+function githubMergeButtons(pr, state) {
+  if (pr.state !== 'OPEN') return '';
+  const method = state.mergeMethod && pr.mergeMethods.includes(state.mergeMethod) ? state.mergeMethod : pr.mergeMethods[0];
+  const can = !pr.isDraft && MERGEABLE_STATES.has(pr.mergeState) && !!method && state.busy !== 'merge';
+  const [, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
+  return `<div class="gh-merge-row">
       <span class="ws-flex"></span>
       ${githubAutoMergeHtml(pr, state, method, can)}
       <div class="gh-merge-btns">
         <button type="button" class="ws-btn ws-btn--primary gh-merge-btn" id="gh-merge" ${can ? '' : 'disabled'} title="${can ? `${MERGE_LABELS[method]} into ${escapeHtml(pr.baseRef)}` : escapeHtml(text)}">${state.busy === 'merge' ? 'Merging…' : MERGE_LABELS[method] || 'Merge'}</button>
         ${pr.mergeMethods.length > 1 ? `<button type="button" class="ws-btn ws-btn--primary gh-merge-more" id="gh-merge-method" title="Choose how to merge">${PICONS.chevronDown(11)}</button>` : ''}
       </div>
-    </div>
-    ${state.notice ? `<div class="gh-notice gh-notice--${state.notice.kind}">${escapeHtml(state.notice.text)}</div>` : ''}
-  </div>`;
+    </div>`;
+}
+
+function githubStatusCard(pr, state, project) {
+  return `<div class="gh-sec gh-status">${githubChecksRow(pr, state)}${githubReviewsRow(pr, state)}${githubMergeRow(pr, state, project)}${githubMergeButtons(pr, state)}`
+    + `${state.notice ? `<div class="gh-notice gh-notice--${state.notice.kind}">${escapeHtml(state.notice.text)}</div>` : ''}</div>`;
 }
 
 // --- Resolving conflicts in a Claude session ---
@@ -1437,11 +1449,8 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
           <button type="button" class="gh-files-link" id="gh-files-changed" title="Review the changes file by file">${PICONS.file(12)}<span>${detail.changedFiles} file${detail.changedFiles === 1 ? '' : 's'}</span>${PICONS.chevronRight(10)}</button></div>
         ${githubDescriptionHtml(detail, state)}
       </div>
-      ${githubMergeSection(detail, state, project)}
+      ${githubStatusCard(detail, state, project)}
       ${githubSessionsSection(project, detail)}
-      ${githubChecksSection(detail, state)}
-      ${githubMyReviewSection(detail, state)}
-      ${githubReviewsSection(detail, state)}
       ${githubConversation(detail)}`;
   } else {
     body = `

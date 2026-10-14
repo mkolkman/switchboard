@@ -7530,13 +7530,10 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-mine { font-size: 9.5px; letter-spacing: 0.02em; }
 .gh-mine--reviewed { color: #6fcf8f; }
 .gh-mine--changed { color: #e0b860; }
-.gh-myrev-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
-.gh-myrev-text { flex: 1; min-width: 0; font-size: 12px; color: #c4c4d8; }
-.gh-myrev-text code { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; color: #c8c8dc; }
+.gh-myrev-row code { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; color: #c8c8dc; }
 .gh-mark-reviewed[disabled] { opacity: 0.45; cursor: not-allowed; }
 
-/* Review requests in the panel's Reviews section. */
-.gh-reviews-h { display: flex; align-items: center; gap: 8px; }
+/* Review requests in the panel's Reviews row. */
 .gh-request-review { gap: 4px; text-transform: none; letter-spacing: 0; }
 .gh-unrequest { padding: 0 4px; opacity: 0.55; }
 .gh-unrequest:hover { opacity: 1; }
@@ -7634,7 +7631,16 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-state--muted { color: #8a8aa0; }
 .gh-state--merged { color: #c49cf5; }
 
-.gh-merge { display: flex; flex-direction: column; gap: 10px; background: rgba(120,130,255,0.04); }
+/* The status card: a label column, and per row a line with its action on the right. */
+.gh-status { display: flex; flex-direction: column; gap: 10px; background: rgba(120,130,255,0.04); }
+.gh-srow { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; align-items: start; }
+.gh-srow-label { padding-top: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #7a7a92; }
+.gh-srow-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gh-srow-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 24px; }
+button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.gh-srow-line .arrow { color: #7a7a92; }
+.gh-srow-line #gh-resolve { gap: 6px; }
+.gh-status .gh-fold-body { padding: 2px 0 4px; }
 .gh-thread-show { flex-shrink: 0; margin-left: auto; }
 .gh-review-mode { display: inline-flex; margin-left: 8px; }
 .gh-review-mode .ws-ghost.active { background: rgba(120,130,255,0.16); color: #c0c4ff; }
@@ -7658,7 +7664,7 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-req { font-size: 9.5px; color: #a0a6e8; border: 1px solid rgba(160,166,232,0.3); border-radius: 7px; padding: 0 5px; }
 .gh-ci--skip { background: #55556a; }
 
-.gh-review-row { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; }
+.gh-review-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 2px 0; }
 
 .gh-md { font-size: 12.5px; line-height: 1.55; color: #c4c4d8; overflow-wrap: anywhere; }
 .gh-md > :first-child { margin-top: 0; }
@@ -7680,8 +7686,6 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-thread { margin: 4px 0 8px; padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.025); }
 .gh-thread summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
 .gh-path { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; color: #a0a6e8; }
-.gh-merge-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
-.gh-merge-state #gh-resolve { gap: 6px; }
 /* A merged PR in the panel tabs; the list's ✓ means approved, so not that. */
 .gh-ptab-merged { flex: none; color: #c49cf5; }
 
