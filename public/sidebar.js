@@ -344,6 +344,8 @@ function buildSessionsList(fId, visible, older) {
 // morphdom callback: carry DOM-only state (collapse, expansion, an open rename)
 // from the element on screen to its replacement. Shared with the Projects tab.
 function preserveSidebarDomState(fromEl, toEl) {
+  // The keyboard cursor (sidebar-keyboard.js) stays where it was.
+  if (fromEl.classList.contains('kbd-cursor')) toEl.classList.add('kbd-cursor');
   // Skip updating session items that have an active rename input
   if (fromEl.classList.contains('session-item') && fromEl.querySelector('.session-rename-input')) {
     return false;
@@ -408,7 +410,8 @@ function renderProjects(projects, resort) {
   // interacting with an input/textarea (search box, rename input, dialogs, etc.)
   const ae = document.activeElement;
   const isUserTyping = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable || ae.closest('.modal-overlay'));
-  if (activeSessionId && openSessions.has(activeSessionId) && !isUserTyping) {
+  const listHasKeyboard = typeof isSidebarFocused === 'function' && isSidebarFocused();
+  if (activeSessionId && openSessions.has(activeSessionId) && !isUserTyping && !listHasKeyboard) {
     openSessions.get(activeSessionId).terminal.focus();
   }
 }

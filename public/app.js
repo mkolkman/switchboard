@@ -1535,6 +1535,8 @@ initGridObservers();
   resortBtn.parentElement.insertBefore(groupModeBtn, newSessionBtn);
   updateGroupModeButton();
 
+  installSidebarKeyboard();
+
   // Global keyboard shortcuts (covers non-terminal focus)
   // When a terminal is focused, xterm's customKeyEventHandler fires first and sets
   // e._handled to prevent the document listener from double-firing the same action.
