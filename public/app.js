@@ -1090,24 +1090,6 @@ function repoLaunchTargets() {
     .sort((a, b) => b.lastActivity - a.lastActivity || a.info.name.localeCompare(b.info.name));
 }
 
-function showSidebarNewSessionMenu(anchor) {
-  const rect = anchor.getBoundingClientRect();
-  const repos = repoLaunchTargets();
-  showContextMenu([
-    { label: 'Chat', hint: 'no repository', icon: ICONS.claude(14), onClick: launchChatSession },
-    { sep: true },
-    { head: repos.length ? 'In a repository' : 'No repositories yet' },
-    ...repos.map(({ info, project }) => {
-      const folder = folderBaseName(project.projectPath);
-      return {
-        label: info.name,
-        hint: folder === info.name ? '' : folder,
-        onClick: async () => launchWithDefaultCli(project, await resolveDefaultSessionOptions(project)),
-      };
-    }),
-  ], { x: rect.left, y: rect.bottom + 4 });
-}
-
 function setSidebarGroupMode(mode) {
   if (!isGroupMode(mode) || mode === sidebarGroupMode) return;
   sidebarGroupMode = mode;
@@ -1513,11 +1495,11 @@ initGridObservers();
   const newSessionBtn = document.createElement('button');
   newSessionBtn.id = 'new-session-btn';
   newSessionBtn.type = 'button';
-  newSessionBtn.title = 'New session: a chat, or a session in a repository';
-  newSessionBtn.setAttribute('aria-label', newSessionBtn.title);
-  newSessionBtn.setAttribute('aria-haspopup', 'menu');
-  newSessionBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg><svg class="chevron" width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m2 3.5 3 3 3-3"/></svg>';
-  newSessionBtn.addEventListener('click', () => showSidebarNewSessionMenu(newSessionBtn));
+  newSessionBtn.title = `New session: a chat, or a session in a repository (${isMac ? '\u2318A' : 'Ctrl+A'})`;
+  newSessionBtn.setAttribute('aria-label', 'New session');
+  newSessionBtn.setAttribute('aria-haspopup', 'dialog');
+  newSessionBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
+  newSessionBtn.addEventListener('click', () => showProjectPickerDialog());
   resortBtn.parentElement.insertBefore(newSessionBtn, gridToggleBtn);
 
   // Group by: folder, repository, customer or status.
