@@ -1379,26 +1379,32 @@ function bindGithubSessions(project, panel) {
   }));
 }
 
-function githubConversation(detail) {
-  const comments = detail.comments || [];
-  const threads = detail.threads || [];
-  const open = threads.filter(t => !t.resolved);
-  let html = `<div class="gh-sec"><div class="gh-sec-h">Conversation <span class="gh-muted">${comments.length}</span></div>`;
-  html += comments.length ? comments.map(c => {
-    const review = c.kind === 'review' ? (REVIEW_STATE_TEXT[c.state] || ['muted', ''])[1] : '';
-    return `<div class="gh-comment"><div class="gh-comment-h"><span class="gh-who">${escapeHtml(c.author)}</span>${review ? `<span class="gh-muted">${escapeHtml(review)}</span>` : ''}<span class="ws-flex"></span><a class="gh-muted" href="${escapeHtml(c.url)}">${escapeHtml(githubAgo(c.at))}</a></div><div class="gh-md">${githubMarkdown(c.body)}</div></div>`;
-  }).join('') : '<div class="gh-muted">No comments.</div>';
-  html += '</div>';
-  if (threads.length) {
-    html += `<div class="gh-sec"><div class="gh-sec-h">Review threads <span class="gh-muted">${open.length} unresolved of ${threads.length}</span></div>`;
-    html += [...open, ...threads.filter(t => t.resolved)].map(t => `
-      <details class="gh-thread" ${t.resolved ? '' : 'open'}>
-        <summary><span class="gh-path">${escapeHtml(t.path)}${t.line ? ':' + t.line : ''}</span>${t.resolved ? '<span class="gh-muted">resolved</span>' : ''}${t.outdated ? '<span class="gh-muted">outdated</span>' : ''}<span class="ws-flex"></span>${t.comments[0]?.url ? `<button type="button" class="ws-ghost ws-ghost--sm gh-thread-show" data-thread-url="${githubAttr(t.comments[0].url)}" data-path="${githubAttr(t.path)}" title="Show this thread in its file, in Files changed">Show in file ${PICONS.chevronRight(10)}</button>` : ''}</summary>
-        ${t.comments.map(c => `<div class="gh-comment"><div class="gh-comment-h"><span class="gh-who">${escapeHtml(c.author)}</span><span class="ws-flex"></span><a class="gh-muted" href="${escapeHtml(c.url)}">${escapeHtml(githubAgo(c.at))}</a></div><div class="gh-md">${githubMarkdown(c.body)}</div></div>`).join('')}
-      </details>`).join('');
-    html += '</div>';
-  }
-  return html;
+function githubTimelineComment(c) {
+  const review = c.kind === 'review' ? (REVIEW_STATE_TEXT[c.state] || ['muted', ''])[1] : '';
+  return `<div class="gh-comment"><div class="gh-comment-h"><span class="gh-who">${escapeHtml(c.author)}</span>${review ? `<span class="gh-muted">${escapeHtml(review)}</span>` : ''}<span class="ws-flex"></span><a class="gh-muted" href="${escapeHtml(c.url)}">${escapeHtml(githubAgo(c.at))}</a></div><div class="gh-md">${githubMarkdown(c.body)}</div></div>`;
+}
+
+// A review thread folds shut once resolved; opening or closing one by hand
+// holds across the live repaints.
+function githubTimelineThread(t, state) {
+  const key = `thread:${t.comments[0]?.url || t.path}`;
+  const open = state.open.has(key) ? state.open.get(key) : !t.resolved;
+  return `<details class="gh-thread" data-key="${githubAttr(key)}" data-resolved="${t.resolved}" ${open ? 'open' : ''}>
+    <summary><span class="gh-path">${escapeHtml(t.path)}${t.line ? ':' + t.line : ''}</span>${t.resolved ? '<span class="gh-muted">resolved</span>' : ''}${t.outdated ? '<span class="gh-muted">outdated</span>' : ''}<span class="ws-flex"></span>${t.comments[0]?.url ? `<button type="button" class="ws-ghost ws-ghost--sm gh-thread-show" data-thread-url="${githubAttr(t.comments[0].url)}" data-path="${githubAttr(t.path)}" title="Show this thread in its file, in Files changed">Show in file ${PICONS.chevronRight(10)}</button>` : ''}</summary>
+    ${t.comments.map(c => githubTimelineComment(c)).join('')}
+  </details>`;
+}
+
+/** Comments and review threads as one conversation, oldest first; a thread sits where it started. */
+function githubTimeline(detail, state) {
+  const entries = [
+    ...(detail.comments || []).map(c => ({ at: c.at, html: githubTimelineComment(c) })),
+    ...(detail.threads || []).map(t => ({ at: t.comments[0]?.at, html: githubTimelineThread(t, state) })),
+  ].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+  const open = (detail.threads || []).filter(t => !t.resolved).length;
+  return `<div class="gh-sec gh-timeline"><div class="gh-sec-h">Conversation <span class="gh-muted">${entries.length}${open ? `, ${open} unresolved thread${open === 1 ? '' : 's'}` : ''}</span></div>`
+    + (entries.length ? entries.map(e => e.html).join('') : '<div class="gh-muted">No comments.</div>')
+    + '</div>';
 }
 
 function paintGithubPanel(project, { resetScroll = false } = {}) {
@@ -1453,7 +1459,7 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
       </div>
       ${githubStatusCard(detail, state, project)}
       ${githubSessionsSection(project, detail)}
-      ${githubConversation(detail)}`;
+      ${githubTimeline(detail, state)}`;
   } else {
     body = `
       <div class="gh-sec gh-pr-head">
@@ -1461,7 +1467,7 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
         ${githubDescriptionHtml(detail, state)}
       </div>
       ${githubDepsSection(item, state)}
-      ${githubConversation(detail)}`;
+      ${githubTimeline(detail, state)}`;
   }
 
   // The title leads; a panel still reading shows the list's title for it.
@@ -1507,6 +1513,14 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
     h.onclick = () => {
       const fold = h.parentElement;
       state.open.set(fold.dataset.key, fold.classList.toggle('collapsed') === false);
+    };
+  });
+  panel.querySelectorAll('.gh-thread').forEach(t => {
+    // Only a choice that differs from the default is kept, so a thread
+    // resolved later still folds shut (toggle also fires on first paint).
+    t.ontoggle = () => {
+      if (t.open === (t.dataset.resolved !== 'true')) state.open.delete(t.dataset.key);
+      else state.open.set(t.dataset.key, t.open);
     };
   });
   panel.querySelectorAll('.gh-desc-more').forEach(btn => {
