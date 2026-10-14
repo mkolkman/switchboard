@@ -896,6 +896,23 @@ function githubReviewsSection(pr, state) {
     ${rows.length ? rows.join('') : '<div class="gh-muted">No reviews yet.</div>'}</div>`;
 }
 
+/**
+ * GitHub's auto-merge: on, with who turned it on and how it merges, or a
+ * button to turn it on while the PR cannot merge yet (checks running, review
+ * pending). GitHub refuses it on a PR that can merge right now.
+ */
+function githubAutoMergeHtml(pr, state, method, canMergeNow) {
+  const auto = pr.autoMerge;
+  if (!auto?.allowed || pr.isDraft) return '';
+  if (auto.on) {
+    const how = MERGE_LABELS[auto.method] || 'merge';
+    return `<span class="gh-state gh-state--ok" title="${githubAttr(`GitHub will ${how.toLowerCase()} once the requirements are met.${auto.by ? ` Turned on by ${auto.by}` : ''}${auto.at ? ` ${githubAgo(auto.at)}` : ''}`)}">Auto-merge on</span>
+      <button type="button" class="ws-ghost ws-ghost--sm" id="gh-automerge-off" ${state.busy ? 'disabled' : ''} title="Turn auto-merge off">${state.busy === 'automerge' ? 'Turning off…' : 'Disable'}</button>`;
+  }
+  if (canMergeNow || !method) return '';
+  return `<button type="button" class="ws-btn" id="gh-automerge" ${state.busy ? 'disabled' : ''} title="${githubAttr(`GitHub will ${MERGE_LABELS[method].toLowerCase()} into ${pr.baseRef} by itself once checks and reviews pass`)}">${state.busy === 'automerge' ? 'Enabling…' : 'Enable auto-merge'}</button>`;
+}
+
 function githubMergeSection(pr, state, project) {
   const prKey = `${pr.repo}#${pr.number}`;
   const resolving = state.busy === 'resolve' || (!!project && prSessionIds(project, prKey).some(id => prSessionState(id)[0] !== 'stopped'));
@@ -922,6 +939,7 @@ function githubMergeSection(pr, state, project) {
     <div class="gh-merge-row">
       ${autorebase}
       <span class="ws-flex"></span>
+      ${githubAutoMergeHtml(pr, state, method, can)}
       <div class="gh-merge-btns">
         <button type="button" class="ws-btn ws-btn--primary gh-merge-btn" id="gh-merge" ${can ? '' : 'disabled'} title="${can ? `${MERGE_LABELS[method]} into ${escapeHtml(pr.baseRef)}` : escapeHtml(text)}">${state.busy === 'merge' ? 'Merging…' : MERGE_LABELS[method] || 'Merge'}</button>
         ${pr.mergeMethods.length > 1 ? `<button type="button" class="ws-btn ws-btn--primary gh-merge-more" id="gh-merge-method" title="Choose how to merge">${PICONS.chevronDown(11)}</button>` : ''}
@@ -1459,6 +1477,14 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
     bindGithubSessions(project, panel);
     const filesBtn = panel.querySelector('#gh-files-changed');
     if (filesBtn) filesBtn.onclick = () => openGithubReview(project, `${detail.repo}#${detail.number}`, detail.title);
+    // A review thread: its file in Files changed, scrolled to the thread.
+    panel.querySelectorAll('.gh-thread-show').forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openGithubReview(project, `${detail.repo}#${detail.number}`, detail.title, { path: btn.dataset.path, threadUrl: btn.dataset.threadUrl });
+      };
+    });
   }
 }
 
@@ -1477,14 +1503,6 @@ function bindGithubPrActions(project, panel, pr) {
       paintGithubPanel(project);
     };
   }
-    // A review thread: its file in Files changed, scrolled to the thread.
-    panel.querySelectorAll('.gh-thread-show').forEach(btn => {
-      btn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openGithubReview(project, `${detail.repo}#${detail.number}`, detail.title, { path: btn.dataset.path, threadUrl: btn.dataset.threadUrl });
-      };
-    });
   // Review requests: a change shows in the panel and in the list's chips.
   const setRequest = async (login, on) => {
     state.busy = 'request';
@@ -1550,6 +1568,21 @@ function bindGithubPrActions(project, panel, pr) {
       onClick: () => { state.mergeMethod = m; paintGithubPanel(project); },
     })), { anchor: e.currentTarget });
   }
+  const setAutoMerge = async (on) => {
+    const method = state.mergeMethod && pr.mergeMethods.includes(state.mergeMethod) ? state.mergeMethod : pr.mergeMethods[0];
+    if (on && !confirm(`Enable auto-merge?\n\n${pr.repo}#${pr.number}: ${pr.title}\nGitHub will ${MERGE_LABELS[method].toLowerCase()} into ${pr.baseRef} once checks and reviews pass.`)) return;
+    state.busy = 'automerge';
+    paintGithubPanel(project);
+    const result = await window.api.setGithubAutoMerge(target, { on, method });
+    state.busy = null;
+    state.notice = result?.error ? { kind: 'bad', text: result.error } : { kind: 'ok', text: on ? 'Auto-merge is on.' : 'Auto-merge is off.' };
+    await loadGithubDetail(project, { quiet: true });
+    paintGithubPanel(project);
+  };
+  const autoOn = panel.querySelector('#gh-automerge');
+  if (autoOn) autoOn.onclick = () => setAutoMerge(true);
+  const autoOff = panel.querySelector('#gh-automerge-off');
+  if (autoOff) autoOff.onclick = () => setAutoMerge(false);
   const mergeBtn = panel.querySelector('#gh-merge');
   if (mergeBtn) {
     mergeBtn.onclick = async () => {

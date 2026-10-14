@@ -845,13 +845,14 @@ const COMMENT_FIELDS = 'author { login } body createdAt url';
 async function getPullRequest(owner, repo, number) {
   const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!, $me: String) {
     repository(owner: $owner, name: $repo) {
-      nameWithOwner squashMergeAllowed rebaseMergeAllowed mergeCommitAllowed defaultBranchRef { name }
+      nameWithOwner squashMergeAllowed rebaseMergeAllowed mergeCommitAllowed autoMergeAllowed defaultBranchRef { name }
       autorebase: label(name: "${AUTOREBASE_LABEL}") { id }
       pullRequest(number: $number) {
         id number title url state isDraft merged mergedAt mergeCommit { oid } body createdAt updatedAt
         author { login }
         headRefName baseRefName headRefOid
         mergeable mergeStateStatus reviewDecision
+        autoMergeRequest { enabledBy { login } mergeMethod enabledAt }
         additions deletions changedFiles
         labels(first: 30) { nodes { name } }
         reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } ... on Bot { login } } } }
@@ -895,6 +896,14 @@ async function getPullRequest(owner, repo, number) {
     mergeMethods: [
       r.squashMergeAllowed && 'SQUASH', r.rebaseMergeAllowed && 'REBASE', r.mergeCommitAllowed && 'MERGE',
     ].filter(Boolean),
+    // GitHub merges it by itself once the requirements are met (checks, reviews).
+    autoMerge: {
+      allowed: !!r.autoMergeAllowed,
+      on: !!pr.autoMergeRequest,
+      method: pr.autoMergeRequest?.mergeMethod || null,
+      by: pr.autoMergeRequest?.enabledBy?.login || null,
+      at: pr.autoMergeRequest?.enabledAt || null,
+    },
     requested: (pr.reviewRequests?.nodes || []).map(n => n.requestedReviewer)
       .filter(r => r && !isIgnoredReviewer(r.__typename === 'Team' ? { login: r.name, __typename: 'Team' } : r))
       .map(r => r.login || r.name),
@@ -994,6 +1003,24 @@ async function mergePullRequest(owner, repo, number, { method, expectedHeadOid }
   // Every tracker that lists this PR is stale now.
   cache.clear();
   return { ok: true, merged: !!res?.mergePullRequest?.pullRequest?.merged };
+}
+
+/** Turn GitHub's auto-merge on (with a merge method) or off for a PR. */
+async function setAutoMerge(owner, repo, number, { on, method }) {
+  if (on && !MERGE_METHODS.has(method)) throw new Error(`Unknown merge method: ${method}`);
+  const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id } }
+  }`, { owner, repo, number });
+  const id = data?.repository?.pullRequest?.id;
+  if (!id) throw new Error(`${owner}/${repo}#${number} was not found.`);
+  if (on) {
+    await graphql(`mutation($id: ID!, $method: PullRequestMergeMethod!) {
+      enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) { pullRequest { id } }
+    }`, { id, method });
+  } else {
+    await graphql(`mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { id } } }`, { id });
+  }
+  return { ok: true };
 }
 
 /** A file's text at a commit, for the whole-file view of a PR's diff. */
@@ -1394,7 +1421,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,

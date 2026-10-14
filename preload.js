@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('api', {
   getGithubIssue: (target) => ipcRenderer.invoke('github-issue', target),
   getGithubPullRequestFiles: (target) => ipcRenderer.invoke('github-pr-files', target),
   getMyGithubPullRequests: () => ipcRenderer.invoke('github-my-prs'),
+  setGithubAutoMerge: (target, opts) => ipcRenderer.invoke('github-set-automerge', target, opts),
   getGithubFileContent: (target, filePath, ref) => ipcRenderer.invoke('github-file-content', target, filePath, ref),
   getSleepDisabled: () => ipcRenderer.invoke('get-sleep-disabled'),
   setSleepDisabled: (disabled) => ipcRenderer.invoke('set-sleep-disabled', disabled),
