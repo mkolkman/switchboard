@@ -394,11 +394,10 @@ function drawGithubGraphEdges(graph) {
   // A folded column's strip stands in for its cards.
   graph.querySelectorAll('.gh-gstub').forEach(stub => JSON.parse(stub.dataset.keys || '[]').forEach(k => cards.set(k, stub)));
   const drawn = new Set();
-  // Measured without the old arrows, which would hold the graph at their size.
-  svg.setAttribute('width', 0);
-  svg.setAttribute('height', 0);
-  svg.setAttribute('width', graph.scrollWidth);
-  svg.setAttribute('height', graph.scrollHeight);
+  // A point the arrows overflow from: an SVG the size of the graph would add
+  // to its scroll area itself, and could leave a scrollbar when it all fits.
+  svg.setAttribute('width', 1);
+  svg.setAttribute('height', 1);
   const at = (el) => {
     const r = el.getBoundingClientRect();
     return { l: r.left - box.left + graph.scrollLeft, r: r.right - box.left + graph.scrollLeft, y: r.top - box.top + graph.scrollTop + r.height / 2 };
