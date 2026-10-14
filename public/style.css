@@ -7698,6 +7698,58 @@ body.fp-resizing webview { pointer-events: none; }
 .ghv-row-author { font-size: 10.5px; color: #6a6a80; }
 .ghv-empty { padding: 6px 8px 10px; font-size: 11.5px; color: #6a6a80; }
 
+/* ---- Help Scout tab: the inbox in the sidebar, one conversation in the main area ---- */
+#helpscout-viewer { position: absolute; inset: 0; display: flex; flex-direction: column; background: #111118; min-height: 0; }
+#helpscout-content { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; }
+#helpscout-content::-webkit-scrollbar, .hsv-body::-webkit-scrollbar { width: 5px; }
+#helpscout-content::-webkit-scrollbar-thumb, .hsv-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+.hsv-mailboxes { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 4px; }
+.hsv-mailboxes .ws-ghost.active, .hsv-tabs .ws-ghost.active { background: rgba(120,130,255,0.16); color: #c0c4ff; }
+.hsv-group-h { cursor: pointer; user-select: none; }
+.hsv-arrow { display: inline-flex; transition: transform 0.12s; }
+.hsv-arrow.shut { transform: rotate(-90deg); }
+.hsv-pending { font-size: 10px; color: #d8b26a; }
+.hsv-kind { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,0.06); color: #a0a0b8; }
+.hsv-kind--faq { background: rgba(126,226,160,0.12); color: #7ee2a0; }
+.hsv-kind--feature { background: rgba(122,132,255,0.14); color: #a6abff; }
+.hsv-kind--issue { background: rgba(224,138,138,0.14); color: #e08a8a; }
+.hsv-kind--incident { background: rgba(216,178,106,0.14); color: #d8b26a; }
+.hsv-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px 40px; }
+.hsv-page { max-width: 900px; }
+.hsv-head { padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); margin-bottom: 12px; }
+.hsv-subject { font-size: 16px; font-weight: 600; color: #e0e0f0; line-height: 1.35; }
+.hsv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; font-size: 11.5px; color: #8a8aa0; }
+.hsv-meta .mono { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; color: #7f86c8; }
+.hsv-tag { padding: 0 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: #a0a0b8; }
+.hsv-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+.hsv-control { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #8a8aa0; }
+.hsv-control select { background: rgba(255,255,255,0.05); color: #d0d0e0; border: 1px solid rgba(255,255,255,0.08); border-radius: 5px; padding: 3px 6px; font-size: 12px; }
+.hsv-controls .ws-ghost span { margin-left: 5px; }
+.hsv-notice { padding: 6px 10px; margin-bottom: 10px; border-radius: 6px; background: rgba(126,226,160,0.08); color: #a8e8c0; font-size: 12px; }
+.hsv-notice.gh-error { background: rgba(224,138,138,0.1); }
+.hsv-sugs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.hsv-sug { padding: 8px 10px; border-radius: 7px; border: 1px solid rgba(216,178,106,0.2); background: rgba(216,178,106,0.05); }
+.hsv-sug--done { opacity: 0.6; }
+.hsv-sug-h { display: flex; align-items: center; gap: 6px; }
+.hsv-sug-text { margin-top: 6px; font-size: 12px; line-height: 1.5; color: #b8b8cc; white-space: pre-wrap; }
+.hsv-composer { margin-bottom: 16px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
+.hsv-tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.hsv-compose { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; line-height: 1.5; color: #e0e0f0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; outline: none; }
+.hsv-compose:focus { border-color: rgba(128,136,255,0.5); }
+.hsv-compose-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.hsv-threads { display: flex; flex-direction: column; gap: 10px; }
+.hsv-thread { padding: 10px 12px; border-radius: 8px; background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.05); }
+.hsv-thread--customer { border-left: 2px solid #7f86c8; }
+.hsv-thread--note { background: rgba(216,178,106,0.06); border-color: rgba(216,178,106,0.18); }
+.hsv-thread-h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11.5px; }
+.hsv-thread-kind { font-weight: 700; color: #c0c0d8; }
+.hsv-thread-from { color: #8a8aa0; }
+.hsv-thread-text { font-size: 13px; line-height: 1.55; color: #c8c8dc; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hsv-attachments { margin-top: 6px; font-size: 11.5px; color: #8a8aa0; }
+.hsv-link { color: #9aa2ff; text-decoration: none; }
+.hsv-link:hover { text-decoration: underline; }
+.hsv-lineitem { font-size: 11px; color: #6a6a80; padding: 0 12px; }
+
 /* ---- Wayfinder: the next ticket on a map's frontier ---- */
 .wf-dialog { width: 560px; max-width: calc(100vw - 32px); }
 .wf-ticket { margin: 10px 0 12px; padding: 12px 14px; border-radius: 8px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }

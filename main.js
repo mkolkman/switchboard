@@ -54,6 +54,7 @@ const { createPreviewMcpServer } = require('./preview-mcp');
 const { repoInfoForPaths, findLocalClones } = require('./repo-info');
 const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
+const helpscout = require('./helpscout');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -794,6 +795,17 @@ ipcMain.handle('github-clone-repo', (_e, repoFull) => {
 ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTracker.mergePullRequest(...ghTarget(t), {
   method: String(opts?.method || ''), expectedHeadOid: String(opts?.expectedHeadOid || ''),
 })));
+// --- IPC: Help Scout (helpscout.js) ---
+// Each write is a click in the Help Scout tab. A reply is always a draft:
+// you send it in Help Scout itself.
+ipcMain.handle('helpscout-inbox', () => helpscout.asResult(helpscout.getInbox()));
+ipcMain.handle('helpscout-conversation', (_e, id) => helpscout.asResult(helpscout.getConversation(id)));
+ipcMain.handle('helpscout-save-draft', (_e, id, spec) => helpscout.asResult(helpscout.saveDraft(id, spec || {})));
+ipcMain.handle('helpscout-add-note', (_e, id, text) => helpscout.asResult(helpscout.addNote(id, String(text || ''))));
+ipcMain.handle('helpscout-assign', (_e, id, assigneeId) => helpscout.asResult(helpscout.assign(id, assigneeId || null)));
+ipcMain.handle('helpscout-set-status', (_e, id, status) => helpscout.asResult(helpscout.setStatus(id, String(status || ''))));
+ipcMain.handle('helpscout-set-suggestion', (_e, sid, status) => helpscout.asResult(helpscout.setSuggestionStatus(sid, String(status || ''))));
+
 // --- IPC: the Notion todo list (notion-todo.js) ---
 // The token is the first secret Switchboard keeps, so it is stored encrypted
 // with safeStorage and never sent to the renderer.

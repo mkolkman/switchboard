@@ -92,7 +92,7 @@ let activePtyIds = new Set();
 let sortedOrder = []; // [{ projectPath, itemIds: [itemId, ...] }, ...] — single source of truth for sidebar order
 // Only Sessions and Projects are remembered: the others (Plans, Agent Files,
 // Stats) are places you visit, not places you work from.
-const REMEMBERED_TABS = ['sessions', 'projects', 'github', 'todo'];
+const REMEMBERED_TABS = ['sessions', 'projects', 'github', 'todo', 'helpscout'];
 const LAST_TAB_KEY = 'lastTab';
 function rememberedTab() {
   try {
@@ -1310,6 +1310,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     if (activeTab === 'projects' && typeof leaveProjectViews === 'function') leaveProjectViews();
     if (activeTab === 'github' && typeof hideGithubView === 'function') hideGithubView();
     if (activeTab === 'todo' && typeof hideTodoView === 'function') hideTodoView();
+    if (activeTab === 'helpscout' && typeof hideHelpscoutView === 'function') hideHelpscoutView();
     activeTab = tabName;
     if (REMEMBERED_TABS.includes(tabName)) { try { localStorage.setItem(LAST_TAB_KEY, tabName); } catch {} }
     document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
@@ -1329,6 +1330,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     memoryContent.style.display = 'none';
     document.getElementById('github-content').style.display = 'none';
     document.getElementById('todo-content').style.display = 'none';
+    document.getElementById('helpscout-content').style.display = 'none';
     sessionFilters.style.display = 'none';
     searchBar.style.display = 'none';
 
@@ -1379,6 +1381,9 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     } else if (tabName === 'todo') {
       document.getElementById('todo-content').style.display = '';
       showTodoView();
+    } else if (tabName === 'helpscout') {
+      document.getElementById('helpscout-content').style.display = '';
+      showHelpscoutView();
     } else if (tabName === 'plans') {
       searchBar.style.display = '';
       searchInput.placeholder = 'Search plans...';
@@ -1595,9 +1600,9 @@ loadProjects().then(async () => {
   // point, so an already-open entry still needs showSession().
   if (activeSessionId) {
     const session = sessionMap.get(activeSessionId);
-    // The GitHub and Todo tabs have no terminal in view: the session comes
-    // back in the background instead of covering it.
-    const focus = activeTab !== 'github' && activeTab !== 'todo';
+    // The GitHub, Todo and Help Scout tabs have no terminal in view: the
+    // session comes back in the background instead of covering it.
+    const focus = !['github', 'todo', 'helpscout'].includes(activeTab);
     if (session?.archived) {
       setActiveSession(null);
     } else if (session) {

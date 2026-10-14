@@ -1,0 +1,332 @@
+// --- Help Scout tab: the support inbox, worked from Switchboard ---
+// The sidebar groups the conversations the way Help Scout's folders do
+// (Unassigned, Mine, Assigned, Closed, Spam), plus the suggestions the
+// customer-support skill saved to log later. The main area is one
+// conversation: its threads, its status and assignee, a note, and your
+// draft reply. A reply is only ever a draft; "Send in Help Scout" opens the
+// conversation there, because the API cannot publish a draft. Main does the
+// API calls (helpscout.js).
+// Depends on: utils.js (escapeHtml, formatDate), projects-view.js (PICONS,
+// showContextMenu), dialogs.js (resolveDefaultSessionOptions), app.js
+// (launchNewSession, encodeProjectPath).
+
+const helpscoutViewContent = document.getElementById('helpscout-content');
+const helpscoutViewer = document.getElementById('helpscout-viewer');
+const HELPSCOUT_VIEW_REFRESH_MS = 2 * 60 * 1000;
+const HELPSCOUT_GROUPS = [
+  { id: 'unassigned', label: 'Unassigned', hint: 'Open conversations nobody has' },
+  { id: 'mine', label: 'Mine', hint: 'Open conversations assigned to you' },
+  { id: 'assigned', label: 'Assigned', hint: 'Open conversations assigned to someone else' },
+  { id: 'closed', label: 'Closed', hint: 'The most recently closed conversations' },
+  { id: 'spam', label: 'Spam', hint: 'The most recent spam' },
+];
+const HELPSCOUT_STATUSES = ['active', 'pending', 'closed', 'spam'];
+// The skill that logs each kind of suggestion; the rest go back to customer-support.
+const HELPSCOUT_LOG_SKILLS = {
+  faq: '/movelab-claude-skills:log-nohrd-faq',
+  feature: '/movelab-claude-skills:log-feature-request',
+  incident: '/movelab-claude-skills:log-machine-incident',
+};
+const HELPSCOUT_SUPPORT_SKILL = '/movelab-claude-skills:customer-support';
+
+const helpscoutViewState = {
+  inbox: null, error: null, loading: false, timer: null,
+  mailbox: null, // a mailbox id to show only that one, or null for all
+  collapsed: new Set(['closed', 'spam']),
+  selectedId: null, conversation: null, convError: null, convLoading: false,
+  composer: 'reply', busy: null, notice: null,
+};
+
+const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
+
+/** "3h", "2d": how long ago, short, for the list. */
+function helpscoutAgo(iso) {
+  if (!iso) return '';
+  const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  if (mins < 60) return `${mins}m`;
+  if (mins < 48 * 60) return `${Math.round(mins / 60)}h`;
+  return `${Math.round(mins / 1440)}d`;
+}
+
+/** Thread text with its links clickable; everything else escaped. */
+function helpscoutLinkify(text) {
+  return escapeHtml(text).replace(/https?:\/\/[^\s<>"]+[^\s<>".,;:!?)]/g, url => `<a class="hsv-link" href="${url}">${url}</a>`);
+}
+
+async function loadHelpscoutView({ quiet = false } = {}) {
+  if (helpscoutViewState.loading) return;
+  helpscoutViewState.loading = true;
+  if (!quiet) renderHelpscoutViewList();
+  const result = await window.api.getHelpscoutInbox().catch(err => ({ error: err?.message || String(err) }));
+  helpscoutViewState.loading = false;
+  if (result?.error) helpscoutViewState.error = result.error;
+  else { helpscoutViewState.error = null; helpscoutViewState.inbox = result; }
+  renderHelpscoutViewList();
+}
+
+async function openHelpscoutConversation(id, { quiet = false } = {}) {
+  const s = helpscoutViewState;
+  if (s.selectedId !== id) { s.conversation = null; s.notice = null; s.composer = 'reply'; }
+  s.selectedId = id;
+  s.convLoading = true;
+  renderHelpscoutViewList();
+  if (!quiet) renderHelpscoutViewMain();
+  const result = await window.api.getHelpscoutConversation(id).catch(err => ({ error: err?.message || String(err) }));
+  if (s.selectedId !== id) return;
+  s.convLoading = false;
+  if (result?.error) s.convError = result.error;
+  else { s.convError = null; s.conversation = result; }
+  renderHelpscoutViewMain();
+}
+
+/** Run a write, then read the conversation and the list again. */
+async function helpscoutViewWrite(label, call, done) {
+  const s = helpscoutViewState;
+  s.busy = label;
+  s.notice = null;
+  renderHelpscoutViewMain();
+  const result = await call().catch(err => ({ error: err?.message || String(err) }));
+  s.busy = null;
+  s.notice = result?.error ? { bad: true, text: result.error } : { text: done };
+  if (s.selectedId) await openHelpscoutConversation(s.selectedId, { quiet: true });
+  loadHelpscoutView({ quiet: true });
+  return !result?.error;
+}
+
+// --- Sessions ---
+
+async function helpscoutViewSession(prompt) {
+  const folder = await window.api.getChatFolder();
+  if (!folder || folder.error) { alert(`Could not create the chat folder: ${folder?.error || 'unknown error'}`); return; }
+  const target = { folder: encodeProjectPath(folder), projectPath: folder, sessions: [] };
+  const options = await resolveDefaultSessionOptions(target);
+  options.runtime = 'claude';
+  options.initialPrompt = prompt;
+  delete options.worktree;
+  delete options.worktreeName;
+  launchNewSession(target, options, { focus: true });
+}
+
+function helpscoutSupportSession(conv) {
+  helpscoutViewSession(`${HELPSCOUT_SUPPORT_SKILL} Help Scout ticket #${conv.number}: ${conv.url}`);
+}
+
+function helpscoutLogSession(sug) {
+  const skill = HELPSCOUT_LOG_SKILLS[sug.kind];
+  const close = `When it is logged, mark suggestion ${sug.id} as logged with the customer-support skill's helpscout_api.py: \`close ${sug.id}\`.`;
+  helpscoutViewSession(skill
+    ? `${skill} ${sug.text}\n\nFrom Help Scout ticket #${sug.number} (${sug.url}). ${close}`
+    : `${HELPSCOUT_SUPPORT_SKILL} Log this saved ${sug.kind} suggestion from Help Scout ticket #${sug.number} (${sug.url}):\n\n${sug.text}\n\n${close}`);
+}
+
+async function helpscoutSetSuggestion(sid, status) {
+  const result = await window.api.setHelpscoutSuggestion(sid, status).catch(err => ({ error: err?.message || String(err) }));
+  if (result?.error) { alert(result.error); return; }
+  const s = helpscoutViewState;
+  if (s.inbox) s.inbox.suggestions = result.suggestions;
+  if (s.conversation) s.conversation.suggestions = result.suggestions.filter(x => x.conversation === s.conversation.id);
+  renderHelpscoutViewList();
+  renderHelpscoutViewMain();
+}
+
+// --- Sidebar ---
+
+function helpscoutViewRow(c, selectedId) {
+  const who = c.group === 'assigned' && c.assignee ? c.assignee.name : c.customer.name || c.customer.email;
+  const ago = helpscoutAgo(c.group === 'closed' || c.group === 'spam' ? c.updatedAt : c.waitingSince || c.updatedAt);
+  return `<div class="ghv-row${c.id === selectedId ? ' selected' : ''}" data-conv="${c.id}" title="${hsvAttr(`#${c.number} ${c.subject}\n${c.preview}`)}">
+      <div class="ghv-row-title">${escapeHtml(c.subject)}</div>
+      <div class="ghv-row-meta"><span class="ghv-row-ref">#${c.number}</span><span class="ghv-row-author">${escapeHtml(who)}</span>
+        ${c.status === 'pending' ? '<span class="hsv-pending">pending</span>' : ''}<span class="ws-flex"></span><span class="gh-muted">${escapeHtml(ago)}</span></div>
+    </div>`;
+}
+
+function helpscoutSuggestionRow(sug) {
+  return `<div class="ghv-row hsv-sug-row" data-sug-conv="${hsvAttr(sug.conversation)}" title="${hsvAttr(sug.text)}">
+      <div class="ghv-row-title">${escapeHtml(sug.text.split('\n')[0])}</div>
+      <div class="ghv-row-meta"><span class="hsv-kind hsv-kind--${hsvAttr(sug.kind)}">${escapeHtml(sug.kind)}</span><span class="ghv-row-ref">#${sug.number}</span></div>
+    </div>`;
+}
+
+function renderHelpscoutViewList() {
+  if (!helpscoutViewContent) return;
+  const s = helpscoutViewState;
+  const inbox = s.inbox;
+  const status = s.loading ? 'Loading…' : inbox?.fetchedAt ? `Updated ${escapeHtml(formatDate(new Date(inbox.fetchedAt)))}` : '';
+  const convs = (inbox?.conversations || []).filter(c => !s.mailbox || c.mailboxId === s.mailbox);
+  const groups = HELPSCOUT_GROUPS.map(g => {
+    const items = convs.filter(c => c.group === g.id);
+    const open = !s.collapsed.has(g.id);
+    return `<div class="ghv-section"><div class="ghv-section-h hsv-group-h" data-group="${g.id}" title="${hsvAttr(g.hint)}"><span class="hsv-arrow${open ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>${escapeHtml(g.label)}<span class="ghv-count">${items.length}</span></div>
+      ${open ? (items.length ? items.map(c => helpscoutViewRow(c, s.selectedId)).join('') : '<div class="ghv-empty">Nothing here.</div>') : ''}</div>`;
+  }).join('');
+  const toLog = (inbox?.suggestions || []).filter(x => x.status === 'open');
+  const mailboxes = inbox?.mailboxes || [];
+  helpscoutViewContent.innerHTML = `
+    <div class="ghv-head"><span class="ghv-head-title">Help Scout</span><span class="ws-flex"></span>
+      <span class="gh-muted">${status}</span>
+      <button type="button" class="ws-ghost ws-ghost--sm" id="hsv-refresh" title="Read Help Scout again">${PICONS.refresh(12)}</button></div>
+    ${mailboxes.length > 1 ? `<div class="hsv-mailboxes">${[{ id: null, name: 'All' }, ...mailboxes].map(m => `<button type="button" class="ws-ghost ws-ghost--sm${s.mailbox === m.id ? ' active' : ''}" data-mailbox="${m.id ?? ''}">${escapeHtml(m.name)}</button>`).join('')}</div>` : ''}
+    ${s.error ? `<div class="ghv-empty gh-error">${escapeHtml(s.error)}</div>` : ''}
+    ${groups}
+    ${toLog.length ? `<div class="ghv-section"><div class="ghv-section-h" title="Suggestions the customer-support skill saved to log later">To log<span class="ghv-count">${toLog.length}</span></div>${toLog.map(helpscoutSuggestionRow).join('')}</div>` : ''}`;
+  helpscoutViewContent.querySelector('#hsv-refresh').onclick = () => loadHelpscoutView();
+  helpscoutViewContent.querySelectorAll('[data-mailbox]').forEach(btn => {
+    btn.onclick = () => { s.mailbox = btn.dataset.mailbox ? Number(btn.dataset.mailbox) : null; renderHelpscoutViewList(); };
+  });
+  helpscoutViewContent.querySelectorAll('.hsv-group-h').forEach(h => {
+    h.onclick = () => { const id = h.dataset.group; if (s.collapsed.has(id)) s.collapsed.delete(id); else s.collapsed.add(id); renderHelpscoutViewList(); };
+  });
+  helpscoutViewContent.querySelectorAll('[data-conv]').forEach(row => { row.onclick = () => openHelpscoutConversation(Number(row.dataset.conv)); });
+  helpscoutViewContent.querySelectorAll('[data-sug-conv]').forEach(row => { row.onclick = () => openHelpscoutConversation(Number(row.dataset.sugConv)); });
+}
+
+// --- One conversation ---
+
+const HELPSCOUT_THREAD_LABELS = { customer: 'Customer', message: 'Reply', reply: 'Reply', note: 'Note', forwardparent: 'Forwarded', forwardchild: 'Forward', chat: 'Chat', phone: 'Phone' };
+
+function helpscoutThread(t) {
+  if (t.type === 'lineitem') return `<div class="hsv-lineitem">${escapeHtml(t.action || '')} · ${escapeHtml(formatDate(new Date(t.createdAt)))}</div>`;
+  const label = t.draft ? 'Draft reply' : t.byClaude ? 'Note by Claude' : HELPSCOUT_THREAD_LABELS[t.type] || t.type;
+  const kind = t.draft ? 'draft' : t.type === 'note' ? 'note' : t.type === 'customer' ? 'customer' : 'reply';
+  return `<div class="hsv-thread hsv-thread--${kind}">
+      <div class="hsv-thread-h"><span class="hsv-thread-kind">${escapeHtml(label)}</span><span class="hsv-thread-from" title="${hsvAttr(t.fromEmail)}">${escapeHtml(t.from)}</span>
+        <span class="ws-flex"></span><span class="gh-muted">${t.createdAt ? escapeHtml(formatDate(new Date(t.createdAt))) : ''}</span></div>
+      <div class="hsv-thread-text">${helpscoutLinkify(t.text)}</div>
+      ${t.attachments.length ? `<div class="hsv-attachments">${t.attachments.map(a => a.url ? `<a class="hsv-link" href="${hsvAttr(a.url)}">${escapeHtml(a.name)}</a>` : escapeHtml(a.name)).join(' · ')}</div>` : ''}
+    </div>`;
+}
+
+function helpscoutSuggestion(sug) {
+  const skill = HELPSCOUT_LOG_SKILLS[sug.kind] || HELPSCOUT_SUPPORT_SKILL;
+  return `<div class="hsv-sug${sug.status === 'open' ? '' : ' hsv-sug--done'}" data-sug="${sug.id}">
+      <div class="hsv-sug-h"><span class="hsv-kind hsv-kind--${hsvAttr(sug.kind)}">${escapeHtml(sug.kind)}</span>
+        ${sug.status === 'open' ? '' : `<span class="gh-muted">${escapeHtml(sug.status)}</span>`}<span class="ws-flex"></span>
+        ${sug.status === 'open' ? `<button type="button" class="ws-ghost ws-ghost--sm" data-sug-act="log" title="${hsvAttr(`A Claude session with ${skill}`)}">${ICONS.claude(11)} Log with Claude</button>
+          <button type="button" class="ws-ghost ws-ghost--sm" data-sug-act="logged">Logged</button>
+          <button type="button" class="ws-ghost ws-ghost--sm" data-sug-act="dismissed">Dismiss</button>`
+          : '<button type="button" class="ws-ghost ws-ghost--sm" data-sug-act="open">Reopen</button>'}</div>
+      <div class="hsv-sug-text">${helpscoutLinkify(sug.text)}</div>
+    </div>`;
+}
+
+function renderHelpscoutViewMain() {
+  if (!helpscoutViewer || activeTab !== 'helpscout') return;
+  const s = helpscoutViewState;
+  const c = s.conversation;
+  // A repaint while typing would throw the text away; keep what is typed.
+  const typed = helpscoutViewer.querySelector('#hsv-compose')?.value;
+  const scroll = helpscoutViewer.querySelector('.hsv-body')?.scrollTop || 0;
+  if (!s.selectedId) { helpscoutViewer.innerHTML = '<div class="hsv-body"><div class="ghv-empty">Pick a conversation.</div></div>'; return; }
+  if (!c) {
+    helpscoutViewer.innerHTML = `<div class="hsv-body"><div class="ghv-empty${s.convError ? ' gh-error' : ''}">${escapeHtml(s.convError || 'Loading…')}</div></div>`;
+    return;
+  }
+  const inbox = s.inbox;
+  const mailbox = inbox?.mailboxes?.find(m => m.id === c.mailboxId)?.name || '';
+  const draft = c.threads.find(t => t.draft);
+  const people = inbox?.people || [];
+  const busy = s.busy ? ' disabled' : '';
+  const composeValue = typed !== undefined && s.composerKept === `${c.id}:${s.composer}` ? typed : s.composer === 'reply' ? (draft?.text || '') : '';
+  s.composerKept = `${c.id}:${s.composer}`;
+  helpscoutViewer.innerHTML = `<div class="hsv-body"><div class="hsv-page">
+    <div class="hsv-head">
+      <div class="hsv-subject">${escapeHtml(c.subject)}</div>
+      <div class="hsv-meta"><span class="mono">#${c.number}</span>${mailbox ? `<span>${escapeHtml(mailbox)}</span>` : ''}
+        <span title="${hsvAttr(c.customer.email)}">${escapeHtml(c.customer.name || c.customer.email)}${c.customer.name && c.customer.email ? ` &lt;${escapeHtml(c.customer.email)}&gt;` : ''}</span>
+        ${c.tags.map(t => `<span class="hsv-tag">${escapeHtml(t)}</span>`).join('')}</div>
+      <div class="hsv-controls">
+        <label class="hsv-control">Status <select id="hsv-status"${busy}>${HELPSCOUT_STATUSES.map(st => `<option value="${st}"${c.status === st ? ' selected' : ''}>${st[0].toUpperCase() + st.slice(1)}</option>`).join('')}</select></label>
+        <label class="hsv-control">Assignee <select id="hsv-assignee"${busy}><option value="">Unassigned</option>${people.map(p => `<option value="${p.id}"${c.assignee?.id === p.id ? ' selected' : ''}>${escapeHtml(p.name)}${p.id === inbox?.me?.id ? ' (you)' : p.team ? ' (team)' : ''}</option>`).join('')}</select></label>
+        <span class="ws-flex"></span>
+        <button type="button" class="ws-ghost" id="hsv-session" title="${hsvAttr(`A Claude session with ${HELPSCOUT_SUPPORT_SKILL} on this ticket`)}">${ICONS.claude(12)}<span>Claude session</span></button>
+        <button type="button" class="ws-ghost" id="hsv-open" title="Open the conversation in Help Scout">${PICONS.open(12)}<span>Help Scout</span></button>
+      </div>
+    </div>
+    ${s.notice ? `<div class="hsv-notice${s.notice.bad ? ' gh-error' : ''}">${escapeHtml(s.notice.text)}</div>` : ''}
+    ${c.suggestions.length ? `<div class="hsv-sugs">${c.suggestions.map(helpscoutSuggestion).join('')}</div>` : ''}
+    <div class="hsv-composer">
+      <div class="hsv-tabs">
+        <button type="button" class="ws-ghost ws-ghost--sm${s.composer === 'reply' ? ' active' : ''}" data-composer="reply">${draft ? 'Draft reply' : 'Reply'}</button>
+        <button type="button" class="ws-ghost ws-ghost--sm${s.composer === 'note' ? ' active' : ''}" data-composer="note">Note</button>
+        <span class="ws-flex"></span>
+        <span class="gh-muted">${s.composer === 'reply' ? 'Saved as a draft in Help Scout; you send it there.' : 'Only your team sees a note.'}</span>
+      </div>
+      <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team'}">${escapeHtml(composeValue)}</textarea>
+      <div class="hsv-compose-acts">
+        ${s.composer === 'reply'
+          ? `<button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
+             <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="Save the draft, then open the conversation in Help Scout to send it">Send in Help Scout</button>`
+          : `<button type="button" class="ws-btn ws-btn--primary" id="hsv-add-note"${busy}>${s.busy === 'note' ? 'Adding…' : 'Add note'}</button>`}
+      </div>
+    </div>
+    <div class="hsv-threads">${c.threads.filter(t => !t.draft).map(helpscoutThread).join('')}</div>
+  </div></div>`;
+  helpscoutViewer.querySelector('.hsv-body').scrollTop = scroll;
+  bindHelpscoutViewMain(c, draft);
+}
+
+function bindHelpscoutViewMain(c, draft) {
+  const s = helpscoutViewState;
+  const $ = (sel) => helpscoutViewer.querySelector(sel);
+  $('#hsv-open').onclick = () => window.api.openExternal(c.url);
+  $('#hsv-session').onclick = () => helpscoutSupportSession(c);
+  $('#hsv-status').onchange = (e) => {
+    const status = e.target.value;
+    if (status === 'spam' && !confirm(`Mark #${c.number} as spam?`)) { e.target.value = c.status; return; }
+    helpscoutViewWrite('status', () => window.api.setHelpscoutStatus(c.id, status), `Status set to ${status}.`);
+  };
+  $('#hsv-assignee').onchange = (e) => {
+    const id = e.target.value ? Number(e.target.value) : null;
+    const name = e.target.selectedOptions[0]?.textContent || 'nobody';
+    helpscoutViewWrite('assign', () => window.api.assignHelpscout(c.id, id), id ? `Assigned to ${name}.` : 'Unassigned.');
+  };
+  helpscoutViewer.querySelectorAll('[data-composer]').forEach(btn => {
+    btn.onclick = () => { s.composer = btn.dataset.composer; s.composerKept = null; renderHelpscoutViewMain(); };
+  });
+  const text = () => $('#hsv-compose').value;
+  const saveDraft = () => helpscoutViewWrite('draft', () => window.api.saveHelpscoutDraft(c.id, { threadId: draft?.id || null, text: text() }), 'Draft saved in Help Scout.');
+  if ($('#hsv-save-draft')) $('#hsv-save-draft').onclick = () => saveDraft();
+  if ($('#hsv-send')) $('#hsv-send').onclick = async () => { if (await saveDraft()) window.api.openExternal(c.url); };
+  if ($('#hsv-add-note')) {
+    $('#hsv-add-note').onclick = async () => {
+      if (await helpscoutViewWrite('note', () => window.api.addHelpscoutNote(c.id, text()), 'Note added.')) {
+        s.composerKept = null;
+        renderHelpscoutViewMain();
+      }
+    };
+  }
+  helpscoutViewer.querySelectorAll('.hsv-sug').forEach(el => {
+    const sug = c.suggestions.find(x => String(x.id) === el.dataset.sug);
+    el.querySelectorAll('[data-sug-act]').forEach(btn => {
+      btn.onclick = () => (btn.dataset.sugAct === 'log' ? helpscoutLogSession(sug) : helpscoutSetSuggestion(sug.id, btn.dataset.sugAct));
+    });
+  });
+  helpscoutViewer.querySelectorAll('a.hsv-link').forEach(a => {
+    a.onclick = (e) => { e.preventDefault(); if (/^https?:/i.test(a.href)) window.api.openExternal(a.href); };
+  });
+}
+
+/** Called when the Help Scout tab is opened (app.js). */
+function showHelpscoutView() {
+  hideAllViewers();
+  // hideAllViewers puts the terminal area back; this tab covers it instead.
+  placeholder.style.display = 'none';
+  terminalArea.style.display = 'none';
+  helpscoutViewer.style.display = 'flex';
+  renderHelpscoutViewList();
+  renderHelpscoutViewMain();
+  const s = helpscoutViewState;
+  const stale = !s.inbox || Date.now() - Date.parse(s.inbox.fetchedAt) > HELPSCOUT_VIEW_REFRESH_MS;
+  if (stale) loadHelpscoutView({ quiet: !!s.inbox });
+  if (s.selectedId) openHelpscoutConversation(s.selectedId, { quiet: true });
+  clearInterval(s.timer);
+  s.timer = setInterval(() => {
+    if (activeTab !== 'helpscout') { clearInterval(s.timer); s.timer = null; return; }
+    loadHelpscoutView({ quiet: true });
+  }, HELPSCOUT_VIEW_REFRESH_MS);
+}
+
+function hideHelpscoutView() {
+  if (helpscoutViewer) helpscoutViewer.style.display = 'none';
+}
