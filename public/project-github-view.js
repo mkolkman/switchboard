@@ -153,12 +153,12 @@ function githubMineMark(pr) {
   return { kind, text: kind === 'reviewed' ? 'Reviewed by you' : `Changed since your review${files ? ` (${files} file${files === 1 ? '' : 's'})` : ''}` };
 }
 
-/** "waits #2212" or "waits 3": the blockers of an issue that are still open. Short, so the title keeps its room. */
+/** "awaits #2212" or "awaits 3": the blockers of an issue that are still open. Short, so the title keeps its room. */
 function githubDepPill(item) {
   const open = openBlockers(item);
   if (!open.length) return '';
   const ref = (d) => `${d.repo === item.repo ? '' : githubRepoName(d.repo)}#${d.number}`;
-  const text = open.length > 1 ? `waits ${open.length}` : `waits #${open[0].number}`;
+  const text = open.length > 1 ? `awaits ${open.length}` : `awaits #${open[0].number}`;
   const title = `Waits on, still open:\n${open.map(d => `${ref(d)} ${d.title}`).join('\n')}`;
   return `<span class="gh-dep" title="${githubAttr(title)}">${escapeHtml(text)}</span>`;
 }
