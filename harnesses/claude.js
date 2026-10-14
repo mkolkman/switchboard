@@ -465,8 +465,10 @@ function buildLaunchArgs({ sessionId, isNew, options }) {
 
   // A first prompt, as the positional argument. Only for a brand-new session:
   // a resume continues where it was, and a fork carries its parent's prompt.
+  // It goes last, after "--", so a prompt that starts with "-" is never read
+  // as a flag. Main puts its own flags before the "--" (see withLaunchFlags).
   if (isNew && !options?.forkFrom && options?.initialPrompt) {
-    args.push(String(options.initialPrompt));
+    args.push('--', String(options.initialPrompt));
   }
 
   return args;

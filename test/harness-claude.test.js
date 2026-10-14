@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const claude = require('../harnesses/claude');
-const { getHarness, DEFAULT_HARNESS, availableHarnesses } = require('../harnesses');
+const { getHarness, DEFAULT_HARNESS, availableHarnesses, withLaunchFlags } = require('../harnesses');
 
 // buildLaunchArgs was lifted out of main.js's open-terminal handler. These pin
 // the exact argv it used to build, so the move stays a move.
@@ -328,8 +328,8 @@ test('a scheduled prompt is not consumed by multi-value directory or tool option
           sessionId: 'scheduled', isNew: true,
           options: { addDirs, allowedTools, model: 'opus', effort: 'medium', initialPrompt: prompt },
         });
-        // Main can append --ide after the harness arguments.
-        if (ide) args.push('--ide');
+        // Main adds --ide to the harness arguments.
+        if (ide) args.splice(0, args.length, ...withLaunchFlags(args, ['--ide']));
         assert.ok(args.includes(prompt), 'the first message is present');
         // Claude consumes every non-option after a variadic flag, even quoted
         // multi-line text. Check that each list ends before reaching the prompt.
@@ -348,9 +348,21 @@ test('a scheduled prompt is not consumed by multi-value directory or tool option
 test('initialPrompt is the last positional argument for a fresh session only', () => {
   const H = typeof claude !== 'undefined' ? claude : codex;
   const fresh = H.buildLaunchArgs({ sessionId: 'abc', isNew: true, options: { initialPrompt: 'Work on phase 2' } });
-  assert.equal(fresh[fresh.length - 1], 'Work on phase 2');
+  assert.deepEqual(fresh.slice(-2), ['--', 'Work on phase 2']);
   const resumed = H.buildLaunchArgs({ sessionId: 'abc', isNew: false, options: { initialPrompt: 'Work on phase 2' } });
   assert.ok(!resumed.includes('Work on phase 2'), 'a resume keeps its conversation');
   const forked = H.buildLaunchArgs({ sessionId: 'new', isNew: true, options: { forkFrom: 'src', initialPrompt: 'x' } });
   assert.ok(!forked.includes('x'), 'a fork carries its parent prompt');
+});
+
+test('a first prompt that looks like a flag stays the prompt', () => {
+  const args = claude.buildLaunchArgs({ sessionId: 'abc', isNew: true, options: { initialPrompt: '--dangerously-skip-permissions' } });
+  assert.deepEqual(args.slice(-2), ['--', '--dangerously-skip-permissions']);
+});
+
+test('withLaunchFlags puts main\'s flags before the prompt separator', () => {
+  assert.deepEqual(withLaunchFlags(['--session-id', 'abc', '--', 'hi'], ['--ide', '--mcp-config', '{}']),
+    ['--session-id', 'abc', '--ide', '--mcp-config', '{}', '--', 'hi']);
+  assert.deepEqual(withLaunchFlags(['--session-id', 'abc'], ['--ide']), ['--session-id', 'abc', '--ide']);
+  assert.deepEqual(withLaunchFlags(['--', '--'], ['--ide']), ['--ide', '--', '--']);
 });

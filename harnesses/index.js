@@ -88,8 +88,18 @@ function progressBusyState({ level, titleBusy }) {
   return null;
 }
 
+/**
+ * A harness's argv with flags of main's own (--ide, the preview MCP config)
+ * added. A first prompt ends the argv as "--", prompt; the flags go before that
+ * "--", since everything after it is read as the prompt.
+ */
+function withLaunchFlags(args, flags) {
+  const promptAt = args.length >= 2 && args[args.length - 2] === '--' ? args.length - 2 : args.length;
+  return [...args.slice(0, promptAt), ...flags, ...args.slice(promptAt)];
+}
+
 module.exports = {
-  HARNESSES, DEFAULT_HARNESS, progressBusyState,
+  HARNESSES, DEFAULT_HARNESS, progressBusyState, withLaunchFlags,
   getHarness, allHarnesses, availableHarnesses,
   harnessForFolder, transcriptPath,
 };

@@ -670,7 +670,7 @@ test('a codex fork is matched by its parent, not the inherited tag', () => {
 test('initialPrompt is the last positional argument for a fresh session only', () => {
   const H = typeof claude !== 'undefined' ? claude : codex;
   const fresh = H.buildLaunchArgs({ sessionId: 'abc', isNew: true, options: { initialPrompt: 'Work on phase 2' } });
-  assert.equal(fresh[fresh.length - 1], 'Work on phase 2');
+  assert.deepEqual(fresh.slice(-2), ['--', 'Work on phase 2']);
   const resumed = H.buildLaunchArgs({ sessionId: 'abc', isNew: false, options: { initialPrompt: 'Work on phase 2' } });
   assert.ok(!resumed.includes('Work on phase 2'), 'a resume keeps its conversation');
   const forked = H.buildLaunchArgs({ sessionId: 'new', isNew: true, options: { forkFrom: 'src', initialPrompt: 'x' } });
