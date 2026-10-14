@@ -297,7 +297,7 @@ function githubTrackerCard(project, refText, state) {
 
   const selectedKey = state.selection?.itemKey || null;
   if (githubPlanView(project) === 'graph') {
-    html += result.items.length ? githubGraphHtml(project, result, refText, prefix, selectedKey) : '';
+    html += result.items.length ? githubGraphHtml(project, result, refText, prefix, selectedKey, state) : '';
   } else for (const group of githubListGroups(project, result)) {
     const key = `${refText}|${group.id}`;
     const open = state.open.has(key) ? state.open.get(key) : !group.collapsed;
@@ -334,15 +334,17 @@ function setGithubPlanView(project, view) {
 
 /**
  * Columns: the plan's phases, or the depth of the chain when it has none.
- * Blockers from outside the plan get a column of their own, first.
+ * Blockers from outside the plan get a column of their own, first. A column
+ * folds to a narrow strip (a finished phase starts folded); arrows to and
+ * from its cards then start or end at the strip.
  */
-function githubGraphHtml(project, result, refText, prefix, selectedKey) {
+function githubGraphHtml(project, result, refText, prefix, selectedKey, state) {
   const { edges, outside } = depEdges(result.items);
   const byKey = new Map(result.items.map(i => [depKey(i), i]));
   let columns;
   const phased = typeof githubPhases === 'function' ? githubPhases(project, result) : null;
   if (phased?.phases.length) {
-    columns = phased.phases.map(p => ({ id: 'ph:' + p.title, label: p.title, keys: p.items.map(depKey) }));
+    columns = phased.phases.map(p => ({ id: 'ph:' + p.title, label: p.title, keys: p.items.map(depKey), done: p.complete }));
     if (phased.unphased.length) columns.push({ id: 'ph:none', label: 'No phase', keys: phased.unphased.map(depKey) });
   } else {
     columns = depthColumns(result.items.map(depKey), edges);
@@ -363,9 +365,22 @@ function githubGraphHtml(project, result, refText, prefix, selectedKey) {
       + `<span class="gh-gcard-ref">#${item.number}</span><span class="gh-gcard-title">${escapeHtml(title)}</span></button>`;
   };
   const back = laid.edges.filter(e => e.back).length;
+  const finished = (key) => {
+    const item = byKey.get(key);
+    return item ? item.status === 'done' || item.status === 'dropped' : outside.get(key)?.state === 'CLOSED';
+  };
+  const column = (c) => {
+    const openKey = `${refText}|graph:${c.id}`;
+    const open = state.open.has(openKey) ? state.open.get(openKey) : !c.done;
+    const count = `${c.keys.filter(finished).length}/${c.keys.length}`;
+    // Folded, the heading is the whole strip, and stands in for the cards.
+    const fold = open ? '' : ` gh-gstub" data-stub="${githubAttr(c.id)}" data-keys="${githubAttr(JSON.stringify(c.keys))}`;
+    const head = `<button type="button" class="gh-gcol-h${fold}" data-open-key="${githubAttr(openKey)}" title="${githubAttr(c.label)}\n${open ? 'Click to fold' : 'Click to unfold'}"><span class="arrow">&#9660;</span><span class="gh-gcol-name">${escapeHtml(c.label)}</span><span class="gh-gcol-n">${count}</span></button>`;
+    return `<div class="gh-gcol${open ? '' : ' gh-gcol--folded'}">${head}${open ? c.keys.map(card).join('') : ''}</div>`;
+  };
   return `<div class="gh-graph" data-ref="${githubAttr(refText)}">`
     + (back ? `<div class="gh-graph-warn">${back} blocker${back === 1 ? ' is' : 's are'} planned after what ${back === 1 ? 'it blocks' : 'they block'} (red arrows)</div>` : '')
-    + `<div class="gh-graph-cols">${laid.columns.map(c => `<div class="gh-gcol"><div class="gh-gcol-h" title="${githubAttr(c.label)}">${escapeHtml(c.label)}</div>${c.keys.map(card).join('')}</div>`).join('')}</div>`
+    + `<div class="gh-graph-cols">${laid.columns.map(column).join('')}</div>`
     + `<svg class="gh-graph-edges" data-edges="${githubAttr(JSON.stringify(laid.edges))}"></svg></div>`;
 }
 
@@ -376,6 +391,9 @@ function drawGithubGraphEdges(graph) {
   const edges = JSON.parse(svg.dataset.edges || '[]');
   const box = graph.getBoundingClientRect();
   const cards = new Map([...graph.querySelectorAll('.gh-gcard')].map(c => [c.dataset.key, c]));
+  // A folded column's strip stands in for its cards.
+  graph.querySelectorAll('.gh-gstub').forEach(stub => JSON.parse(stub.dataset.keys || '[]').forEach(k => cards.set(k, stub)));
+  const drawn = new Set();
   svg.setAttribute('width', graph.scrollWidth);
   svg.setAttribute('height', graph.scrollHeight);
   const at = (el) => {
@@ -385,21 +403,34 @@ function drawGithubGraphEdges(graph) {
   svg.innerHTML = edges.map(e => {
     const from = cards.get(e.from), to = cards.get(e.to);
     if (!from || !to) return '';
+    // Into or out of a fold: one arrow per pair of ends, none inside one.
+    if (from === to) return '';
+    const end = (el, key) => el.dataset.stub ? `stub:${el.dataset.stub}` : key;
+    const pair = `${end(from, e.from)}>${end(to, e.to)}`;
+    if (drawn.has(pair)) return '';
+    drawn.add(pair);
     const a = at(from), b = at(to);
     // Same column: out of the right side and back in. Otherwise right to left.
     const x1 = a.r, y1 = a.y, x2 = e.same ? b.r : b.l, y2 = b.y;
     const bend = e.same ? 28 : Math.max(24, Math.abs(x2 - x1) / 2);
     const c1 = x1 + bend, c2 = e.same ? x2 + bend : x2 - bend;
     const head = e.same ? `M${x2 + 6},${y2 - 4} L${x2},${y2} L${x2 + 6},${y2 + 4}` : `M${x2 - 6},${y2 - 4} L${x2},${y2} L${x2 - 6},${y2 + 4}`;
-    const closed = from.classList.contains('gh-gcard--done');
+    const closed = from.classList.contains('gh-gcard--done') || from.classList.contains('gh-gstub');
     const cls = `gh-gedge${e.back ? ' gh-gedge--back' : ''}${closed ? ' gh-gedge--met' : ''}`;
     return `<g class="${cls}" data-from="${escapeHtml(e.from)}" data-to="${escapeHtml(e.to)}"><path d="M${x1},${y1} C${c1},${y1} ${c2},${y2} ${x2},${y2}"/><path d="${head}"/></g>`;
   }).join('');
 }
 
 function bindGithubGraph(project, list) {
+  const state = githubTabState(project.id);
   list.querySelectorAll('.gh-graph').forEach(graph => {
     drawGithubGraphEdges(graph);
+    graph.querySelectorAll('.gh-gcol-h[data-open-key]').forEach(head => {
+      head.onclick = () => {
+        state.open.set(head.dataset.openKey, head.parentElement.classList.contains('gh-gcol--folded'));
+        paintGithubList(project);
+      };
+    });
     // Cards move with the panel's width and with fonts loading.
     new ResizeObserver(() => drawGithubGraphEdges(graph)).observe(graph);
     graph.querySelectorAll('.gh-gcard').forEach(card => {

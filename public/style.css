@@ -7319,9 +7319,23 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-graph-cols { position: relative; z-index: 1; display: flex; gap: 44px; align-items: flex-start; }
 .gh-gcol { flex: none; width: 180px; display: flex; flex-direction: column; gap: 6px; }
 .gh-gcol-h {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 0; margin-bottom: 2px;
+  background: none; border: 0; text-align: left; font: inherit; cursor: pointer;
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #7a7a92;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px;
 }
+.gh-gcol-h:hover { color: #a8a8c0; }
+.gh-gcol-h .arrow { font-size: 8px; transition: transform 0.15s; }
+.gh-gcol-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-gcol-n { flex: none; font-weight: 600; letter-spacing: 0; color: #6a6a80; }
+/* A folded column: a strip with its name, read top to bottom; arrows end on it. */
+.gh-gcol--folded { width: 30px; }
+.gh-gstub {
+  flex-direction: column; gap: 8px; height: 220px; padding: 8px 0; margin: 0;
+  background: #1c1c26; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
+}
+.gh-gstub .arrow { transform: rotate(-90deg); }
+.gh-gstub .gh-gcol-name { writing-mode: vertical-rl; flex: 1; }
+.gh-gstub .gh-gcol-n { writing-mode: vertical-rl; color: #6fcf8f; }
 .gh-gcard {
   display: flex; flex-direction: column; gap: 2px; padding: 5px 8px; text-align: left; font: inherit; cursor: pointer;
   background: #1c1c26; border: 1px solid rgba(255,255,255,0.08); border-left: 3px solid #6a6a80; border-radius: 6px;
