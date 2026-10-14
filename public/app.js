@@ -428,7 +428,7 @@ window.api.onProcessExited((sessionId, exitCode, signal, userStopped) => {
     // A pending session that died never wrote a .jsonl, so loadProjects keeps
     // re-injecting it. Mark it dead so it stops sorting as a running session.
     const pending = pendingSessions.get(sessionId);
-    if (pending) pending.exited = true;
+    if (pending) { pending.exited = true; pending.exitedAt = pending.exitedAt || Date.now(); }
     if (gridViewActive) {
       gridViewerCount.textContent = gridCards.size + ' session' + (gridCards.size !== 1 ? 's' : '');
     }
@@ -747,6 +747,9 @@ function dismissSession(sessionId) {
  * staying behind with an exit banner for a session that is no longer listed.
  */
 function closeArchivedSession(sessionId) {
+  // A pending row has no transcript to archive, and loadProjects would put it
+  // back unarchived: archiving it means forgetting it.
+  if (pendingSessions.has(sessionId)) { dismissSession(sessionId); return; }
   if (openSessions.has(sessionId)) destroySession(sessionId);
   else forgetTerminalHistory(sessionId);
   if (activeSessionId === sessionId && !gridViewActive) {
@@ -965,12 +968,15 @@ async function loadProjects({ resort = false, reason = 'project' } = {}) {
   dedupTree(cachedProjectTree);
   dedupTree(cachedProjectTreeAll);
 
-  // Reconcile pending sessions: remove ones that now have real data
+  // Reconcile pending sessions: remove ones that now have real data, and the
+  // ones no real data is ever coming for (isPendingAbandoned).
   let hasReinjected = false;
   for (const [sid, pending] of [...pendingSessions]) {
     const realExists = allProjects.some(p => p.sessions.some(s => s.sessionId === sid));
     if (realExists) {
       pendingSessions.delete(sid);
+    } else if (isPendingAbandoned(pending, { running: activePtyIds.has(sid), onScreen: activeSessionId === sid })) {
+      dismissSession(sid);
     } else {
       hasReinjected = true;
       // Still pending — re-inject into cached data
