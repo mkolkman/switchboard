@@ -664,6 +664,23 @@ function orderGroups(groups, mode, resort) {
   return [...byActivity.filter(g => !orderIndex.has(g.path)), ...known];
 }
 
+// Status headers fold; open or shut is remembered per status. Stale starts shut.
+const STATUS_FOLDS_KEY = 'statusSectionFolds';
+function statusSectionOpen(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STATUS_FOLDS_KEY) || '{}');
+    return key in saved ? !!saved[key] : key !== 'stale';
+  } catch { return key !== 'stale'; }
+}
+function toggleStatusSection(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STATUS_FOLDS_KEY) || '{}');
+    saved[key] = !statusSectionOpen(key);
+    localStorage.setItem(STATUS_FOLDS_KEY, JSON.stringify(saved));
+  } catch {}
+  refreshSidebar();
+}
+
 function buildVirtualGroups(newSidebar, projects, resort, mode) {
   const groups = orderGroups(collectGroups(withAllFolders(projects), mode), mode, resort);
   const newSortedOrder = [];
@@ -678,21 +695,22 @@ function buildVirtualGroups(newSidebar, projects, resort, mode) {
     boundProjects.push(project);
     const fId = folderId(g.path);
 
-    // Status: one list with a header per status that has sessions, nothing to
-    // fold; Stale sits wholly under its "older" toggle. Ported from Joris
-    // Blaak's fork (ab3bc73).
+    // Status: one list with a header per status that has sessions, as in Joris
+    // Blaak's fork (ab3bc73); a header folds its sessions away.
     if (mode === 'status') {
       if (!filtered.length) continue;
+      // A search or filter shows everything it found, folded or not.
+      const open = statusSectionOpen(g.key) || searchMatchIds !== null || showStarredOnly || showRunningOnly;
       const section = document.createElement('div');
       section.className = 'status-section';
       section.id = fId;
       const label = document.createElement('div');
       label.className = `session-section-label session-section-label--${g.key}`;
-      label.title = g.title || g.label;
-      label.innerHTML = `${escapeHtml(g.label)}<span class="session-section-count">${filtered.length}</span>`;
+      label.dataset.statusFold = g.key;
+      label.title = `${g.title || g.label}\nClick to ${open ? 'fold' : 'unfold'}`;
+      label.innerHTML = `<span class="session-section-fold${open ? '' : ' shut'}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>${escapeHtml(g.label)}<span class="session-section-count">${filtered.length}</span>`;
       section.appendChild(label);
-      const stale = g.key === 'stale' && searchMatchIds === null && !showStarredOnly && !showRunningOnly;
-      section.appendChild(buildSessionsList(fId, stale ? [] : visible, stale ? [...visible, ...older] : older));
+      if (open) section.appendChild(buildSessionsList(fId, visible, older));
       newSidebar.appendChild(section);
       continue;
     }
@@ -858,6 +876,10 @@ function bindSessionListEvents(container) {
         saveExpandedSlugs();
       }
     };
+  });
+
+  container.querySelectorAll('[data-status-fold]').forEach(label => {
+    label.onclick = () => toggleStatusSection(label.dataset.statusFold);
   });
 
   container.querySelectorAll('.sessions-more-toggle').forEach(moreBtn => {

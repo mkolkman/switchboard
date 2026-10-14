@@ -13,7 +13,7 @@ const githubViewer = document.getElementById('github-viewer');
 const GITHUB_VIEW_REFRESH_MS = 2 * 60 * 1000;
 
 const githubViewState = { mine: null, review: null, closed: null, error: null, loading: false, fetchedAt: null, timer: null };
-const GITHUB_VIEW_CLOSED_KEY = 'githubViewClosedOpen';
+const GITHUB_VIEW_FOLDS_KEY = 'githubViewFolds';
 
 function githubViewItems() {
   return [...(githubViewState.mine || []), ...(githubViewState.review || []), ...(githubViewState.closed || [])];
@@ -85,8 +85,21 @@ function githubViewSection(title, hint, items, selectedKey, empty, { foldKey = n
     ${items === null || !open ? '' : items.length ? items.map(i => githubViewRow(i, selectedKey)).join('') : `<div class="ghv-empty">${escapeHtml(empty)}</div>`}</div>`;
 }
 
-function githubViewClosedOpen() {
-  try { return localStorage.getItem(GITHUB_VIEW_CLOSED_KEY) === '1'; } catch { return false; }
+// Each section folds; open or shut is remembered per section. Merged or
+// closed starts shut, the open ones open.
+function githubViewFoldOpen(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GITHUB_VIEW_FOLDS_KEY) || '{}');
+    return key in saved ? !!saved[key] : key !== 'closed';
+  } catch { return key !== 'closed'; }
+}
+
+function toggleGithubViewFold(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GITHUB_VIEW_FOLDS_KEY) || '{}');
+    saved[key] = !githubViewFoldOpen(key);
+    localStorage.setItem(GITHUB_VIEW_FOLDS_KEY, JSON.stringify(saved));
+  } catch {}
 }
 
 function renderGithubViewList() {
@@ -99,16 +112,13 @@ function renderGithubViewList() {
       <span class="gh-muted">${s.loading ? 'Loading…' : s.fetchedAt ? `Updated ${escapeHtml(formatDate(new Date(s.fetchedAt)))}` : ''}</span>
       <button type="button" class="ws-ghost ws-ghost--sm" id="ghv-refresh" title="Fetch the lists again">${PICONS.refresh(12)}</button></div>
     ${s.error ? `<div class="ghv-empty gh-error">${escapeHtml(s.error)}</div>` : ''}
-    ${githubViewSection('Review requested', 'Open pull requests that ask for your review', s.review, selectedKey, 'Nothing waiting for your review.')}
-    ${githubViewSection('My pull requests', 'Open pull requests you opened', s.mine, selectedKey, 'You have no open pull requests.')}
-    ${githubViewSection('Merged or closed', 'The latest pull requests you opened, or whose review was asked of you or done by you, that are merged or closed', s.closed, selectedKey, 'Nothing merged or closed yet.', { foldKey: 'closed', open: githubViewClosedOpen() })}`;
+    ${githubViewSection('Review requested', 'Open pull requests that ask for your review', s.review, selectedKey, 'Nothing waiting for your review.', { foldKey: 'review', open: githubViewFoldOpen('review') })}
+    ${githubViewSection('My pull requests', 'Open pull requests you opened', s.mine, selectedKey, 'You have no open pull requests.', { foldKey: 'mine', open: githubViewFoldOpen('mine') })}
+    ${githubViewSection('Merged or closed', 'The latest pull requests you opened, or whose review was asked of you or done by you, that are merged or closed', s.closed, selectedKey, 'Nothing merged or closed yet.', { foldKey: 'closed', open: githubViewFoldOpen('closed') })}`;
   githubViewContent.scrollTop = scroll;
   githubViewContent.querySelector('#ghv-refresh').onclick = () => loadGithubView();
-  githubViewContent.querySelectorAll('[data-fold="closed"]').forEach(h => {
-    h.onclick = () => {
-      try { localStorage.setItem(GITHUB_VIEW_CLOSED_KEY, githubViewClosedOpen() ? '0' : '1'); } catch {}
-      renderGithubViewList();
-    };
+  githubViewContent.querySelectorAll('[data-fold]').forEach(h => {
+    h.onclick = () => { toggleGithubViewFold(h.dataset.fold); renderGithubViewList(); };
   });
   githubViewContent.querySelectorAll('.ghv-row').forEach(row => {
     row.onclick = () => openGithubViewItem(row.dataset.item, null);
