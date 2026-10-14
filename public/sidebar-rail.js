@@ -11,7 +11,7 @@
 // (findTreeProject, markHtml, projectHue, selectProject, sessionTitle,
 // showContextMenu), sidebar.js (isChatFolder), session-groups.js (folderBaseName),
 // project-github-view.js (prSessionState, githubItemKey), github-view.js
-// (githubViewItems, openGithubViewItem), todo-view.js (todoViewSections,
+// (githubViewState, openGithubViewItem), todo-view.js (todoViewSections,
 // todoViewer), helpscout-view.js (helpscoutViewState, openHelpscoutConversation).
 
 const sidebarRail = document.getElementById('sidebar-rail');
@@ -115,7 +115,8 @@ function railSessionItems() {
 
 function railGithubItems() {
   const selected = githubTabState(GITHUB_VIEW_PROJECT.id).selection?.itemKey || null;
-  return githubViewItems().slice(0, SIDEBAR_RAIL_LIMIT).map(item => {
+  // The open ones: what is waiting, not what is done.
+  return [...(githubViewState.review || []), ...(githubViewState.mine || [])].slice(0, SIDEBAR_RAIL_LIMIT).map(item => {
     const key = githubItemKey(item);
     return `<button type="button" class="rail-item rail-num${key === selected ? ' active' : ''}" data-pr="${railAttr(key)}" title="${railAttr(`${item.repo}#${item.number}: ${item.title}`)}">#${item.number}</button>`;
   }).join('');

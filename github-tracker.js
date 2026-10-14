@@ -10,6 +10,8 @@ const { execFile } = require('child_process');
 
 const CACHE_MS = 2 * 60 * 1000;
 const ITEM_BATCH = 20;
+// The GitHub tab's merged or closed PRs: how many, newest first.
+const CLOSED_PRS = 20;
 const WAYFINDER_MAP_LABEL = 'wayfinder:map';
 const API = 'https://api.github.com/graphql';
 
@@ -1394,21 +1396,38 @@ async function getMyPullRequests() {
     review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
       nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
     }
+    closedMine: search(query: "is:pr is:closed author:@me archived:false sort:updated-desc", type: ISSUE, first: ${CLOSED_PRS}) {
+      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
+    }
+    closedRequested: search(query: "is:pr is:closed review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: ${CLOSED_PRS}) {
+      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
+    }
+    closedReviewed: search(query: "is:pr is:closed reviewed-by:@me -author:@me archived:false sort:updated-desc", type: ISSUE, first: ${CLOSED_PRS}) {
+      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
+    }
   }`, { me: await ghLogin() });
   const toItem = (node) => {
     if (!node?.number) return null;
     const pr = shapePr(node, 'linked');
     const item = {
-      repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, state: 'OPEN', stateReason: null,
+      repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, state: pr.state === 'OPEN' ? 'OPEN' : 'CLOSED', stateReason: null,
       updatedAt: pr.updatedAt, author: node.author?.login || 'ghost', assignees: [],
       pullRequests: [pr], isPullRequest: true,
     };
     item.status = itemStatus(item);
     return item;
   };
+  // Merged or closed: yours, and the ones your review was asked for or that
+  // you reviewed (a request goes once it is answered), newest first, once each.
+  const closed = new Map();
+  for (const node of [...(data?.closedMine?.nodes || []), ...(data?.closedRequested?.nodes || []), ...(data?.closedReviewed?.nodes || [])]) {
+    const item = toItem(node);
+    if (item) closed.set(`${item.repo}#${item.number}`, item);
+  }
   const lists = {
     mine: (data?.mine?.nodes || []).map(toItem).filter(Boolean),
     review: (data?.review?.nodes || []).map(toItem).filter(Boolean),
+    closed: [...closed.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, CLOSED_PRS),
   };
   await addReviewChanges([...lists.mine, ...lists.review].flatMap(i => i.pullRequests));
   return { ...lists, fetchedAt: new Date().toISOString() };
