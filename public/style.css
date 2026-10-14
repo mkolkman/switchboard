@@ -66,8 +66,14 @@ body { display: flex; flex-direction: column; }
   padding-top: 7px;
 }
 
-/* Collapsed to a 42px rail, the sidebar is narrower than the traffic lights, so the
-   expand button would sit underneath them. Push it below instead. */
+/* Collapsed to a 42px rail, the sidebar is narrower than the traffic lights
+   (x 18 to about 70), which then cover whatever header the main area shows.
+   The rail widens to hold them, and the expand button goes below them. */
+.platform-darwin:not(.fullscreen) #sidebar.collapsed {
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+}
 .platform-darwin #sidebar.collapsed #sidebar-expand-btn {
   margin-top: 44px;
 }
