@@ -3,8 +3,8 @@
 // picker, Cmd+E archives the open session and Cmd+N starts a quick session
 // (a bare N too, outside the terminal and text fields). In a text field Cmd+A
 // and Cmd+E stay its own (Select All). A quick session is Claude in one fixed
-// folder, the global quickSessionPath setting; until that is set the
-// lightning button is hidden and the keys open Settings.
+// folder, the global quickSessionPath setting; until that is set the keys
+// open Settings.
 // Ported from Joris Blaak's fork (ec9bf71, 98ec26a).
 // Depends on: dialogs.js (showProjectPickerDialog, resolveDefaultSessionOptions),
 // app.js (launchWithDefaultCli, activeSessionId, sessionMap), projects-view.js
@@ -48,15 +48,6 @@ async function launchQuickSession() {
   if (!folder.startsWith('/')) { alert(`The quick session folder must be a full path, not "${folder}".`); openSettingsViewer('global'); return; }
   const project = { folder: encodeProjectPath(folder), projectPath: folder, sessions: [] };
   launchWithDefaultCli(project, await resolveDefaultSessionOptions(project));
-}
-
-/** Show the lightning button only while there is a folder for it. */
-async function syncQuickSessionButton() {
-  const btn = document.getElementById('quick-session-btn');
-  if (!btn) return;
-  const folder = await quickSessionPath();
-  btn.hidden = !folder;
-  btn.title = folder ? `Quick session in ${folder} (${sidebarKeyboardMac ? '⌘N' : 'Ctrl+N'})` : '';
 }
 
 /** Archive the session on screen, as its row's archive button does. */

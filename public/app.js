@@ -1510,17 +1510,6 @@ initGridObservers();
   newSessionBtn.addEventListener('click', () => showProjectPickerDialog());
   resortBtn.parentElement.insertBefore(newSessionBtn, gridToggleBtn);
 
-  // Quick session: Claude straight away in the folder set in Settings.
-  const quickSessionBtn = document.createElement('button');
-  quickSessionBtn.id = 'quick-session-btn';
-  quickSessionBtn.type = 'button';
-  quickSessionBtn.hidden = true;
-  quickSessionBtn.setAttribute('aria-label', 'Quick session');
-  quickSessionBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>';
-  quickSessionBtn.addEventListener('click', () => launchQuickSession());
-  resortBtn.parentElement.insertBefore(quickSessionBtn, newSessionBtn);
-  syncQuickSessionButton();
-
   // Group by: folder, repository, customer or status.
   const groupModeBtn = document.createElement('button');
   groupModeBtn.id = 'group-mode-btn';
@@ -1540,7 +1529,7 @@ initGridObservers();
       { label: 'Edit customers\u2026', onClick: () => openSettingsViewer('global') },
     ], { x: rect.left, y: rect.bottom + 4 });
   });
-  resortBtn.parentElement.insertBefore(groupModeBtn, newSessionBtn);
+  resortBtn.parentElement.insertBefore(groupModeBtn, gridToggleBtn);
   updateGroupModeButton();
 
   installSidebarKeyboard();

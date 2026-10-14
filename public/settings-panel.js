@@ -350,7 +350,7 @@
         <div class="settings-field">
           <div class="settings-field-info">
             <span class="settings-label">Quick Session Folder</span>
-            <div class="settings-description">Where the lightning button, ${isMac ? '\u2318N' : 'Ctrl+N'} and N (outside a session) start Claude straight away: a full path. Empty hides the button.</div>
+            <div class="settings-description">Where ${isMac ? '\u2318N' : 'Ctrl+N'} and N (outside a session) start Claude straight away: a full path.</div>
           </div>
           <div class="settings-field-control">
             <input type="text" class="settings-input" id="sv-quick-session-path" placeholder="/Users/you/Sources" value="${escapeHtml(quickSessionPathValue)}" spellcheck="false">
@@ -604,7 +604,6 @@
           window._setSessionMaxAge(settings.sessionMaxAgeDays);
         }
         if (typeof window._setCustomerMapping === 'function') window._setCustomerMapping(settings.customers);
-        if (typeof syncQuickSessionButton === 'function') syncQuickSessionButton();
         if (settings.terminalTheme && typeof window._applyTerminalTheme === 'function') {
           window._applyTerminalTheme(settings.terminalTheme);
         }
