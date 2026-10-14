@@ -74,13 +74,13 @@ body { display: flex; flex-direction: column; }
   margin-top: 44px;
 }
 .platform-darwin:not(.fullscreen):has(#sidebar.collapsed) :is(#terminal-header, #grid-viewer-header, #stats-viewer-header, #settings-viewer-header, #jsonl-viewer-header, .viewer-toolbar) {
-  padding-left: 40px;
+  padding-left: 54px;
 }
 .platform-darwin:not(.fullscreen):has(#sidebar.collapsed) :is(#project-viewer .ws-header, #project-strip) {
-  padding-left: 48px;
+  padding-left: 62px;
 }
 .platform-darwin:not(.fullscreen):has(#sidebar.collapsed) :is(#github-viewer, #todo-viewer, #helpscout-viewer, #memory-viewer) {
-  padding-left: 34px;
+  padding-left: 48px;
 }
 
 /* Fullscreen hides the traffic lights entirely: reclaim their space. */
