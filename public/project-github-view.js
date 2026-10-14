@@ -394,6 +394,9 @@ function drawGithubGraphEdges(graph) {
   // A folded column's strip stands in for its cards.
   graph.querySelectorAll('.gh-gstub').forEach(stub => JSON.parse(stub.dataset.keys || '[]').forEach(k => cards.set(k, stub)));
   const drawn = new Set();
+  // Measured without the old arrows, which would hold the graph at their size.
+  svg.setAttribute('width', 0);
+  svg.setAttribute('height', 0);
   svg.setAttribute('width', graph.scrollWidth);
   svg.setAttribute('height', graph.scrollHeight);
   const at = (el) => {
