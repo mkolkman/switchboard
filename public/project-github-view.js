@@ -800,6 +800,33 @@ function githubMarkdown(text) {
   return window.marked.parse(src, { renderer: githubMarkedRenderer });
 }
 
+/**
+ * Just the first paragraph of a description (headings before it are skipped),
+ * or null when that is all there is. Descriptions can run long; the panel
+ * shows this much until "Read more".
+ */
+function githubFirstParagraph(text) {
+  const src = String(text || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  if (!src || !window.marked?.lexer) return null;
+  githubMarkdown('');
+  const tokens = window.marked.lexer(src);
+  const blocks = tokens.filter(t => t.type !== 'space');
+  const first = blocks.find(t => t.type === 'paragraph') || blocks[0];
+  if (!first || blocks.length < 2) return null;
+  const part = [first];
+  part.links = tokens.links;
+  return window.marked.parser(part, { renderer: githubMarkedRenderer });
+}
+
+function githubDescriptionHtml(detail, state) {
+  const key = `desc:${detail.repo}#${detail.number}`;
+  const short = githubFirstParagraph(detail.body);
+  const full = !short || !!state.open.get(key);
+  return `<div class="gh-desc" data-key="${githubAttr(key)}"><div class="gh-md">${full ? githubMarkdown(detail.body) : short}</div>`
+    + (short ? `<button type="button" class="ws-ghost ws-ghost--sm gh-desc-more${full ? ' open' : ''}">${full ? 'Show less' : 'Read more'} ${PICONS.chevronDown(10)}</button>` : '')
+    + '</div>';
+}
+
 function githubAgo(iso) {
   return iso ? formatDate(new Date(iso)) : '';
 }
@@ -1401,40 +1428,45 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
   if (!detail) body = '<div class="git-loading"><span class="git-loading-dot"></span>Reading GitHub…</div>';
   else if (detail.error) body = `<div class="gh-sec gh-error">${escapeHtml(detail.error)}</div>`;
   else if (detail.kind === 'pr') {
-    const pill = detail.merged ? 'merged' : detail.state === 'CLOSED' ? 'closed' : detail.isDraft ? 'draft' : 'open';
+    const ref = `${githubRepoName(detail.repo)}#${detail.number}`;
     body = `
       <div class="gh-sec gh-pr-head">
-        <div class="gh-pr-title"><span class="gh-pill gh-pill--${pill}">${pill}</span>${escapeHtml(detail.title)}</div>
-        <div class="gh-muted"><span class="gh-who">${escapeHtml(detail.author)}</span> wants to merge <code>${escapeHtml(detail.headRef)}</code> into <code>${escapeHtml(detail.baseRef)}</code>
-          · <span class="gh-plus">+${detail.additions}</span> <span class="gh-minus">−${detail.deletions}</span> in ${detail.changedFiles} file${detail.changedFiles === 1 ? '' : 's'}</div>
-        <div><button type="button" class="ws-btn gh-files-btn" id="gh-files-changed" title="Review the changes file by file">${PICONS.file(13)}<span>Files changed</span><span class="gh-files-count">${detail.changedFiles}</span>${PICONS.chevronRight(11)}</button></div>
+        <div class="gh-pr-meta"><span class="gh-pr-ref">${escapeHtml(ref)}</span><span class="gh-who">${escapeHtml(detail.author)}</span>
+          <span><code>${escapeHtml(detail.headRef)}</code> → <code>${escapeHtml(detail.baseRef)}</code></span>
+          <span><span class="gh-plus">+${detail.additions}</span> <span class="gh-minus">−${detail.deletions}</span></span>
+          <button type="button" class="gh-files-link" id="gh-files-changed" title="Review the changes file by file">${PICONS.file(12)}<span>${detail.changedFiles} file${detail.changedFiles === 1 ? '' : 's'}</span>${PICONS.chevronRight(10)}</button></div>
+        ${githubDescriptionHtml(detail, state)}
       </div>
       ${githubMergeSection(detail, state, project)}
       ${githubSessionsSection(project, detail)}
       ${githubChecksSection(detail, state)}
       ${githubMyReviewSection(detail, state)}
       ${githubReviewsSection(detail, state)}
-      <div class="gh-sec"><div class="gh-sec-h">Description</div><div class="gh-md">${githubMarkdown(detail.body)}</div></div>
       ${githubConversation(detail)}`;
   } else {
-    const pill = detail.state === 'CLOSED' ? (detail.stateReason === 'NOT_PLANNED' ? 'closed' : 'merged') : 'open';
     body = `
       <div class="gh-sec gh-pr-head">
-        <div class="gh-pr-title"><span class="gh-pill gh-pill--${pill}">${detail.state === 'CLOSED' ? 'closed' : 'open'}</span>${escapeHtml(detail.title)}</div>
-        <div class="gh-muted">Opened by <span class="gh-who">${escapeHtml(detail.author)}</span> ${escapeHtml(githubAgo(detail.createdAt))}${(item.pullRequests || []).length ? '' : ' · no pull request yet'}</div>
+        <div class="gh-pr-meta"><span class="gh-pr-ref">${escapeHtml(githubRepoName(detail.repo))}#${detail.number}</span><span>Opened by <span class="gh-who">${escapeHtml(detail.author)}</span> ${escapeHtml(githubAgo(detail.createdAt))}</span>${(item.pullRequests || []).length ? '' : '<span>no pull request yet</span>'}</div>
+        ${githubDescriptionHtml(detail, state)}
       </div>
       ${githubDepsSection(item, state)}
-      <div class="gh-sec"><div class="gh-sec-h">Description</div><div class="gh-md">${githubMarkdown(detail.body)}</div></div>
       ${githubConversation(detail)}`;
   }
 
-  const ref = sel.view === 'issue' ? sel.itemKey : sel.view;
+  // The title leads; a panel still reading shows the list's title for it.
   const url = detail && !detail.error ? detail.url : null;
+  let pill = '';
+  if (detail && !detail.error) {
+    pill = detail.kind === 'pr'
+      ? (detail.merged ? 'merged' : detail.state === 'CLOSED' ? 'closed' : detail.isDraft ? 'draft' : 'open')
+      : (detail.state === 'CLOSED' ? (detail.stateReason === 'NOT_PLANNED' ? 'closed' : 'merged') : 'open');
+  }
+  const pillText = detail?.kind === 'issue' && pill === 'merged' ? 'closed' : pill;
+  const title = detail && !detail.error ? detail.title : item.title;
   panel.innerHTML = `
     <div class="gh-panel-h">
-      <span class="gh-panel-ref">${escapeHtml(githubRepoName(ref.split('#')[0]))}#${escapeHtml(ref.split('#')[1])}</span>
+      <div class="gh-pr-title">${pill ? `<span class="gh-pill gh-pill--${pill}">${pillText}</span>` : ''}${escapeHtml(title || '')}</div>
       ${loading ? '<span class="git-loading-dot" title="Refreshing"></span>' : ''}
-      <span class="ws-flex"></span>
       <button type="button" class="ws-ghost" id="gh-panel-refresh" title="Fetch the latest from GitHub">${PICONS.refresh(12)}</button>
       ${url ? `<button type="button" class="ws-ghost" id="gh-panel-open" title="Open on GitHub">GitHub ↗</button>` : ''}
       <button type="button" class="ws-ghost" id="gh-panel-close" title="Close the panel">${PICONS.x(12)}</button>
@@ -1464,6 +1496,13 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
     h.onclick = () => {
       const fold = h.parentElement;
       state.open.set(fold.dataset.key, fold.classList.toggle('collapsed') === false);
+    };
+  });
+  panel.querySelectorAll('.gh-desc-more').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.parentElement.dataset.key;
+      state.open.set(key, !state.open.get(key));
+      paintGithubPanel(project);
     };
   });
   panel.querySelectorAll('.gh-deprow').forEach(btn => {
