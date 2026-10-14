@@ -7315,6 +7315,10 @@ body.fp-resizing webview { pointer-events: none; }
 
 /* The graph: a column per phase, arrows from a blocker to what it blocks. */
 .gh-graph { position: relative; overflow-x: auto; padding: 8px 14px 14px; }
+.gh-graph::-webkit-scrollbar { height: 8px; }
+.gh-graph::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+.gh-graph::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.gh-graph::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
 .gh-graph-warn { font-size: 11px; color: #e08a8a; margin-bottom: 8px; }
 .gh-graph-cols { position: relative; z-index: 1; display: flex; gap: 44px; align-items: flex-start; }
 .gh-gcol { flex: none; width: 180px; display: flex; flex-direction: column; gap: 6px; }
