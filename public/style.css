@@ -7685,8 +7685,8 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-comment-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .gh-comment-h a.gh-muted { text-decoration: none; }
 .gh-thread { margin: 4px 0 8px; padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.025); }
-.gh-thread summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
-.gh-path { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; color: #a0a6e8; }
+.gh-thread summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.gh-path { min-width: 0; overflow-wrap: anywhere; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 11px; color: #a0a6e8; }
 /* A merged PR in the panel tabs; the list's ✓ means approved, so not that. */
 .gh-ptab-merged { flex: none; color: #c49cf5; }
 
