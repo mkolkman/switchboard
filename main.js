@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, screen, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, screen, session: electronSession, shell } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
@@ -114,13 +114,26 @@ const activeSessions = new Map();
 
 // A page to show beside a session: from Claude's open_preview tool, or a
 // dev-server or artifact link seen in its output (preview-urls.js).
+/** A popup from a preview page that signs in: Google, Apple, or Claude's own. */
+function isPreviewSignIn(url) {
+  if (url === 'about:blank' || url === '') return true;
+  try {
+    const host = new URL(url).hostname;
+    return ['accounts.google.com', 'appleid.apple.com', 'claude.ai', 'anthropic.com'].some(h => host === h || host.endsWith('.' + h));
+  } catch { return false; }
+}
+
 function sendPreview(sessionId, url, source) {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   const session = activeSessions.get(sessionId);
   mainWindow.webContents.send('preview-open', session?.realSessionId || sessionId, url, source);
   return true;
 }
-const previewMcp = createPreviewMcpServer({ onOpen: (sessionId, url) => sendPreview(sessionId, url, 'tool'), log });
+const previewMcp = createPreviewMcpServer({
+  onOpen: (sessionId, url) => sendPreview(sessionId, url, 'tool'),
+  log,
+  scriptDir: app.getPath('userData'),
+});
 let mainWindow = null;
 let appIsQuitting = false;
 
@@ -320,8 +333,17 @@ function createWindow() {
     params.partition = 'persist:preview';
     if (!/^(https?|file):/i.test(params.src || '')) event.preventDefault();
   });
+  // Google refuses sign-in in a browser that says it is Electron: the preview
+  // passes for the Chrome it is.
+  const previewSession = electronSession.fromPartition('persist:preview');
+  previewSession.setUserAgent(mainWindow.webContents.getUserAgent().replace(/ (Electron|Switchboard|switchboard)\/\S+/g, ''));
   mainWindow.webContents.on('did-attach-webview', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
+      // A sign-in popup must stay in the preview's partition, or the page that
+      // opened it never hears back. Anything else opens in the system browser.
+      if (isPreviewSignIn(url)) {
+        return { action: 'allow', overrideBrowserWindowOptions: { width: 520, height: 680, autoHideMenuBar: true, webPreferences: { partition: 'persist:preview', sandbox: true, contextIsolation: true, nodeIntegration: false } } };
+      }
       if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
       return { action: 'deny' };
     });
@@ -1871,6 +1893,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       if (startFresh && harness.launchEnv) Object.assign(ptyEnv, harness.launchEnv(sessionId));
       if (mcpServer) {
         ptyEnv.CLAUDE_CODE_SSE_PORT = String(mcpServer.port);
+      }
+      // Links the session opens: prototype pages beside it, the rest as before.
+      try { Object.assign(ptyEnv, await previewMcp.launchEnv(sessionId)); } catch (err) {
+        log.error(`[preview-mcp] No BROWSER for ${sessionId}: ${err.message}`);
       }
 
       ptyProcess = await ptyClient.spawn({

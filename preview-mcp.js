@@ -7,6 +7,10 @@
  * mcp-bridge.js), so this one is a server of its own, handed to the session
  * with --mcp-config. One server serves every session; the path names the
  * session, behind a token made at start-up.
+ *
+ * It also takes the links a session would open in the system browser: the
+ * session's BROWSER is a script (browserScript) that sends a prototype page
+ * here, to /open, and anything else on to the system browser.
  */
 
 const http = require('http');
@@ -45,6 +49,32 @@ function previewTarget(value) {
   return { error: 'Give an http(s) URL or an absolute file path.' };
 }
 
+// Pages that belong beside the session; the rest (sign-ins, docs, GitHub) stays in the system browser.
+const PREVIEW_PATTERNS = ['http://localhost*', 'https://localhost*', 'http://127.0.0.1*', 'http://0.0.0.0*', 'http://\\[::1\\]*', 'file://*', 'https://claude.ai/artifact/*', 'https://claude.ai/code/artifact/*'];
+
+const BROWSER_SCRIPT = `#!/bin/sh
+# Switchboard: a session's BROWSER. Prototype pages open beside the session,
+# everything else in the system browser. Written by preview-mcp.js.
+case "$1" in
+  ${PREVIEW_PATTERNS.join('|')})
+    if [ -n "$SWITCHBOARD_PREVIEW_OPEN" ] && curl -fsS -m 3 -X POST --data-urlencode "url=$1" "$SWITCHBOARD_PREVIEW_OPEN" >/dev/null 2>&1; then
+      exit 0
+    fi ;;
+esac
+exec open "$1"
+`;
+
+/** Write the BROWSER script into a folder of the app's own; its path. */
+function browserScript(dir) {
+  const file = path.join(dir, 'switchboard-browser.sh');
+  if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== BROWSER_SCRIPT) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, BROWSER_SCRIPT, { mode: 0o755 });
+  }
+  fs.chmodSync(file, 0o755);
+  return file;
+}
+
 /** One JSON-RPC request in, its response out (null for a notification). */
 function handleRpc(msg, sessionId, onOpen) {
   const reply = (result) => ({ jsonrpc: '2.0', id: msg.id, result });
@@ -73,7 +103,7 @@ function handleRpc(msg, sessionId, onOpen) {
   }
 }
 
-function createPreviewMcpServer({ onOpen, log }) {
+function createPreviewMcpServer({ onOpen, log, scriptDir }) {
   const token = crypto.randomBytes(16).toString('hex');
   let server = null;
   let port = null;
@@ -81,6 +111,18 @@ function createPreviewMcpServer({ onOpen, log }) {
   async function start() {
     if (server) return port;
     server = http.createServer((req, res) => {
+      // From the BROWSER script: url=<page>, form-encoded.
+      const open = req.url.match(/^\/open\/([0-9a-f]+)\/([A-Za-z0-9-]+)$/);
+      if (open && open[1] === token && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; if (body.length > 1e5) req.destroy(); });
+        req.on('end', () => {
+          const target = previewTarget(new URLSearchParams(body).get('url'));
+          const ok = !target.error && onOpen(open[2], target.url);
+          res.writeHead(ok ? 204 : 400).end();
+        });
+        return;
+      }
       const match = req.url.match(/^\/mcp\/([0-9a-f]+)\/([A-Za-z0-9-]+)$/);
       if (!match || match[1] !== token) { res.writeHead(404).end(); return; }
       // Streamable HTTP: no server-sent stream, plain JSON answers.
@@ -114,12 +156,22 @@ function createPreviewMcpServer({ onOpen, log }) {
     return ['--mcp-config', JSON.stringify(config), '--allowedTools', TOOL_ID];
   }
 
+  /** Environment for a session: its BROWSER sends prototype pages here. */
+  async function launchEnv(sessionId) {
+    await start();
+    if (!scriptDir) return {};
+    return {
+      BROWSER: browserScript(scriptDir),
+      SWITCHBOARD_PREVIEW_OPEN: `http://127.0.0.1:${port}/open/${token}/${sessionId}`,
+    };
+  }
+
   function stop() {
     server?.close();
     server = null;
   }
 
-  return { start, launchArgs, stop };
+  return { start, launchArgs, launchEnv, stop };
 }
 
-module.exports = { createPreviewMcpServer, handleRpc, previewTarget, TOOL_ID };
+module.exports = { createPreviewMcpServer, handleRpc, previewTarget, browserScript, TOOL_ID };

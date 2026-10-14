@@ -63,3 +63,28 @@ test('the server answers MCP over HTTP behind its token', async () => {
     server.stop();
   }
 });
+
+test('the BROWSER script sends prototype pages to Switchboard and the rest to the system browser', async () => {
+  const os = require('os');
+  const fs = require('fs');
+  const { execFile } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-browser-'));
+  const opened = [];
+  const server = createPreviewMcpServer({ onOpen: (sid, url) => { opened.push([sid, url]); return true; }, scriptDir: dir });
+  try {
+    const env = await server.launchEnv('abc-123');
+    assert.equal(fs.statSync(env.BROWSER).mode & 0o111, 0o111);
+    // A fake `open` on PATH records what would have gone to the system browser.
+    fs.writeFileSync(path.join(dir, 'open'), `#!/bin/sh\necho "$1" >> "${dir}/system.txt"\n`, { mode: 0o755 });
+    // Async: the server answering the script runs in this same process.
+    const run = (url) => new Promise((resolve, reject) => execFile(env.BROWSER, [url], { env: { ...process.env, ...env, PATH: `${dir}:${process.env.PATH}` } }, err => err ? reject(err) : resolve()));
+    await run('https://claude.ai/code/artifact/abc');
+    await run('http://localhost:5173/');
+    await run('https://github.com/x/y');
+    assert.deepEqual(opened, [['abc-123', 'https://claude.ai/code/artifact/abc'], ['abc-123', 'http://localhost:5173/']]);
+    assert.equal(fs.readFileSync(path.join(dir, 'system.txt'), 'utf8'), 'https://github.com/x/y\n');
+  } finally {
+    server.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
