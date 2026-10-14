@@ -9,10 +9,11 @@ const {
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
 const DAY = 86400000;
 
-test('sessionStatus puts what needs you ahead of what the process is doing', () => {
+test('sessionStatus puts what needs you, what is unread and what is busy under Working', () => {
   const base = { nowMs: NOW, modifiedMs: NOW, maxAgeDays: 3 };
-  assert.equal(sessionStatus({ ...base, attention: true, unread: true, running: true, busy: true }), 'attention');
-  assert.equal(sessionStatus({ ...base, unread: true, running: true, busy: true }), 'unread');
+  assert.equal(sessionStatus({ ...base, attention: true, unread: true, running: true, busy: true }), 'working');
+  assert.equal(sessionStatus({ ...base, attention: true }), 'working');
+  assert.equal(sessionStatus({ ...base, unread: true }), 'working');
   assert.equal(sessionStatus({ ...base, running: true, busy: true }), 'working');
   assert.equal(sessionStatus({ ...base, running: true }), 'idle');
   assert.equal(sessionStatus({ ...base, busy: true }), 'recent', 'busy without a process is leftover state');

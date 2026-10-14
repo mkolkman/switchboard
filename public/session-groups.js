@@ -13,10 +13,10 @@ const DEFAULT_GROUP_MODE = 'folder';
 const OTHER_CUSTOMER = 'Other';
 
 // Shown in this order, which is also the order they need you in.
+// Working holds what needs you, what is unread and what is busy; the colour
+// of a session's name tells them apart.
 const STATUS_GROUPS = [
-  { id: 'attention', label: 'Needs you', description: 'Waiting for your permission or input' },
-  { id: 'unread', label: 'Unread', description: 'Finished a turn you have not looked at yet' },
-  { id: 'working', label: 'Working', description: 'The agent is busy right now' },
+  { id: 'working', label: 'Working', description: 'Needs you (orange), finished a turn you have not read (blue), or busy (shimmering)' },
   { id: 'idle', label: 'Idle', description: 'Running, waiting for your next prompt' },
   { id: 'recent', label: 'Recent', description: 'Not running, active within the session max age' },
   { id: 'stale', label: 'Stale', description: 'Not running, older than the session max age' },
@@ -28,9 +28,7 @@ function isGroupMode(id) {
 
 /** Which status group a session is in. Signals are booleans; times are ms. */
 function sessionStatus({ attention, unread, busy, running, modifiedMs, nowMs, maxAgeDays }) {
-  if (attention) return 'attention';
-  if (unread) return 'unread';
-  if (running && busy) return 'working';
+  if (attention || unread || (running && busy)) return 'working';
   if (running) return 'idle';
   const age = nowMs - (Number.isFinite(modifiedMs) ? modifiedMs : 0);
   return age > maxAgeDays * 86400000 ? 'stale' : 'recent';

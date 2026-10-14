@@ -678,6 +678,25 @@ function buildVirtualGroups(newSidebar, projects, resort, mode) {
     boundProjects.push(project);
     const fId = folderId(g.path);
 
+    // Status: one list with a header per status that has sessions, nothing to
+    // fold; Stale sits wholly under its "older" toggle. Ported from Joris
+    // Blaak's fork (ab3bc73).
+    if (mode === 'status') {
+      if (!filtered.length) continue;
+      const section = document.createElement('div');
+      section.className = 'status-section';
+      section.id = fId;
+      const label = document.createElement('div');
+      label.className = `session-section-label session-section-label--${g.key}`;
+      label.title = g.title || g.label;
+      label.innerHTML = `${escapeHtml(g.label)}<span class="session-section-count">${filtered.length}</span>`;
+      section.appendChild(label);
+      const stale = g.key === 'stale' && searchMatchIds === null && !showStarredOnly && !showRunningOnly;
+      section.appendChild(buildSessionsList(fId, stale ? [] : visible, stale ? [...visible, ...older] : older));
+      newSidebar.appendChild(section);
+      continue;
+    }
+
     const group = document.createElement('div');
     group.className = 'project-group' + (filtered.length === 0 ? ' is-empty' : '');
     group.id = fId;
