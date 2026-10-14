@@ -133,13 +133,15 @@ function helpscoutSessionIds(conversationId) {
 function openHelpscoutTicket(conversationId) {
   const tab = document.querySelector('.sidebar-tab[data-tab="helpscout"]');
   if (tab && activeTab !== 'helpscout') tab.click();
+  // Already the tab, with a session drawn over it: put the ticket back.
+  else showHelpscoutView();
   openHelpscoutConversation(conversationId);
 }
 
 /** A linked session closed while on screen: show its ticket again. */
 function returnToHelpscoutTicket(sessionId) {
   const link = helpscoutLinkFor(sessionId);
-  if (link && activeTab === 'sessions') openHelpscoutTicket(link.conversation);
+  if (link && (activeTab === 'sessions' || activeTab === 'helpscout')) openHelpscoutTicket(link.conversation);
 }
 
 async function helpscoutViewSession(conv, prompt, label) {
@@ -151,6 +153,9 @@ async function helpscoutViewSession(conv, prompt, label) {
   options.initialPrompt = prompt;
   delete options.worktree;
   delete options.worktreeName;
+  // The session shows in the Sessions tab, like any other; its header leads back.
+  const sessionsTab = document.querySelector('.sidebar-tab[data-tab="sessions"]');
+  if (sessionsTab && activeTab !== 'sessions') sessionsTab.click();
   const sessionId = await launchNewSession(target, options, { focus: true });
   if (!sessionId) return;
   linkHelpscoutSession(sessionId, conv);
@@ -180,7 +185,10 @@ function helpscoutSessionsSection(conv) {
 function bindHelpscoutSessionRow(row) {
   row.querySelector('[data-act="open"]').onclick = () => {
     const session = currentSession(row.dataset.session);
-    if (session) openSession(session);
+    if (!session) return;
+    const sessionsTab = document.querySelector('.sidebar-tab[data-tab="sessions"]');
+    if (sessionsTab && activeTab !== 'sessions') sessionsTab.click();
+    openSession(session);
   };
 }
 
