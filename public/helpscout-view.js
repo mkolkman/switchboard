@@ -273,6 +273,11 @@ function renderHelpscoutViewList() {
 
 const HELPSCOUT_THREAD_LABELS = { customer: 'Customer', message: 'Reply', reply: 'Reply', note: 'Note', forwardparent: 'Forwarded', forwardchild: 'Forward', chat: 'Chat', phone: 'Phone' };
 
+// HEIC is an image Chromium cannot draw; it opens in Preview like any other file.
+function helpscoutIsImage(a) {
+  return /^image\/(?!hei[cf])/i.test(a.mimeType || '') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(a.name || '');
+}
+
 function helpscoutThread(t) {
   if (t.type === 'lineitem') return `<div class="hsv-lineitem">${escapeHtml(t.action || '')} · ${escapeHtml(formatDate(new Date(t.createdAt)))}</div>`;
   const label = t.draft ? 'Draft reply' : t.byClaude ? 'Note by Claude' : HELPSCOUT_THREAD_LABELS[t.type] || t.type;
@@ -281,7 +286,7 @@ function helpscoutThread(t) {
       <div class="hsv-thread-h"><span class="hsv-thread-kind">${escapeHtml(label)}</span><span class="hsv-thread-from" title="${hsvAttr(t.fromEmail)}">${escapeHtml(t.from)}</span>
         <span class="ws-flex"></span><span class="gh-muted">${t.createdAt ? escapeHtml(formatDate(new Date(t.createdAt))) : ''}</span></div>
       <div class="hsv-thread-text">${helpscoutLinkify(t.text)}</div>
-      ${t.attachments.length ? `<div class="hsv-attachments">${t.attachments.map(a => a.url ? `<a class="hsv-link" href="${hsvAttr(a.url)}">${escapeHtml(a.name)}</a>` : escapeHtml(a.name)).join(' · ')}</div>` : ''}
+      ${t.attachments.length ? `<div class="hsv-attachments">${t.attachments.map(a => `<button type="button" class="hsv-att" data-att="${a.id}" title="${hsvAttr(helpscoutIsImage(a) ? 'Show the image' : 'Open in its app')}">${PICONS.file(11)}<span>${escapeHtml(a.name)}</span></button>`).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -399,9 +404,87 @@ function bindHelpscoutViewMain(c, draft) {
     });
   });
   if (sessionRows.length) tickHelpscoutSessions();
+  helpscoutViewer.querySelectorAll('.hsv-att').forEach(btn => {
+    btn.onclick = () => openHelpscoutAttachment(c, Number(btn.dataset.att));
+  });
   helpscoutViewer.querySelectorAll('a.hsv-link').forEach(a => {
     a.onclick = (e) => { e.preventDefault(); if (/^https?:/i.test(a.href)) window.api.openExternal(a.href); };
   });
+}
+
+// --- Attachments: images in a popup over the tab, ← → between them ---
+
+const helpscoutImageCache = new Map(); // attachment id → data: URL
+
+/** An image opens in the popup; any other file in its own app. */
+async function openHelpscoutAttachment(c, attId) {
+  const all = [...c.threads].reverse().filter(t => !t.draft).flatMap(t => t.attachments);
+  const att = all.find(a => a.id === attId);
+  if (!att) return;
+  if (!helpscoutIsImage(att)) {
+    const result = await window.api.openHelpscoutAttachment(c.id, att.id, att.name);
+    if (result?.error) { helpscoutViewState.notice = { bad: true, text: result.error }; renderHelpscoutViewMain(); }
+    return;
+  }
+  const images = all.filter(helpscoutIsImage);
+  showHelpscoutLightbox(c.id, images, images.indexOf(att));
+}
+
+function showHelpscoutLightbox(convId, images, start) {
+  document.querySelector('.hsv-lightbox')?.remove();
+  let index = start;
+  const box = document.createElement('div');
+  box.className = 'hsv-lightbox';
+  const close = () => { box.remove(); document.removeEventListener('keydown', onKey, true); };
+  const show = async () => {
+    const att = images[index];
+    const many = images.length > 1;
+    box.innerHTML = `<div class="hsv-lightbox-bar"><span class="hsv-lightbox-name">${escapeHtml(att.name)}</span>
+        ${many ? `<span class="gh-muted">${index + 1} / ${images.length}</span>` : ''}<span class="ws-flex"></span>
+        <button type="button" class="ws-ghost" data-lb="close" title="Close (Esc)">${PICONS.x(14)}</button></div>
+      <div class="hsv-lightbox-stage">
+        ${many ? `<button type="button" class="hsv-lightbox-nav hsv-lightbox-nav--prev" data-lb="prev" title="Previous (←)">${PICONS.back(18)}</button>` : ''}
+        <div class="hsv-lightbox-img"><span class="gh-muted">Loading…</span></div>
+        ${many ? `<button type="button" class="hsv-lightbox-nav hsv-lightbox-nav--next" data-lb="next" title="Next (→)">${PICONS.chevronRight(18)}</button>` : ''}
+      </div>`;
+    box.querySelectorAll('[data-lb]').forEach(btn => {
+      btn.onclick = (e) => { e.stopPropagation(); step(btn.dataset.lb); };
+    });
+    let url = helpscoutImageCache.get(att.id);
+    if (!url) {
+      const result = await window.api.getHelpscoutAttachment(convId, att.id);
+      if (result?.error) {
+        if (images[index] === att) box.querySelector('.hsv-lightbox-img').innerHTML = `<span class="gh-error">${escapeHtml(result.error)}</span>`;
+        return;
+      }
+      url = `data:${att.mimeType || 'image/png'};base64,${result.data}`;
+      helpscoutImageCache.set(att.id, url);
+    }
+    // Moved on while it loaded: that image draws itself.
+    if (images[index] !== att || !box.isConnected) return;
+    const holder = box.querySelector('.hsv-lightbox-img');
+    holder.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = att.name;
+    holder.appendChild(img);
+  };
+  const step = (what) => {
+    if (what === 'close') { close(); return; }
+    index = (index + (what === 'next' ? 1 : -1) + images.length) % images.length;
+    show();
+  };
+  // Capture, so the arrows do not also move the sidebar list underneath.
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (images.length > 1 && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      e.preventDefault(); e.stopPropagation(); step(e.key === 'ArrowRight' ? 'next' : 'prev');
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+  box.onclick = (e) => { if (e.target === box || e.target.classList.contains('hsv-lightbox-stage')) close(); };
+  document.body.appendChild(box);
+  show();
 }
 
 /** Called when the Help Scout tab is opened (app.js). */

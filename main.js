@@ -856,6 +856,12 @@ ipcMain.handle('helpscout-save-draft', (_e, id, spec) => helpscout.asResult(help
 ipcMain.handle('helpscout-add-note', (_e, id, text) => helpscout.asResult(helpscout.addNote(id, String(text || ''))));
 ipcMain.handle('helpscout-assign', (_e, id, assigneeId) => helpscout.asResult(helpscout.assign(id, assigneeId || null)));
 ipcMain.handle('helpscout-set-status', (_e, id, status) => helpscout.asResult(helpscout.setStatus(id, String(status || ''))));
+ipcMain.handle('helpscout-attachment', (_e, convId, attId) => helpscout.asResult(helpscout.getAttachment(convId, attId)));
+ipcMain.handle('helpscout-open-attachment', (_e, convId, attId, name) => helpscout.asResult(helpscout.openAttachment(convId, attId, String(name || '')).then(async ({ file }) => {
+  const err = await shell.openPath(file);
+  if (err) throw new Error(err);
+  return {};
+})));
 ipcMain.handle('helpscout-set-suggestion', (_e, sid, status) => helpscout.asResult(helpscout.setSuggestionStatus(sid, String(status || ''))));
 
 // --- IPC: the Notion todo list (notion-todo.js) ---

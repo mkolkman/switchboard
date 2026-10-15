@@ -97,7 +97,8 @@ function shapeThread(t) {
     byClaude: t.type === 'note' && text.startsWith(CLAUDE_NOTE_LABEL),
     to: t.to || [],
     cc: t.cc || [],
-    attachments: (t._embedded?.attachments || []).map(a => ({ name: a.filename, url: a._links?.web?.href || a._links?.data?.href || null })),
+    // Help Scout's links need its API token; the tab fetches the file itself (getAttachment).
+    attachments: (t._embedded?.attachments || []).map(a => ({ id: a.id, name: a.filename, mimeType: a.mimeType || '', size: a.size || 0 })),
     action: t.action?.text || null,
   };
 }
@@ -219,6 +220,24 @@ async function getConversation(id) {
   };
 }
 
+/** An attachment's bytes, base64, read through the API (its web link wants a signed-in browser). */
+async function getAttachment(conversationId, attachmentId) {
+  const { data } = await api('GET', `/conversations/${Number(conversationId)}/attachments/${Number(attachmentId)}/data`);
+  if (!data?.data) throw new Error('Help Scout returned no data for this attachment.');
+  return { data: data.data };
+}
+
+/** A non-image attachment: written to a temp folder and opened in its default app. */
+async function openAttachment(conversationId, attachmentId, name) {
+  const { data } = await getAttachment(conversationId, attachmentId);
+  const dir = path.join(os.tmpdir(), 'switchboard-helpscout');
+  fs.mkdirSync(dir, { recursive: true });
+  const safe = path.basename(String(name || 'attachment')).replace(/[^\w.\- ]+/g, '_') || 'attachment';
+  const file = path.join(dir, `${Number(attachmentId)}-${safe}`);
+  fs.writeFileSync(file, Buffer.from(data, 'base64'));
+  return { file };
+}
+
 // --- Writes: each one is a click in the tab ---
 
 /** Your draft reply: its text replaced when it exists, else a new draft. Never sent. */
@@ -282,5 +301,5 @@ function asResult(promise) {
 
 module.exports = {
   htmlToText, textToHtml, groupOf, shapeConversation, shapeThread, CLAUDE_NOTE_LABEL,
-  getInbox, getConversation, saveDraft, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
+  getInbox, getConversation, getAttachment, openAttachment, saveDraft, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
 };

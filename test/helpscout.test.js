@@ -36,4 +36,7 @@ test('a conversation and its threads keep what the tab shows', () => {
   const draft = shapeThread({ id: 2, type: 'reply', state: 'draft', body: 'Hi', createdBy: { type: 'user', email: 'm@x' } });
   assert.equal(draft.draft, true);
   assert.equal(draft.from, 'm@x');
+  // Attachments keep their id and type, for the API read; Help Scout's links need its token.
+  const withFile = shapeThread({ id: 3, type: 'customer', body: 'See photo', _embedded: { attachments: [{ id: 9, filename: 'a.jpg', mimeType: 'image/jpeg', size: 12, _links: { web: { href: 'https://x' } } }] } });
+  assert.deepEqual(withFile.attachments, [{ id: 9, name: 'a.jpg', mimeType: 'image/jpeg', size: 12 }]);
 });
