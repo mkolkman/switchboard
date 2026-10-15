@@ -5,6 +5,8 @@
 // ones) their repo's short name with a status dot, the kind of session and its
 // track or branch, GitHub its PR numbers, Todo its section icons and Help
 // Scout its ticket numbers; each one does what its full row does on a click.
+// In Sessions a + under the mode button starts a new session, like the open
+// sidebar's.
 // The lists come from what the expanded sidebar holds, in its order and with
 // its filters, so the two never disagree.
 // Depends on: app.js (activeTab, sidebarContent, openSession), projects-view.js
@@ -154,6 +156,7 @@ function renderSidebarRail() {
   const scroll = sidebarRail.querySelector('.rail-list')?.scrollTop || 0;
   sidebarRail.innerHTML = `
     <button type="button" class="rail-mode" title="${railAttr(`${tab?.title || activeTab}\nClick to switch`)}">${tab ? railIcon(tab.innerHTML, 18) : ''}</button>
+    ${activeTab === 'sessions' ? `<button type="button" class="rail-item rail-new" title="${railAttr(document.getElementById('new-session-btn')?.title || 'New session')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>` : ''}
     <div class="rail-list">${list ? list() : ''}</div>`;
   sidebarRail.querySelector('.rail-list').scrollTop = scroll;
   sidebarRail.querySelector('.rail-mode').onclick = (e) => {
@@ -164,6 +167,9 @@ function renderSidebarRail() {
       onClick: () => btn.click(),
     })), { anchor: e.currentTarget });
   };
+  // The open sidebar's + : a chat, or a session in a repository.
+  const newBtn = sidebarRail.querySelector('.rail-new');
+  if (newBtn) newBtn.onclick = () => showProjectPickerDialog();
   sidebarRail.querySelectorAll('[data-project]').forEach(b => { b.onclick = () => selectProject(b.dataset.project); });
   sidebarRail.querySelectorAll('[data-session]').forEach(b => {
     b.onclick = () => { const s = sessionMap.get(b.dataset.session); if (s) openSession(s); };
