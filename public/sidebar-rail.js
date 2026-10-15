@@ -3,8 +3,9 @@
 // mode (tab) it is in, which opens a menu to switch mode, and below it a short
 // form of that mode's list. Projects show their marks, Sessions (only the live
 // ones) their repo's short name with a status dot, the kind of session and its
-// track or branch, GitHub its PR numbers, Todo its section icons and Help
-// Scout its ticket numbers; each one does what its full row does on a click.
+// track or branch, GitHub its PR numbers, Todo its section icons, Help Scout
+// its ticket numbers and Grafana Logs and its firing or pending alerts; each
+// one does what its full row does on a click.
 // In Sessions a + under the mode button starts a new session, like the open
 // sidebar's.
 // The lists come from what the expanded sidebar holds, in its order and with
@@ -14,11 +15,12 @@
 // showContextMenu), sidebar.js (isChatFolder), session-groups.js (folderBaseName),
 // project-github-view.js (prSessionState, githubItemKey), github-view.js
 // (githubViewState, openGithubViewItem), todo-view.js (todoViewSections,
-// todoViewer), helpscout-view.js (helpscoutViewState, openHelpscoutConversation).
+// todoViewer), helpscout-view.js (helpscoutViewState, openHelpscoutConversation),
+// grafana-view.js (grafanaViewState, selectGrafana).
 
 const sidebarRail = document.getElementById('sidebar-rail');
 const SIDEBAR_RAIL_LIMIT = 40;
-const SIDEBAR_RAIL_TABS = ['projects', 'sessions', 'github', 'todo', 'helpscout', 'plans', 'memory', 'stats'];
+const SIDEBAR_RAIL_TABS = ['projects', 'sessions', 'github', 'todo', 'helpscout', 'grafana', 'plans', 'memory', 'stats'];
 
 const railTabButton = (name) => document.querySelector(`.sidebar-tab[data-tab="${name}"]`);
 const railIcon = (svg, size) => svg.replace(/width="\d+" height="\d+"/, `width="${size}" height="${size}"`);
@@ -140,12 +142,21 @@ function railHelpscoutItems() {
   return open.slice(0, SIDEBAR_RAIL_LIMIT).map(c => `<button type="button" class="rail-item rail-num rail-num--${c.group}${c.id === s.selectedId ? ' active' : ''}" data-conv="${c.id}" title="${railAttr(`#${c.number} ${c.subject}\n${c.customer.name || c.customer.email}${c.assignee ? `, ${c.assignee.name}` : ''}`)}">#${c.number}</button>`).join('');
 }
 
+/** Firing and pending alerts as dots, Logs first. */
+function railGrafanaItems() {
+  const s = grafanaViewState;
+  const active = (s.alerts || []).filter(a => a.state === 'firing' || a.state === 'pending');
+  return `<button type="button" class="rail-item${s.selected.kind === 'logs' ? ' active' : ''}" data-gfv-logs="1" title="Logs">${PICONS.list(14)}</button>`
+    + active.slice(0, SIDEBAR_RAIL_LIMIT).map(a => `<button type="button" class="rail-item${s.selected.kind === 'alert' && s.selected.id === a.uid ? ' active' : ''}" data-gfv-alert="${railAttr(a.uid)}" title="${railAttr(`${a.state}: ${a.title}`)}"><span class="gfv-dot gfv-dot--${railAttr(a.state)}"></span></button>`).join('');
+}
+
 const RAIL_LISTS = {
   projects: railProjectItems,
   sessions: railSessionItems,
   github: railGithubItems,
   todo: railTodoItems,
   helpscout: railHelpscoutItems,
+  grafana: railGrafanaItems,
 };
 
 /** Draw the rail; a no-op while the sidebar is open. Called by every list that changes. */
@@ -178,6 +189,8 @@ function renderSidebarRail() {
   sidebarRail.querySelectorAll('[data-section]').forEach(b => {
     b.onclick = () => todoViewer.querySelector(`.tdv-section[data-section="${CSS.escape(b.dataset.section)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   });
+  sidebarRail.querySelectorAll('[data-gfv-alert]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'alert', id: b.dataset.gfvAlert }); });
+  sidebarRail.querySelectorAll('[data-gfv-logs]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'logs', id: null }); });
   sidebarRail.querySelectorAll('[data-conv]').forEach(b => { b.onclick = () => openHelpscoutConversation(Number(b.dataset.conv)); });
 }
 

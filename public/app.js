@@ -91,7 +91,7 @@ let activePtyIds = new Set();
 let sortedOrder = []; // [{ projectPath, itemIds: [itemId, ...] }, ...] — single source of truth for sidebar order
 // Only Sessions and Projects are remembered: the others (Plans, Agent Files,
 // Stats) are places you visit, not places you work from.
-const REMEMBERED_TABS = ['sessions', 'projects', 'github', 'todo', 'helpscout'];
+const REMEMBERED_TABS = ['sessions', 'projects', 'github', 'todo', 'helpscout', 'grafana'];
 const LAST_TAB_KEY = 'lastTab';
 function rememberedTab() {
   try {
@@ -1338,6 +1338,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     if (activeTab === 'github' && typeof hideGithubView === 'function') hideGithubView();
     if (activeTab === 'todo' && typeof hideTodoView === 'function') hideTodoView();
     if (activeTab === 'helpscout' && typeof hideHelpscoutView === 'function') hideHelpscoutView();
+    if (activeTab === 'grafana' && typeof hideGrafanaView === 'function') hideGrafanaView();
     activeTab = tabName;
     if (REMEMBERED_TABS.includes(tabName)) { try { localStorage.setItem(LAST_TAB_KEY, tabName); } catch {} }
     document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
@@ -1358,6 +1359,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     document.getElementById('github-content').style.display = 'none';
     document.getElementById('todo-content').style.display = 'none';
     document.getElementById('helpscout-content').style.display = 'none';
+    document.getElementById('grafana-content').style.display = 'none';
     sessionFilters.style.display = 'none';
     searchBar.style.display = 'none';
 
@@ -1411,6 +1413,9 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     } else if (tabName === 'helpscout') {
       document.getElementById('helpscout-content').style.display = '';
       showHelpscoutView();
+    } else if (tabName === 'grafana') {
+      document.getElementById('grafana-content').style.display = '';
+      showGrafanaView();
     } else if (tabName === 'plans') {
       searchBar.style.display = '';
       searchInput.placeholder = 'Search plans...';
@@ -1641,7 +1646,7 @@ loadProjects().then(async () => {
     const session = sessionMap.get(activeSessionId);
     // The GitHub, Todo and Help Scout tabs have no terminal in view: the
     // session comes back in the background instead of covering it.
-    const focus = !['github', 'todo', 'helpscout'].includes(activeTab);
+    const focus = !['github', 'todo', 'helpscout', 'grafana'].includes(activeTab);
     if (session?.archived) {
       setActiveSession(null);
     } else if (session) {

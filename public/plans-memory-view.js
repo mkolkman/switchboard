@@ -137,6 +137,7 @@ function hideViewerPanels() {
   if (typeof hideGithubView === 'function') hideGithubView();
   if (typeof hideTodoView === 'function') hideTodoView();
   if (typeof hideHelpscoutView === 'function') hideHelpscoutView();
+  if (typeof hideGrafanaView === 'function') hideGrafanaView();
   terminalArea.style.display = '';
 }
 

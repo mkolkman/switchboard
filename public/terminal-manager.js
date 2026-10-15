@@ -769,6 +769,8 @@ function showSession(sessionId) {
   if (typeof onSessionShown === 'function') onSessionShown(sessionId);
   // The Help Scout tab keeps the ticket beside it (helpscout-view.js).
   if (typeof onHelpscoutSessionShown === 'function') onHelpscoutSessionShown(sessionId);
+  // The Grafana tab keeps the alert or the logs beside it (grafana-view.js).
+  if (typeof onGrafanaSessionShown === 'function') onGrafanaSessionShown(sessionId);
 }
 
 function setupDragAndDrop(container, getSessionId) {

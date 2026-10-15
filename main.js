@@ -55,6 +55,7 @@ const { repoInfoForPaths, findLocalClones } = require('./repo-info');
 const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
+const grafana = require('./grafana');
 const sleepControl = require('./sleep-control');
 
 
@@ -430,7 +431,8 @@ function createWindow() {
     webPreferences.nodeIntegrationInSubFrames = false;
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
-    params.partition = 'persist:preview';
+    // The Grafana tab's dashboards keep their own login (grafana-view.js).
+    params.partition = params.partition === 'persist:grafana' ? 'persist:grafana' : 'persist:preview';
     if (!/^(https?|file):/i.test(params.src || '')) event.preventDefault();
   });
   // Google refuses sign-in in a browser that says it is Electron: the preview
@@ -846,6 +848,18 @@ ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTra
 // --- IPC: the Mac's sleep switch (sleep-control.js), the sidebar toolbar's button ---
 ipcMain.handle('get-sleep-disabled', () => sleepControl.isSleepDisabled());
 ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisabled(!!disabled, log));
+
+// --- IPC: Grafana (grafana.js), read-only ---
+
+ipcMain.handle('grafana-config', () => grafana.asResult(grafana.getConfig()));
+ipcMain.handle('grafana-save-config', (_e, spec) => grafana.asResult(grafana.saveConfig(spec || {})));
+ipcMain.handle('grafana-alerts', () => grafana.asResult(grafana.getAlerts()));
+ipcMain.handle('grafana-dashboards', () => grafana.asResult(grafana.getDashboards()));
+ipcMain.handle('grafana-vitals', (_e, platform) => grafana.asResult(grafana.getVitals(String(platform || ''))));
+ipcMain.handle('grafana-logs', (_e, spec) => grafana.asResult(grafana.getLogs(spec || {})));
+ipcMain.handle('grafana-log-context', (_e, spec) => grafana.asResult(grafana.getLogContext(spec || {})));
+ipcMain.handle('grafana-alert-series', (_e, spec) => grafana.asResult(grafana.getAlertSeries(spec || {})));
+ipcMain.handle('grafana-session-note', () => grafana.sessionToolsNote());
 
 // --- IPC: Help Scout (helpscout.js) ---
 // Each write is a click in the Help Scout tab. A reply is always a draft:
