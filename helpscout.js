@@ -7,8 +7,8 @@ const { execFile } = require('child_process');
 // Scout tab. It shares its login and files with the customer-support skill's
 // helpscout_api.py (and the drafts job that runs it): the app's OAuth
 // credentials in the keychain, the access token cache, and the suggestions
-// to log later. Nothing here sends an email: a reply is always a draft, sent
-// by you in Help Scout itself (the API cannot publish a draft).
+// to log later. Only sendReply emails the customer, on a click and a confirm in
+// the tab; the other writes are drafts, notes, status and assignment.
 
 const BASE = 'https://api.helpscout.net/v2';
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'helpscout');
