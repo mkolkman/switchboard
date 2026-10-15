@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('api', {
   setHelpscoutStatus: (id, status) => ipcRenderer.invoke('helpscout-set-status', id, status),
   getHelpscoutAttachment: (convId, attId) => ipcRenderer.invoke('helpscout-attachment', convId, attId),
   openHelpscoutAttachment: (convId, attId, name) => ipcRenderer.invoke('helpscout-open-attachment', convId, attId, name),
+  generateHelpscoutDraft: (id) => ipcRenderer.invoke('helpscout-generate-draft', id),
   setHelpscoutSuggestion: (sid, status) => ipcRenderer.invoke('helpscout-set-suggestion', sid, status),
   getNotionTodoConfig: () => ipcRenderer.invoke('notion-todo-config'),
   setNotionTodoConfig: (spec) => ipcRenderer.invoke('notion-todo-set-config', spec),

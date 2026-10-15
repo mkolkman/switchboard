@@ -862,6 +862,11 @@ ipcMain.handle('helpscout-open-attachment', (_e, convId, attId, name) => helpsco
   if (err) throw new Error(err);
   return {};
 })));
+ipcMain.handle('helpscout-generate-draft', (_e, id) => {
+  const cwd = path.join(projects.projectsRoot(), 'Chats');
+  fs.mkdirSync(cwd, { recursive: true });
+  return helpscout.asResult(helpscout.generateDraft(id, { cwd, shell: resolveShell().path, env: cleanPtyEnv }));
+});
 ipcMain.handle('helpscout-set-suggestion', (_e, sid, status) => helpscout.asResult(helpscout.setSuggestionStatus(sid, String(status || ''))));
 
 // --- IPC: the Notion todo list (notion-todo.js) ---

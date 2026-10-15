@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { htmlToText, textToHtml, groupOf, shapeConversation, shapeThread, CLAUDE_NOTE_LABEL } = require('../helpscout');
+const { htmlToText, textToHtml, groupOf, shapeConversation, shapeThread, draftPrompt, CLAUDE_NOTE_LABEL } = require('../helpscout');
 
 test('thread bodies read as text, and typed text writes as Help Scout paragraphs', () => {
   assert.equal(htmlToText('<p>Hi Jens,</p><p>Thanks &amp; regards,<br>Mike</p><style>p{}</style>'), 'Hi Jens,\n\nThanks & regards,\nMike');
@@ -42,4 +42,20 @@ test('a conversation and its threads keep what the tab shows', () => {
   // Attachments keep their id and type, for the API read; Help Scout's links need its token.
   const withFile = shapeThread({ id: 3, type: 'customer', body: 'See photo', _embedded: { attachments: [{ id: 9, filename: 'a.jpg', mimeType: 'image/jpeg', size: 12, _links: { web: { href: 'https://x' } } }] } });
   assert.deepEqual(withFile.attachments, [{ id: 9, name: 'a.jpg', mimeType: 'image/jpeg', size: 12 }]);
+});
+
+test('draftPrompt: the skill, the ticket oldest first without drafts, and the reply alone back', () => {
+  const thread = (id, type, text, extra = {}) => ({ id, type, text, from: 'Ann', createdAt: `2026-10-0${id}`, attachments: [], draft: false, ...extra });
+  const conv = {
+    number: 7, url: 'https://hs/7', subject: 'Rower stops', customer: { name: 'Ann', email: 'ann@x' },
+    // Newest first, as Help Scout lists them.
+    threads: [thread(3, 'reply', 'my draft', { draft: true }), thread(2, 'note', 'check logs'), thread(1, 'customer', 'It stops', { attachments: [{ name: 'a.jpg' }] })],
+  };
+  const prompt = draftPrompt(conv);
+  assert.ok(prompt.startsWith('/movelab-claude-skills:customer-support '));
+  assert.match(prompt, /Hand back only the text of the reply/);
+  assert.ok(prompt.indexOf('It stops') < prompt.indexOf('check logs'));
+  assert.match(prompt, /--- Customer, Ann, 2026-10-01 \(attached: a\.jpg\)/);
+  assert.match(prompt, /--- Note \(team only\)/);
+  assert.doesNotMatch(prompt, /my draft/);
 });

@@ -39,6 +39,7 @@ const helpscoutViewState = {
   scrolledTo: null, // the conversation last scrolled to its end, on opening it
   splitSession: null, // the session shown beside the ticket
   splitHiddenFor: null, // a ticket whose session was hidden by hand
+  generating: null, generated: null, // the ticket Claude is writing a reply for, and its text
 };
 
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
@@ -356,7 +357,10 @@ function renderHelpscoutViewMain() {
   const draft = c.threads.find(t => t.draft);
   const people = inbox?.people || [];
   const busy = s.busy ? ' disabled' : '';
-  const composeValue = typed !== undefined && s.composerKept === `${c.id}:${s.composer}` ? typed : s.composer === 'reply' ? (draft?.text || '') : '';
+  let composeValue = typed !== undefined && s.composerKept === `${c.id}:${s.composer}` ? typed : s.composer === 'reply' ? (draft?.text || '') : '';
+  // A generated reply lands in the box once (helpscoutGenerateDraft).
+  if (s.generated?.conversation === c.id && s.composer === 'reply') { composeValue = s.generated.text; s.generated = null; }
+  const generating = s.generating === c.id;
   s.composerKept = `${c.id}:${s.composer}`;
   helpscoutViewer.innerHTML = `<div class="hsv-body"><div class="hsv-page">
     <div class="hsv-head">
@@ -386,7 +390,9 @@ function renderHelpscoutViewMain() {
       <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team; type @ to mention someone'}">${escapeHtml(composeValue)}</textarea>
       <div class="hsv-compose-acts">
         ${s.composer === 'reply'
-          ? `<button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
+          ? `<button type="button" class="ws-ghost" id="hsv-generate"${generating ? ' disabled' : ''} title="${hsvAttr(`Claude writes a reply with ${HELPSCOUT_SUPPORT_SKILL}, in the background; it comes into this box and nothing is saved`)}">${ICONS.claude(12)}<span>${generating ? 'Writing…' : 'Generate draft'}</span></button>
+             <span class="ws-flex"></span>
+             <button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
              <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="Save the draft, then open the conversation in Help Scout to send it">Send in Help Scout</button>`
           : `<button type="button" class="ws-btn ws-btn--primary" id="hsv-add-note"${busy}>${s.busy === 'note' ? 'Adding…' : 'Add note'}</button>`}
       </div>
@@ -420,6 +426,7 @@ function bindHelpscoutViewMain(c, draft) {
   const text = () => $('#hsv-compose').value;
   const saveDraft = () => helpscoutViewWrite('draft', () => window.api.saveHelpscoutDraft(c.id, { threadId: draft?.id || null, text: text() }), 'Draft saved in Help Scout.');
   if ($('#hsv-save-draft')) $('#hsv-save-draft').onclick = () => saveDraft();
+  if ($('#hsv-generate')) $('#hsv-generate').onclick = () => helpscoutGenerateDraft(c);
   if ($('#hsv-send')) $('#hsv-send').onclick = async () => { if (await saveDraft()) window.api.openExternal(c.url); };
   if (s.composer === 'note') bindHelpscoutMentions($('#hsv-compose'), s.inbox?.people || []);
   if ($('#hsv-add-note')) {
@@ -453,6 +460,33 @@ function bindHelpscoutViewMain(c, draft) {
   helpscoutViewer.querySelectorAll('a.hsv-link').forEach(a => {
     a.onclick = (e) => { e.preventDefault(); if (/^https?:/i.test(a.href)) window.api.openExternal(a.href); };
   });
+}
+
+// --- A reply written by Claude in the background (helpscout.js generateDraft) ---
+
+async function helpscoutGenerateDraft(c) {
+  const s = helpscoutViewState;
+  if (s.generating) return;
+  s.generating = c.id;
+  s.notice = null;
+  renderHelpscoutViewMain();
+  const result = await window.api.generateHelpscoutDraft(c.id).catch(err => ({ error: err?.message || String(err) }));
+  s.generating = null;
+  if (result?.error) {
+    if (s.selectedId === c.id) s.notice = { bad: true, text: result.error };
+    renderHelpscoutViewMain();
+    return;
+  }
+  // The box may hold text by now; replacing it is the user's call.
+  const box = s.selectedId === c.id && s.composer === 'reply' ? helpscoutViewer.querySelector('#hsv-compose') : null;
+  if (box && box.value.trim() && box.value.trim() !== result.text.trim() && !confirm('Replace the text in the reply box with the generated reply?')) {
+    renderHelpscoutViewMain();
+    return;
+  }
+  s.generated = { conversation: c.id, text: result.text };
+  s.composerKept = null;
+  if (s.selectedId === c.id) s.notice = { bad: false, text: 'Reply written by Claude. Check it, then save it as a draft.' };
+  renderHelpscoutViewMain();
 }
 
 // --- @mentions in a note: a list of people over the box while an @word is typed ---

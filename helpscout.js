@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 // Help Scout, read and written live through the Mailbox API v2, for the Help
 // Scout tab. It shares its login and files with the customer-support skill's
@@ -245,6 +245,58 @@ async function openAttachment(conversationId, attachmentId, name) {
   return { file };
 }
 
+// --- A draft reply written by Claude, in the background ---
+
+const DRAFT_TIMEOUT_MS = 5 * 60 * 1000;
+const DRAFT_SKILL = '/movelab-claude-skills:customer-support';
+const DRAFT_LABELS = { customer: 'Customer', message: 'Reply', reply: 'Reply', note: 'Note (team only)', forwardparent: 'Forwarded', forwardchild: 'Forward', chat: 'Chat', phone: 'Phone' };
+
+/** The skill, the ticket as text (oldest first) and what to hand back: the reply alone. */
+function draftPrompt(conv) {
+  const threads = [...conv.threads].reverse().filter(t => !t.draft && t.type !== 'lineitem');
+  const customer = [conv.customer?.name, conv.customer?.email && `<${conv.customer.email}>`].filter(Boolean).join(' ');
+  return `${DRAFT_SKILL} Write the reply to Help Scout ticket #${conv.number} (${conv.url}).\n\n`
+    + 'Hand back only the text of the reply, nothing before or after it. Do not post, save or log anything '
+    + '(no Help Scout draft or note, no GitHub, no Notion) and do not ask questions: the reply goes into the '
+    + 'reply box in Switchboard, where it is checked and saved as a draft by hand.\n\n'
+    + `Subject: ${conv.subject}\nCustomer: ${customer}\n\nThe conversation, oldest first:\n\n`
+    + threads.map(t => `--- ${DRAFT_LABELS[t.type] || t.type}${t.from ? `, ${t.from}` : ''}${t.createdAt ? `, ${t.createdAt}` : ''}`
+      + `${t.attachments.length ? ` (attached: ${t.attachments.map(a => a.name).join(', ')})` : ''}\n${t.text}`).join('\n\n');
+}
+
+/**
+ * Claude with the customer-support skill, headless, writes the reply to a
+ * ticket. It may read (files, `gh issue` and `gh search` for known bugs)
+ * but has no tool that writes; the text comes back for the reply box.
+ * `shell` is a login shell (the app's own PATH lacks claude), `env` the
+ * cleaned environment sessions get.
+ */
+async function generateDraft(id, { cwd, shell, env }) {
+  const conv = await getConversation(id);
+  const args = ['-p', draftPrompt(conv), '--output-format', 'json', '--no-session-persistence',
+    '--tools', 'Skill,Read,Grep,Glob,Bash', '--allowedTools', 'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh search:*)'];
+  const out = await new Promise((resolve, reject) => {
+    const child = spawn(shell, ['-l', '-c', 'exec claude "$@"', 'claude', ...args], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => { child.kill(); reject(new Error('Claude took longer than 5 minutes; try a session instead.')); }, DRAFT_TIMEOUT_MS);
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', err => { clearTimeout(timer); reject(err); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0 && !stdout.trim()) reject(new Error(`claude exited with ${code}: ${stderr.trim().slice(-300) || 'no output'}`));
+      else resolve(stdout);
+    });
+  });
+  let result;
+  try { result = JSON.parse(out); } catch { throw new Error(`Unexpected output from claude: ${out.trim().slice(0, 200)}`); }
+  if (result.is_error || !String(result.result || '').trim()) throw new Error(`Claude could not write a draft: ${String(result.result || result.subtype || 'no text').slice(0, 300)}`);
+  // A reply wrapped in a code fence by habit: just the text.
+  const text = String(result.result).trim().replace(/^```[a-z]*\n([\s\S]*?)\n```$/i, '$1').trim();
+  return { text };
+}
+
 // --- Writes: each one is a click in the tab ---
 
 /** Your draft reply: its text replaced when it exists, else a new draft. Never sent. */
@@ -309,5 +361,5 @@ function asResult(promise) {
 
 module.exports = {
   htmlToText, textToHtml, groupOf, shapeConversation, shapeThread, CLAUDE_NOTE_LABEL,
-  getInbox, getConversation, getAttachment, openAttachment, saveDraft, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
+  getInbox, getConversation, getAttachment, openAttachment, generateDraft, draftPrompt, saveDraft, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
 };
