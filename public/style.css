@@ -7927,7 +7927,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .hsv-compose { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; line-height: 1.5; color: #e0e0f0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; outline: none; }
 .hsv-compose:focus { border-color: rgba(128,136,255,0.5); }
 .hsv-compose-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-.hsv-draft-extra { margin-top: 8px; }
+.hsv-draft-extra { margin-top: 8px; font-size: 12px; border-style: dashed; }
 .hsv-draft-busy { color: #a0a6e8; }
 .hsv-draft-busy--needs { color: #e0b04a; }
 .hsv-notice--claude { font-size: 12px; color: #a8e8c0; }

@@ -41,7 +41,7 @@ const helpscoutViewState = {
   splitHiddenFor: null, // a ticket whose session was hidden by hand
   generating: null, // a draft session at work: { conversation, session, state }
   generated: null, // its reply, on its way into the box: { conversation, text }
-  draftAsk: null, draftExtra: '', // the ticket whose extra-info field is open, and what is typed in it
+  draftExtras: new Map(), // conversation id → the extra info typed for Claude
 };
 
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
@@ -364,7 +364,7 @@ function renderHelpscoutViewMain() {
   let composeValue = typed !== undefined && s.composerKept === `${c.id}:${s.composer}` ? typed : s.composer === 'reply' ? (draft?.text || '') : '';
   // A generated reply lands in the box once (helpscoutGenerateDraft).
   if (s.generated?.conversation === c.id && s.composer === 'reply') { composeValue = s.generated.text; s.generated = null; }
-  const ask = s.draftAsk === c.id && s.composer === 'reply';
+  const drafting = s.generating?.conversation === c.id;
   s.composerKept = `${c.id}:${s.composer}`;
   helpscoutViewer.innerHTML = `<div class="hsv-body"><div class="hsv-page">
     <div class="hsv-head">
@@ -393,10 +393,10 @@ function renderHelpscoutViewMain() {
       </div>
       ${s.notice?.draft && s.composer === 'reply' ? helpscoutNoticeHtml(s.notice) : ''}
       <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team; type @ to mention someone'}">${escapeHtml(composeValue)}</textarea>
-      ${ask ? `<textarea id="hsv-draft-extra" class="hsv-compose hsv-draft-extra" rows="2" spellcheck="true" placeholder="Extra info for Claude (optional): what you know, what the reply should say. Enter starts, Shift+Enter for a new line">${escapeHtml(s.draftExtra)}</textarea>` : ''}
+      ${s.composer === 'reply' ? `<textarea id="hsv-draft-extra" class="hsv-compose hsv-draft-extra" rows="2" spellcheck="true"${drafting ? ' disabled' : ''} placeholder="Extra info for Claude (optional): what you know, what the reply should say. Enter generates the draft, Shift+Enter for a new line">${escapeHtml(s.draftExtras.get(c.id) || '')}</textarea>` : ''}
       <div class="hsv-compose-acts">
         ${s.composer === 'reply'
-          ? `${helpscoutDraftButtons(c, ask)}
+          ? `${helpscoutDraftButtons(c)}
              <span class="ws-flex"></span>
              <button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
              <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="Save the draft, then open the conversation in Help Scout to send it">Send in Help Scout</button>`
@@ -469,9 +469,10 @@ function bindHelpscoutViewMain(c, draft) {
 }
 
 // --- A reply written by Claude, in a session of its own ---
-// Generate draft asks for extra info, then starts a session with the
-// customer-support skill out of sight; "Writing reply…" shows it beside the
-// ticket. When it is done, its last message (the reply) goes into the box.
+// Generate draft (or Enter in the extra-info field above it) starts a
+// session with the customer-support skill out of sight; "Writing reply…"
+// shows it beside the ticket. When it is done, the reply in its last message
+// goes into the box.
 
 const helpscoutDraftSessions = new Set(); // sessions started by Generate draft
 
@@ -481,12 +482,8 @@ function helpscoutNoticeHtml(n) {
   return `<div class="hsv-notice${n.bad ? ' gh-error' : ''}${n.claude ? ' hsv-notice--claude gh-md' : ''}${n.draft ? ' hsv-notice--draft' : ''}">${n.claude ? githubMarkdown(n.text) : escapeHtml(n.text)}</div>`;
 }
 
-function helpscoutDraftButtons(c, ask) {
+function helpscoutDraftButtons(c) {
   const s = helpscoutViewState;
-  if (ask) {
-    return `<button type="button" class="ws-btn ws-btn--sm ws-btn--primary" id="hsv-draft-go">${ICONS.claude(12)}<span>Generate</span></button>
-      <button type="button" class="ws-ghost ws-ghost--sm" id="hsv-draft-cancel">Cancel</button>`;
-  }
   const g = s.generating;
   if (g?.conversation === c.id) {
     const needs = g.state === 'needs';
@@ -498,27 +495,19 @@ function helpscoutDraftButtons(c, ask) {
 function bindHelpscoutDraftButtons(c) {
   const s = helpscoutViewState;
   const $ = (sel) => helpscoutViewer.querySelector(sel);
-  if ($('#hsv-generate')) {
-    $('#hsv-generate').onclick = () => { s.draftAsk = c.id; renderHelpscoutViewMain(); $('#hsv-draft-extra')?.focus(); };
-  }
-  if ($('#hsv-draft-open')) $('#hsv-draft-open').onclick = () => { if (s.generating?.session) showSession(s.generating.session); };
   const extra = $('#hsv-draft-extra');
+  if ($('#hsv-generate')) $('#hsv-generate').onclick = () => helpscoutGenerateDraft(c, extra?.value || '');
+  if ($('#hsv-draft-open')) $('#hsv-draft-open').onclick = () => { if (s.generating?.session) showSession(s.generating.session); };
   if (!extra) return;
-  const cancel = () => { s.draftAsk = null; s.draftExtra = ''; renderHelpscoutViewMain(); };
-  extra.oninput = () => { s.draftExtra = extra.value; };
+  extra.oninput = () => { s.draftExtras.set(c.id, extra.value); };
   extra.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); helpscoutGenerateDraft(c, extra.value); }
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
   };
-  $('#hsv-draft-go').onclick = () => helpscoutGenerateDraft(c, extra.value);
-  $('#hsv-draft-cancel').onclick = cancel;
 }
 
 async function helpscoutGenerateDraft(c, extra) {
   const s = helpscoutViewState;
   if (s.generating) return;
-  s.draftAsk = null;
-  s.draftExtra = '';
   s.notice = null;
   s.generating = { conversation: c.id, session: null, state: null };
   renderHelpscoutViewMain();
@@ -570,6 +559,7 @@ function watchHelpscoutDraft(c, sessionId) {
       return;
     }
     s.generated = { conversation: c.id, text };
+    s.draftExtras.delete(c.id);
     s.composerKept = null;
     // What Claude said around the reply: its assumptions, what to check.
     if (s.selectedId === c.id) s.notice = { bad: false, draft: true, claude: !!result.notes, text: result.notes ? `**Claude:** ${result.notes}` : 'Reply written by Claude. Check it, then save it as a draft.' };
