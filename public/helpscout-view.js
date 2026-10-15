@@ -36,6 +36,7 @@ const helpscoutViewState = {
   collapsed: new Set(['closed', 'spam']),
   selectedId: null, conversation: null, convError: null, convLoading: false,
   composer: 'reply', busy: null, notice: null,
+  scrolledTo: null, // the conversation last scrolled to its end, on opening it
 };
 
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
@@ -339,6 +340,7 @@ function renderHelpscoutViewMain() {
     ${s.notice ? `<div class="hsv-notice${s.notice.bad ? ' gh-error' : ''}">${escapeHtml(s.notice.text)}</div>` : ''}
     ${helpscoutSessionsSection(c)}
     ${c.suggestions.length ? `<div class="hsv-sugs">${c.suggestions.map(helpscoutSuggestion).join('')}</div>` : ''}
+    <div class="hsv-threads">${[...c.threads].reverse().filter(t => !t.draft).map(helpscoutThread).join('')}</div>
     <div class="hsv-composer">
       <div class="hsv-tabs">
         <button type="button" class="ws-ghost ws-ghost--sm${s.composer === 'reply' ? ' active' : ''}" data-composer="reply">${draft ? 'Draft reply' : 'Reply'}</button>
@@ -354,9 +356,11 @@ function renderHelpscoutViewMain() {
           : `<button type="button" class="ws-btn ws-btn--primary" id="hsv-add-note"${busy}>${s.busy === 'note' ? 'Adding…' : 'Add note'}</button>`}
       </div>
     </div>
-    <div class="hsv-threads">${c.threads.filter(t => !t.draft).map(helpscoutThread).join('')}</div>
   </div></div>`;
-  helpscoutViewer.querySelector('.hsv-body').scrollTop = scroll;
+  // Oldest first, like a chat: a conversation opens at its newest message and the reply box.
+  const body = helpscoutViewer.querySelector('.hsv-body');
+  body.scrollTop = s.scrolledTo === c.id ? scroll : body.scrollHeight;
+  s.scrolledTo = c.id;
   bindHelpscoutViewMain(c, draft);
 }
 

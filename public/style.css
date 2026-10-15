@@ -7918,7 +7918,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .hsv-sug--done { opacity: 0.6; }
 .hsv-sug-h { display: flex; align-items: center; gap: 6px; }
 .hsv-sug-text { margin-top: 6px; font-size: 12px; line-height: 1.5; color: #b8b8cc; white-space: pre-wrap; }
-.hsv-composer { margin-bottom: 16px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
+.hsv-composer { margin-top: 16px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
 .hsv-tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
 .hsv-compose { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; line-height: 1.5; color: #e0e0f0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; outline: none; }
 .hsv-compose:focus { border-color: rgba(128,136,255,0.5); }
