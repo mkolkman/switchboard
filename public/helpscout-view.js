@@ -3,9 +3,8 @@
 // (Unassigned, Mine, Assigned, Closed, Spam), plus the suggestions the
 // customer-support skill saved to log later. The main area is one
 // conversation: its threads, its status and assignee, a note, and your
-// draft reply. A reply is only ever a draft; "Send in Help Scout" opens the
-// conversation there, because the API cannot publish a draft. Main does the
-// API calls (helpscout.js).
+// reply, saved as a draft or sent (after a confirm) with the status it leaves
+// the conversation in. Main does the API calls (helpscout.js).
 // Depends on: utils.js (escapeHtml, formatDate), projects-view.js (PICONS,
 // showContextMenu), dialogs.js (resolveDefaultSessionOptions), app.js
 // (launchNewSession, openSession, encodeProjectPath), project-github-view.js
@@ -100,6 +99,26 @@ async function helpscoutViewWrite(label, call, done) {
   if (s.selectedId) await openHelpscoutConversation(s.selectedId, { quiet: true });
   loadHelpscoutView({ quiet: true });
   return !result?.error;
+}
+
+// --- Sending a reply ---
+
+const HELPSCOUT_SEND_STATUS_KEY = 'helpscoutSendStatus';
+
+/** The status a sent reply leaves the conversation in: the last one picked, else Pending. */
+function helpscoutSendStatus() {
+  try { return localStorage.getItem(HELPSCOUT_SEND_STATUS_KEY) || 'pending'; } catch { return 'pending'; }
+}
+
+/** Sends the reply box to the customer, after a confirm; an existing draft is the one sent (helpscout.js sendReply). */
+async function sendHelpscoutReplyNow(c, draft, text, status) {
+  if (!text.trim()) return;
+  const to = c.customer.name ? `${c.customer.name} <${c.customer.email}>` : c.customer.email;
+  if (!confirm(`Send this reply to ${to} now?\n\n#${c.number}: ${c.subject}\nThe conversation is then set to ${status}.`)) return;
+  if (await helpscoutViewWrite('send', () => window.api.sendHelpscoutReply(c.id, { threadId: draft?.id || null, text, status }), 'Reply sent.')) {
+    helpscoutViewState.composerKept = null;
+    renderHelpscoutViewMain();
+  }
 }
 
 // --- Sessions ---
@@ -389,7 +408,7 @@ function renderHelpscoutViewMain() {
         <button type="button" class="ws-ghost ws-ghost--sm${s.composer === 'reply' ? ' active' : ''}" data-composer="reply">${draft ? 'Draft reply' : 'Reply'}</button>
         <button type="button" class="ws-ghost ws-ghost--sm${s.composer === 'note' ? ' active' : ''}" data-composer="note">Note</button>
         <span class="ws-flex"></span>
-        <span class="gh-muted">${s.composer === 'reply' ? 'Saved as a draft in Help Scout; you send it there.' : 'Only your team sees a note.'}</span>
+        <span class="gh-muted">${s.composer === 'reply' ? 'Save it as a draft in Help Scout, or send it now.' : 'Only your team sees a note.'}</span>
       </div>
       ${s.notice?.draft && s.composer === 'reply' ? helpscoutNoticeHtml(s.notice) : ''}
       <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team; type @ to mention someone'}">${escapeHtml(composeValue)}</textarea>
@@ -399,7 +418,8 @@ function renderHelpscoutViewMain() {
           ? `${helpscoutDraftButtons(c)}
              <span class="ws-flex"></span>
              <button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
-             <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="Save the draft, then open the conversation in Help Scout to send it">Send in Help Scout</button>`
+             <label class="hsv-control" title="The status the conversation gets once the reply is sent">then <select id="hsv-send-status"${busy}>${['active', 'pending', 'closed'].map(st => `<option value="${st}"${helpscoutSendStatus() === st ? ' selected' : ''}>${st[0].toUpperCase() + st.slice(1)}</option>`).join('')}</select></label>
+             <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="${hsvAttr(`Send this reply to ${c.customer.email || c.customer.name} now, from Help Scout`)}">${s.busy === 'send' ? 'Sending…' : 'Send'}</button>`
           : `<button type="button" class="ws-btn ws-btn--primary" id="hsv-add-note"${busy}>${s.busy === 'note' ? 'Adding…' : 'Add note'}</button>`}
       </div>
     </div>
@@ -433,7 +453,8 @@ function bindHelpscoutViewMain(c, draft) {
   const saveDraft = () => helpscoutViewWrite('draft', () => window.api.saveHelpscoutDraft(c.id, { threadId: draft?.id || null, text: text() }), 'Draft saved in Help Scout.');
   if ($('#hsv-save-draft')) $('#hsv-save-draft').onclick = () => saveDraft();
   bindHelpscoutDraftButtons(c);
-  if ($('#hsv-send')) $('#hsv-send').onclick = async () => { if (await saveDraft()) window.api.openExternal(c.url); };
+  if ($('#hsv-send-status')) $('#hsv-send-status').onchange = (e) => { try { localStorage.setItem(HELPSCOUT_SEND_STATUS_KEY, e.target.value); } catch {} };
+  if ($('#hsv-send')) $('#hsv-send').onclick = () => sendHelpscoutReplyNow(c, draft, text(), $('#hsv-send-status').value);
   if (s.composer === 'note') bindHelpscoutMentions($('#hsv-compose'), s.inbox?.people || []);
   if ($('#hsv-add-note')) {
     $('#hsv-add-note').onclick = async () => {

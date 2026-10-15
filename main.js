@@ -853,6 +853,7 @@ ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisa
 ipcMain.handle('helpscout-inbox', () => helpscout.asResult(helpscout.getInbox()));
 ipcMain.handle('helpscout-conversation', (_e, id) => helpscout.asResult(helpscout.getConversation(id)));
 ipcMain.handle('helpscout-save-draft', (_e, id, spec) => helpscout.asResult(helpscout.saveDraft(id, spec || {})));
+ipcMain.handle('helpscout-send-reply', (_e, id, spec) => helpscout.asResult(helpscout.sendReply(id, spec || {})));
 ipcMain.handle('helpscout-add-note', (_e, id, text) => helpscout.asResult(helpscout.addNote(id, String(text || ''))));
 ipcMain.handle('helpscout-assign', (_e, id, assigneeId) => helpscout.asResult(helpscout.assign(id, assigneeId || null)));
 ipcMain.handle('helpscout-set-status', (_e, id, status) => helpscout.asResult(helpscout.setStatus(id, String(status || ''))));

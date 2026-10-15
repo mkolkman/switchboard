@@ -303,6 +303,32 @@ async function saveDraft(id, { threadId = null, text }) {
   return { threadId: Number(headers.get('resource-id')) || null };
 }
 
+/**
+ * Send a reply to the customer now, then set the status. The API can neither
+ * delete a draft nor publish one directly, so an existing draft gets the text
+ * and is published through a schedule (planned a few minutes out, then sent at
+ * once); without a draft it is a new published reply. No draft is left behind.
+ */
+async function sendReply(id, { threadId = null, text, status = null }) {
+  if (!String(text || '').trim()) throw new Error('The reply is empty.');
+  if (status && !STATUSES.includes(status)) throw new Error(`Unknown status: ${status}`);
+  const conv = `/conversations/${Number(id)}`;
+  if (threadId) {
+    const thread = `${conv}/threads/${Number(threadId)}`;
+    await api('PATCH', thread, { op: 'replace', path: '/text', value: textToHtml(text) });
+    const soon = new Date(Date.now() + 5 * 60 * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+    await api('PUT', `${thread}/schedule`, { scheduledFor: soon, unscheduleOnCustomerReply: false });
+    await api('PATCH', `${thread}/schedule`, { op: 'replace', path: '/state', value: 'published' });
+  } else {
+    const { data } = await api('GET', conv);
+    const customerId = data.primaryCustomer?.id;
+    if (!customerId) throw new Error('This conversation has no customer to reply to.');
+    await api('POST', `${conv}/reply`, { customer: { id: customerId }, text: textToHtml(text), draft: false });
+  }
+  if (status) await setStatus(id, status);
+  return {};
+}
+
 async function addNote(id, text) {
   if (!String(text || '').trim()) throw new Error('The note is empty.');
   const users = await pages('/users', 'users', 4);
@@ -351,5 +377,5 @@ function asResult(promise) {
 
 module.exports = {
   htmlToText, textToHtml, groupOf, shapeConversation, shapeThread, CLAUDE_NOTE_LABEL,
-  getInbox, getConversation, getAttachment, openAttachment, draftPrompt, getDraftPrompt, splitDraftReply, saveDraft, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
+  getInbox, getConversation, getAttachment, openAttachment, draftPrompt, getDraftPrompt, splitDraftReply, saveDraft, sendReply, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
 };
