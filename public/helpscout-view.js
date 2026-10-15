@@ -39,7 +39,9 @@ const helpscoutViewState = {
   scrolledTo: null, // the conversation last scrolled to its end, on opening it
   splitSession: null, // the session shown beside the ticket
   splitHiddenFor: null, // a ticket whose session was hidden by hand
-  generating: null, generated: null, // the ticket Claude is writing a reply for, and its text
+  generating: null, // a draft session at work: { conversation, session, state }
+  generated: null, // its reply, on its way into the box: { conversation, text }
+  draftAsk: null, draftExtra: '', // the ticket whose extra-info field is open, and what is typed in it
 };
 
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
@@ -150,7 +152,7 @@ function returnToHelpscoutTicket(sessionId) {
   if (link && (activeTab === 'sessions' || activeTab === 'helpscout')) openHelpscoutTicket(link.conversation);
 }
 
-async function helpscoutViewSession(conv, prompt, label) {
+async function helpscoutViewSession(conv, prompt, label, { focus = true } = {}) {
   const folder = await window.api.getChatFolder();
   if (!folder || folder.error) { alert(`Could not create the chat folder: ${folder?.error || 'unknown error'}`); return; }
   const target = { folder: encodeProjectPath(folder), projectPath: folder, sessions: [] };
@@ -160,12 +162,13 @@ async function helpscoutViewSession(conv, prompt, label) {
   delete options.worktree;
   delete options.worktreeName;
   // Started from the Help Scout tab it opens beside the ticket (onHelpscoutSessionShown).
-  const sessionId = await launchNewSession(target, options, { focus: true });
-  if (!sessionId) return;
+  const sessionId = await launchNewSession(target, options, { focus });
+  if (!sessionId) return null;
   linkHelpscoutSession(sessionId, conv);
   prSessionLabels.set(sessionId, label);
   if (typeof updateTerminalHeaderTicket === 'function') updateTerminalHeaderTicket();
   if (activeTab === 'helpscout' && helpscoutViewState.selectedId === conv.id) renderHelpscoutViewMain();
+  return sessionId;
 }
 
 function helpscoutSupportSession(conv) {
@@ -223,8 +226,9 @@ function leaveHelpscoutSplit() {
 
 /** A ticket's newest running session beside it, or the ticket alone (also after Hide). */
 function showHelpscoutTicketSession(conversationId) {
+  // A draft session stays out of sight until "Writing reply…" or its row opens it.
   const id = helpscoutViewState.splitHiddenFor === conversationId ? null
-    : helpscoutSessionIds(conversationId).find(sid => openSessions.has(sid) && !openSessions.get(sid).closed);
+    : helpscoutSessionIds(conversationId).find(sid => openSessions.has(sid) && !openSessions.get(sid).closed && !helpscoutDraftSessions.has(sid));
   if (id) showSession(id);
   else leaveHelpscoutSplit();
 }
@@ -360,7 +364,7 @@ function renderHelpscoutViewMain() {
   let composeValue = typed !== undefined && s.composerKept === `${c.id}:${s.composer}` ? typed : s.composer === 'reply' ? (draft?.text || '') : '';
   // A generated reply lands in the box once (helpscoutGenerateDraft).
   if (s.generated?.conversation === c.id && s.composer === 'reply') { composeValue = s.generated.text; s.generated = null; }
-  const generating = s.generating === c.id;
+  const ask = s.draftAsk === c.id && s.composer === 'reply';
   s.composerKept = `${c.id}:${s.composer}`;
   helpscoutViewer.innerHTML = `<div class="hsv-body"><div class="hsv-page">
     <div class="hsv-head">
@@ -376,7 +380,7 @@ function renderHelpscoutViewMain() {
         <button type="button" class="ws-ghost" id="hsv-open" title="Open the conversation in Help Scout">${PICONS.open(12)}<span>Help Scout</span></button>
       </div>
     </div>
-    ${s.notice ? `<div class="hsv-notice${s.notice.bad ? ' gh-error' : ''}">${escapeHtml(s.notice.text)}</div>` : ''}
+    ${s.notice && !s.notice.draft ? helpscoutNoticeHtml(s.notice) : ''}
     ${helpscoutSessionsSection(c)}
     ${c.suggestions.length ? `<div class="hsv-sugs">${c.suggestions.map(helpscoutSuggestion).join('')}</div>` : ''}
     <div class="hsv-threads">${[...c.threads].reverse().filter(t => !t.draft).map(helpscoutThread).join('')}</div>
@@ -387,10 +391,12 @@ function renderHelpscoutViewMain() {
         <span class="ws-flex"></span>
         <span class="gh-muted">${s.composer === 'reply' ? 'Saved as a draft in Help Scout; you send it there.' : 'Only your team sees a note.'}</span>
       </div>
+      ${s.notice?.draft && s.composer === 'reply' ? helpscoutNoticeHtml(s.notice) : ''}
       <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team; type @ to mention someone'}">${escapeHtml(composeValue)}</textarea>
+      ${ask ? `<textarea id="hsv-draft-extra" class="hsv-compose hsv-draft-extra" rows="2" spellcheck="true" placeholder="Extra info for Claude (optional): what you know, what the reply should say. Enter starts, Shift+Enter for a new line">${escapeHtml(s.draftExtra)}</textarea>` : ''}
       <div class="hsv-compose-acts">
         ${s.composer === 'reply'
-          ? `<button type="button" class="ws-ghost" id="hsv-generate"${generating ? ' disabled' : ''} title="${hsvAttr(`Claude writes a reply with ${HELPSCOUT_SUPPORT_SKILL}, in the background; it comes into this box and nothing is saved`)}">${ICONS.claude(12)}<span>${generating ? 'Writing…' : 'Generate draft'}</span></button>
+          ? `${helpscoutDraftButtons(c, ask)}
              <span class="ws-flex"></span>
              <button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
              <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="Save the draft, then open the conversation in Help Scout to send it">Send in Help Scout</button>`
@@ -426,7 +432,7 @@ function bindHelpscoutViewMain(c, draft) {
   const text = () => $('#hsv-compose').value;
   const saveDraft = () => helpscoutViewWrite('draft', () => window.api.saveHelpscoutDraft(c.id, { threadId: draft?.id || null, text: text() }), 'Draft saved in Help Scout.');
   if ($('#hsv-save-draft')) $('#hsv-save-draft').onclick = () => saveDraft();
-  if ($('#hsv-generate')) $('#hsv-generate').onclick = () => helpscoutGenerateDraft(c);
+  bindHelpscoutDraftButtons(c);
   if ($('#hsv-send')) $('#hsv-send').onclick = async () => { if (await saveDraft()) window.api.openExternal(c.url); };
   if (s.composer === 'note') bindHelpscoutMentions($('#hsv-compose'), s.inbox?.people || []);
   if ($('#hsv-add-note')) {
@@ -462,31 +468,113 @@ function bindHelpscoutViewMain(c, draft) {
   });
 }
 
-// --- A reply written by Claude in the background (helpscout.js generateDraft) ---
+// --- A reply written by Claude, in a session of its own ---
+// Generate draft asks for extra info, then starts a session with the
+// customer-support skill out of sight; "Writing reply…" shows it beside the
+// ticket. When it is done, its last message (the reply) goes into the box.
 
-async function helpscoutGenerateDraft(c) {
+const helpscoutDraftSessions = new Set(); // sessions started by Generate draft
+
+/** A notice; one about a generated draft sits right above the reply box. */
+function helpscoutNoticeHtml(n) {
+  // Claude's notes come as markdown (githubMarkdown, project-github-view.js).
+  return `<div class="hsv-notice${n.bad ? ' gh-error' : ''}${n.claude ? ' hsv-notice--claude gh-md' : ''}${n.draft ? ' hsv-notice--draft' : ''}">${n.claude ? githubMarkdown(n.text) : escapeHtml(n.text)}</div>`;
+}
+
+function helpscoutDraftButtons(c, ask) {
+  const s = helpscoutViewState;
+  if (ask) {
+    return `<button type="button" class="ws-btn ws-btn--sm ws-btn--primary" id="hsv-draft-go">${ICONS.claude(12)}<span>Generate</span></button>
+      <button type="button" class="ws-ghost ws-ghost--sm" id="hsv-draft-cancel">Cancel</button>`;
+  }
+  const g = s.generating;
+  if (g?.conversation === c.id) {
+    const needs = g.state === 'needs';
+    return `<button type="button" class="ws-ghost hsv-draft-busy${needs ? ' hsv-draft-busy--needs' : ''}" id="hsv-draft-open"${g.session ? '' : ' disabled'} title="Show the Claude session beside the ticket">${ICONS.claude(12)}<span>${needs ? 'Claude needs you' : 'Writing reply…'}</span></button>`;
+  }
+  return `<button type="button" class="ws-ghost" id="hsv-generate"${g ? ' disabled' : ''} title="${hsvAttr(g ? 'Claude is writing a reply on another ticket' : `A Claude session with ${HELPSCOUT_SUPPORT_SKILL} writes the reply; it comes into this box, nothing is saved`)}">${ICONS.claude(12)}<span>Generate draft</span></button>`;
+}
+
+function bindHelpscoutDraftButtons(c) {
+  const s = helpscoutViewState;
+  const $ = (sel) => helpscoutViewer.querySelector(sel);
+  if ($('#hsv-generate')) {
+    $('#hsv-generate').onclick = () => { s.draftAsk = c.id; renderHelpscoutViewMain(); $('#hsv-draft-extra')?.focus(); };
+  }
+  if ($('#hsv-draft-open')) $('#hsv-draft-open').onclick = () => { if (s.generating?.session) showSession(s.generating.session); };
+  const extra = $('#hsv-draft-extra');
+  if (!extra) return;
+  const cancel = () => { s.draftAsk = null; s.draftExtra = ''; renderHelpscoutViewMain(); };
+  extra.oninput = () => { s.draftExtra = extra.value; };
+  extra.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); helpscoutGenerateDraft(c, extra.value); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+  };
+  $('#hsv-draft-go').onclick = () => helpscoutGenerateDraft(c, extra.value);
+  $('#hsv-draft-cancel').onclick = cancel;
+}
+
+async function helpscoutGenerateDraft(c, extra) {
   const s = helpscoutViewState;
   if (s.generating) return;
-  s.generating = c.id;
+  s.draftAsk = null;
+  s.draftExtra = '';
   s.notice = null;
+  s.generating = { conversation: c.id, session: null, state: null };
   renderHelpscoutViewMain();
-  const result = await window.api.generateHelpscoutDraft(c.id).catch(err => ({ error: err?.message || String(err) }));
-  s.generating = null;
-  if (result?.error) {
-    if (s.selectedId === c.id) s.notice = { bad: true, text: result.error };
+  const fail = (text) => {
+    s.generating = null;
+    if (s.selectedId === c.id) s.notice = { bad: true, draft: true, text };
     renderHelpscoutViewMain();
-    return;
-  }
-  // The box may hold text by now; replacing it is the user's call.
-  const box = s.selectedId === c.id && s.composer === 'reply' ? helpscoutViewer.querySelector('#hsv-compose') : null;
-  if (box && box.value.trim() && box.value.trim() !== result.text.trim() && !confirm('Replace the text in the reply box with the generated reply?')) {
-    renderHelpscoutViewMain();
-    return;
-  }
-  s.generated = { conversation: c.id, text: result.text };
-  s.composerKept = null;
-  if (s.selectedId === c.id) s.notice = { bad: false, text: 'Reply written by Claude. Check it, then save it as a draft.' };
+  };
+  const result = await window.api.getHelpscoutDraftPrompt(c.id, extra || '').catch(err => ({ error: err?.message || String(err) }));
+  if (result?.error) { fail(result.error); return; }
+  const sessionId = await helpscoutViewSession(c, result.prompt, `Draft reply on #${c.number}`, { focus: false });
+  if (!sessionId) { fail('The draft session did not start.'); return; }
+  s.generating.session = sessionId;
+  helpscoutDraftSessions.add(sessionId);
   renderHelpscoutViewMain();
+  watchHelpscoutDraft(c, sessionId);
+}
+
+/** Every 2 s: follow the draft session; once it has worked and stopped working, its last message is the reply. */
+function watchHelpscoutDraft(c, sessionId) {
+  const s = helpscoutViewState;
+  let worked = false;
+  const timer = setInterval(async () => {
+    if (s.generating?.session !== sessionId) { clearInterval(timer); return; }
+    const [state] = prSessionState(sessionId);
+    if (state !== s.generating.state) {
+      s.generating.state = state;
+      if (activeTab === 'helpscout' && s.selectedId === c.id) renderHelpscoutViewMain();
+    }
+    if (state === 'working' || state === 'needs') { worked = true; return; }
+    if (state === 'stopped') {
+      clearInterval(timer);
+      s.generating = null;
+      if (s.selectedId === c.id) s.notice = { bad: true, draft: true, text: 'The draft session stopped before it wrote a reply.' };
+      renderHelpscoutViewMain();
+      return;
+    }
+    if (!worked) return;
+    const result = await window.api.getHelpscoutDraftReply(sessionId).catch(() => null);
+    // Not indexed yet (a session seconds old): the next tick tries again.
+    if (!result?.reply || s.generating?.session !== sessionId) return;
+    clearInterval(timer);
+    s.generating = null;
+    const text = result.reply;
+    // The box may hold text by now; replacing it is the user's call.
+    const box = s.selectedId === c.id && s.composer === 'reply' ? helpscoutViewer.querySelector('#hsv-compose') : null;
+    if (box && box.value.trim() && box.value.trim() !== text && !confirm(`Replace the text in the reply box of #${c.number} with Claude's reply?`)) {
+      renderHelpscoutViewMain();
+      return;
+    }
+    s.generated = { conversation: c.id, text };
+    s.composerKept = null;
+    // What Claude said around the reply: its assumptions, what to check.
+    if (s.selectedId === c.id) s.notice = { bad: false, draft: true, claude: !!result.notes, text: result.notes ? `**Claude:** ${result.notes}` : 'Reply written by Claude. Check it, then save it as a draft.' };
+    renderHelpscoutViewMain();
+  }, 2000);
 }
 
 // --- @mentions in a note: a list of people over the box while an @word is typed ---

@@ -862,11 +862,7 @@ ipcMain.handle('helpscout-open-attachment', (_e, convId, attId, name) => helpsco
   if (err) throw new Error(err);
   return {};
 })));
-ipcMain.handle('helpscout-generate-draft', (_e, id) => {
-  const cwd = path.join(projects.projectsRoot(), 'Chats');
-  fs.mkdirSync(cwd, { recursive: true });
-  return helpscout.asResult(helpscout.generateDraft(id, { cwd, shell: resolveShell().path, env: cleanPtyEnv }));
-});
+ipcMain.handle('helpscout-draft-prompt', (_e, id, extra) => helpscout.asResult(helpscout.getDraftPrompt(id, String(extra || ''))));
 ipcMain.handle('helpscout-set-suggestion', (_e, sid, status) => helpscout.asResult(helpscout.setSuggestionStatus(sid, String(status || ''))));
 
 // --- IPC: the Notion todo list (notion-todo.js) ---
@@ -1719,6 +1715,18 @@ ipcMain.handle('get-session-glance', (_event, sessionId) => {
   try {
     const entries = readSessionViewerEntries(row);
     return { text: lastAssistantMessage(entries).text, activity: currentActivity(entries) };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// A draft session's reply and notes, from its last message in full (the
+// glance above is cut short for the panels); helpscout.js splits them.
+ipcMain.handle('helpscout-draft-reply', (_event, sessionId) => {
+  const row = getCachedSession(sessionId);
+  if (!row) return { error: 'Session not found in cache' };
+  try {
+    return helpscout.splitDraftReply(lastAssistantMessage(readSessionViewerEntries(row), Infinity).text);
   } catch (err) {
     return { error: err.message };
   }
