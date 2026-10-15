@@ -767,6 +767,8 @@ function showSession(sessionId) {
   }
   // The Projects tab keeps the project around the terminal (projects-view.js).
   if (typeof onSessionShown === 'function') onSessionShown(sessionId);
+  // The Help Scout tab keeps the ticket beside it (helpscout-view.js).
+  if (typeof onHelpscoutSessionShown === 'function') onHelpscoutSessionShown(sessionId);
 }
 
 function setupDragAndDrop(container, getSessionId) {

@@ -37,6 +37,8 @@ const helpscoutViewState = {
   selectedId: null, conversation: null, convError: null, convLoading: false,
   composer: 'reply', busy: null, notice: null,
   scrolledTo: null, // the conversation last scrolled to its end, on opening it
+  splitSession: null, // the session shown beside the ticket
+  splitHiddenFor: null, // a ticket whose session was hidden by hand
 };
 
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
@@ -79,6 +81,8 @@ async function openHelpscoutConversation(id, { quiet = false } = {}) {
   if (result?.error) s.convError = result.error;
   else { s.convError = null; s.conversation = result; }
   renderHelpscoutViewMain();
+  // The ticket's own session comes along; another ticket's goes.
+  if (!quiet || !s.splitSession) showHelpscoutTicketSession(id);
 }
 
 /** Run a write, then read the conversation and the list again. */
@@ -154,14 +158,13 @@ async function helpscoutViewSession(conv, prompt, label) {
   options.initialPrompt = prompt;
   delete options.worktree;
   delete options.worktreeName;
-  // The session shows in the Sessions tab, like any other; its header leads back.
-  const sessionsTab = document.querySelector('.sidebar-tab[data-tab="sessions"]');
-  if (sessionsTab && activeTab !== 'sessions') sessionsTab.click();
+  // Started from the Help Scout tab it opens beside the ticket (onHelpscoutSessionShown).
   const sessionId = await launchNewSession(target, options, { focus: true });
   if (!sessionId) return;
   linkHelpscoutSession(sessionId, conv);
   prSessionLabels.set(sessionId, label);
   if (typeof updateTerminalHeaderTicket === 'function') updateTerminalHeaderTicket();
+  if (activeTab === 'helpscout' && helpscoutViewState.selectedId === conv.id) renderHelpscoutViewMain();
 }
 
 function helpscoutSupportSession(conv) {
@@ -179,18 +182,50 @@ function helpscoutLogSession(sug) {
 function helpscoutSessionsSection(conv) {
   const ids = helpscoutSessionIds(conv.id);
   if (!ids.length) return '';
-  return `<div class="gh-sec gh-sessions hsv-sessions"><div class="gh-sec-h">Claude on this ticket</div>${ids.map(id =>
+  const shown = mainEl.classList.contains('hsv-split') && ids.includes(helpscoutViewState.splitSession);
+  const hide = shown ? '<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm" id="hsv-hide-session" title="Show the ticket alone; Open on a session brings it back">Hide session</button>' : '';
+  return `<div class="gh-sec gh-sessions hsv-sessions"><div class="gh-sec-h">Claude on this ticket${hide}</div>${ids.map(id =>
     `<div class="gh-sess-row" data-session="${hsvAttr(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
 }
 
 function bindHelpscoutSessionRow(row) {
   row.querySelector('[data-act="open"]').onclick = () => {
     const session = currentSession(row.dataset.session);
-    if (!session) return;
-    const sessionsTab = document.querySelector('.sidebar-tab[data-tab="sessions"]');
-    if (sessionsTab && activeTab !== 'sessions') sessionsTab.click();
-    openSession(session);
+    if (session) openSession(session);
   };
+}
+
+// --- A ticket's Claude session beside it ---
+// In this tab a shown session sits on the right of the ticket instead of
+// covering it: showSession hides every viewer, then calls this to put the
+// ticket back on the left.
+
+function onHelpscoutSessionShown(sessionId) {
+  if (activeTab !== 'helpscout' || gridViewActive) return;
+  helpscoutViewState.splitSession = sessionId;
+  helpscoutViewState.splitHiddenFor = null;
+  mainEl.classList.add('hsv-split');
+  helpscoutViewer.style.display = 'flex';
+  placeholder.style.display = 'none';
+  terminalArea.style.display = '';
+  // Its Hide button and row state follow the split.
+  if (helpscoutViewState.conversation) renderHelpscoutViewMain();
+  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+}
+
+function leaveHelpscoutSplit() {
+  helpscoutViewState.splitSession = null;
+  if (!mainEl.classList.contains('hsv-split')) return;
+  mainEl.classList.remove('hsv-split');
+  if (activeTab === 'helpscout') terminalArea.style.display = 'none';
+}
+
+/** A ticket's newest running session beside it, or the ticket alone (also after Hide). */
+function showHelpscoutTicketSession(conversationId) {
+  const id = helpscoutViewState.splitHiddenFor === conversationId ? null
+    : helpscoutSessionIds(conversationId).find(sid => openSessions.has(sid) && !openSessions.get(sid).closed);
+  if (id) showSession(id);
+  else leaveHelpscoutSplit();
 }
 
 // Every 3 s while a ticket with sessions is on screen: redraw just its rows.
@@ -401,6 +436,9 @@ function bindHelpscoutViewMain(c, draft) {
       btn.onclick = () => (btn.dataset.sugAct === 'log' ? helpscoutLogSession(sug) : helpscoutSetSuggestion(sug.id, btn.dataset.sugAct));
     });
   });
+  if ($('#hsv-hide-session')) {
+    $('#hsv-hide-session').onclick = () => { s.splitHiddenFor = c.id; leaveHelpscoutSplit(); renderHelpscoutViewMain(); };
+  }
   const sessionRows = helpscoutViewer.querySelectorAll('.hsv-sessions .gh-sess-row');
   sessionRows.forEach(row => {
     bindHelpscoutSessionRow(row);
@@ -560,6 +598,8 @@ function showHelpscoutLightbox(convId, images, start) {
 /** Called when the Help Scout tab is opened (app.js). */
 function showHelpscoutView() {
   hideAllViewers();
+  // The ticket's session comes back with the ticket (openHelpscoutConversation).
+  helpscoutViewState.splitSession = null;
   // hideAllViewers puts the terminal area back; this tab covers it instead.
   placeholder.style.display = 'none';
   terminalArea.style.display = 'none';
@@ -579,4 +619,6 @@ function showHelpscoutView() {
 
 function hideHelpscoutView() {
   if (helpscoutViewer) helpscoutViewer.style.display = 'none';
+  // showSession passes through here too; onHelpscoutSessionShown puts the split back.
+  mainEl.classList.remove('hsv-split');
 }
