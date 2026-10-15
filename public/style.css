@@ -7918,7 +7918,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .hsv-sug--done { opacity: 0.6; }
 .hsv-sug-h { display: flex; align-items: center; gap: 6px; }
 .hsv-sug-text { margin-top: 6px; font-size: 12px; line-height: 1.5; color: #b8b8cc; white-space: pre-wrap; }
-.hsv-composer { margin-top: 16px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
+.hsv-composer { position: relative; margin-top: 16px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
 .hsv-tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
 .hsv-compose { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; line-height: 1.5; color: #e0e0f0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; outline: none; }
 .hsv-compose:focus { border-color: rgba(128,136,255,0.5); }
@@ -7938,6 +7938,18 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 }
 .hsv-att:hover { background: rgba(120,130,255,0.16); }
 .hsv-att span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* People to @mention, over the note box while an @word is typed. */
+.hsv-mention {
+  position: absolute; z-index: 20; min-width: 220px; max-width: 320px; padding: 4px; border-radius: 8px;
+  background: #22222c; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.hsv-mention-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 8px; border: 0; border-radius: 5px;
+  background: none; color: #d0d0e8; font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.hsv-mention-row.active, .hsv-mention-row:hover { background: rgba(120,130,255,0.16); }
+.hsv-mention-handle { font-weight: 600; color: #c0c4ff; }
 
 /* An attachment image over the whole window; ← → between the conversation's images. */
 .hsv-lightbox { position: fixed; inset: 0; z-index: 9000; display: flex; flex-direction: column; background: rgba(8,8,12,0.94); }

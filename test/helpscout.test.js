@@ -7,6 +7,9 @@ test('thread bodies read as text, and typed text writes as Help Scout paragraphs
   assert.equal(htmlToText('<p>Hi Jens,</p><p>Thanks &amp; regards,<br>Mike</p><style>p{}</style>'), 'Hi Jens,\n\nThanks & regards,\nMike');
   assert.equal(htmlToText('caf&#233; &#x2764; &nbsp;ok'), 'café ❤  ok');
   assert.equal(textToHtml('Hi <Jens>,\n\nLine one\nline two\n\n\n'), 'Hi &lt;Jens&gt;,<br><br>Line one<br>line two');
+  // Known handles become Help Scout mentions; other @words and e-mail addresses stay text.
+  assert.equal(textToHtml('@niek could you look? cc @Lars, not @bob or a@niek.nl. Thanks @niek.', ['niek', 'lars']),
+    '<span class="mention-highlight">@niek</span> could you look? cc <span class="mention-highlight">@Lars</span>, not @bob or a@niek.nl. Thanks <span class="mention-highlight">@niek</span>.');
 });
 
 test('conversations go where Help Scout files them', () => {

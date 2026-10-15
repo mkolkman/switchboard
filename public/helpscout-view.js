@@ -348,7 +348,7 @@ function renderHelpscoutViewMain() {
         <span class="ws-flex"></span>
         <span class="gh-muted">${s.composer === 'reply' ? 'Saved as a draft in Help Scout; you send it there.' : 'Only your team sees a note.'}</span>
       </div>
-      <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team'}">${escapeHtml(composeValue)}</textarea>
+      <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team; type @ to mention someone'}">${escapeHtml(composeValue)}</textarea>
       <div class="hsv-compose-acts">
         ${s.composer === 'reply'
           ? `<button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
@@ -386,6 +386,7 @@ function bindHelpscoutViewMain(c, draft) {
   const saveDraft = () => helpscoutViewWrite('draft', () => window.api.saveHelpscoutDraft(c.id, { threadId: draft?.id || null, text: text() }), 'Draft saved in Help Scout.');
   if ($('#hsv-save-draft')) $('#hsv-save-draft').onclick = () => saveDraft();
   if ($('#hsv-send')) $('#hsv-send').onclick = async () => { if (await saveDraft()) window.api.openExternal(c.url); };
+  if (s.composer === 'note') bindHelpscoutMentions($('#hsv-compose'), s.inbox?.people || []);
   if ($('#hsv-add-note')) {
     $('#hsv-add-note').onclick = async () => {
       if (await helpscoutViewWrite('note', () => window.api.addHelpscoutNote(c.id, text()), 'Note added.')) {
@@ -413,6 +414,71 @@ function bindHelpscoutViewMain(c, draft) {
   });
   helpscoutViewer.querySelectorAll('a.hsv-link').forEach(a => {
     a.onclick = (e) => { e.preventDefault(); if (/^https?:/i.test(a.href)) window.api.openExternal(a.href); };
+  });
+}
+
+// --- @mentions in a note: a list of people over the box while an @word is typed ---
+
+/** The @word the caret is in, or null: { start, query }. */
+function helpscoutMentionAt(textarea) {
+  const before = textarea.value.slice(0, textarea.selectionStart);
+  const m = /(^|[\s(])@([\w-]*)$/.exec(before);
+  return m ? { start: before.length - m[2].length - 1, query: m[2].toLowerCase() } : null;
+}
+
+function bindHelpscoutMentions(textarea, people) {
+  const handles = people.filter(p => p.mention);
+  if (!textarea || !handles.length) return;
+  const holder = textarea.parentElement;
+  let list = [];
+  let index = 0;
+  let at = null;
+  const close = () => { holder.querySelector('.hsv-mention')?.remove(); list = []; at = null; };
+  const pick = (person) => {
+    const end = textarea.selectionStart;
+    const text = `@${person.mention} `;
+    textarea.setRangeText(text, at.start, end, 'end');
+    close();
+    textarea.focus();
+  };
+  const paint = () => {
+    holder.querySelector('.hsv-mention')?.remove();
+    if (!list.length) return;
+    const box = document.createElement('div');
+    box.className = 'hsv-mention';
+    box.innerHTML = list.map((p, i) => `<button type="button" class="hsv-mention-row${i === index ? ' active' : ''}" data-i="${i}"><span class="hsv-mention-handle">@${escapeHtml(p.mention)}</span><span class="gh-muted">${escapeHtml(p.name)}${p.team ? ' (team)' : ''}</span></button>`).join('');
+    // mousedown: the textarea keeps its focus and caret.
+    box.querySelectorAll('.hsv-mention-row').forEach(row => { row.onmousedown = (e) => { e.preventDefault(); pick(list[Number(row.dataset.i)]); }; });
+    // Above the box: it sits at the bottom of the conversation.
+    box.style.bottom = `${holder.clientHeight - textarea.offsetTop + 4}px`;
+    box.style.left = `${textarea.offsetLeft}px`;
+    holder.appendChild(box);
+  };
+  const update = () => {
+    at = helpscoutMentionAt(textarea);
+    if (!at) { close(); return; }
+    // The handle or any word of the name starts with what is typed.
+    list = handles.filter(p => [p.mention, ...p.name.split(/\s+/)].some(w => w.toLowerCase().startsWith(at.query))).slice(0, 8);
+    index = Math.min(index, Math.max(list.length - 1, 0));
+    paint();
+  };
+  textarea.addEventListener('input', update);
+  textarea.addEventListener('click', update);
+  textarea.addEventListener('blur', () => setTimeout(close, 100));
+  textarea.addEventListener('keydown', (e) => {
+    if (!list.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      index = (index + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length;
+      paint();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      pick(list[index]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
   });
 }
 

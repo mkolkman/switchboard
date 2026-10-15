@@ -39,9 +39,16 @@ function htmlToText(html) {
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /** Text you typed as a thread body: paragraphs a blank line apart, as Help Scout's editor shows them (helpscout_api.py to_html). */
-function textToHtml(text) {
+/**
+ * Plain text as Help Scout HTML. `mentions` are user handles ("niek"): an
+ * @handle among them is marked up the way Help Scout's own editor does.
+ */
+function textToHtml(text, mentions = []) {
+  const known = new Set(mentions.map(m => String(m).toLowerCase()));
   const paras = String(text || '').trim().split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-  return paras.map(p => escapeHtml(p).replace(/\n/g, '<br>')).join('<br><br>');
+  return paras.map(p => escapeHtml(p).replace(/\n/g, '<br>')
+    .replace(/(^|[\s(])@([\w-]+)/g, (all, pre, handle) => (known.has(handle.toLowerCase()) ? `${pre}<span class="mention-highlight">@${handle}</span>` : all)))
+    .join('<br><br>');
 }
 
 // --- Shapes ---
@@ -196,8 +203,8 @@ async function getInbox() {
     me: { id: user.id, name: personName(user) },
     mailboxes: mailboxes.map(m => ({ id: m.id, name: m.name, email: m.email })),
     people: [
-      ...users.map(u => ({ id: u.id, name: personName(u), team: false })),
-      ...teams.map(t => ({ id: t.id, name: t.name || personName(t), team: true })),
+      ...users.map(u => ({ id: u.id, name: personName(u), team: false, mention: u.mention || null })),
+      ...teams.map(t => ({ id: t.id, name: t.name || personName(t), team: true, mention: t.mention || null })),
     ],
     conversations: [...open, ...closed, ...spam].map(c => shapeConversation(c, user.id)),
     suggestions: readSuggestions(),
@@ -256,7 +263,8 @@ async function saveDraft(id, { threadId = null, text }) {
 
 async function addNote(id, text) {
   if (!String(text || '').trim()) throw new Error('The note is empty.');
-  await api('POST', `/conversations/${Number(id)}/notes`, { text: textToHtml(text) });
+  const users = await pages('/users', 'users', 4);
+  await api('POST', `/conversations/${Number(id)}/notes`, { text: textToHtml(text, users.map(u => u.mention).filter(Boolean)) });
   return {};
 }
 
