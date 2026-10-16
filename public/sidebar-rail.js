@@ -108,12 +108,15 @@ function railSessionItems() {
     const repo = repoInfoByPath.get(session.projectPath)?.name || (isChatFolder(session.projectPath) ? 'Chat' : folderBaseName(session.projectPath));
     const hue = projectHue(repo.toLowerCase());
     const kind = railSessionKind(session);
-    const place = railSessionPlace(session);
+    // What it works on beats its track or branch: "#2283" for a PR, issue or ticket.
+    const ctx = typeof sessionContextLabel === 'function' ? sessionContextLabel(id) : null;
+    const ctxShort = ctx && /#\d+/.test(ctx.label) ? `#${ctx.label.split('#')[1]}` : '';
+    const place = ctxShort || railSessionPlace(session);
     const [state, stateText] = prSessionState(id);
-    const tip = `${sessionTitle(session)}\n${repo}${place ? ` \u00b7 ${place}` : ''}\n${RAIL_KIND_HINTS[kind]}, ${stateText}`;
+    const tip = `${sessionTitle(session)}\n${repo}${ctx ? ` \u00b7 ${ctx.label}` : place ? ` \u00b7 ${place}` : ''}\n${RAIL_KIND_HINTS[kind]}, ${stateText}`;
     return `<button type="button" class="rail-item rail-session${id === activeSessionId ? ' active' : ''}" data-session="${railAttr(id)}" title="${railAttr(tip)}">
         <span class="rail-repo" style="background:hsla(${hue},70%,60%,0.18);color:hsl(${hue},80%,72%);">${escapeHtml(railRepoAbbrev(repo))}<span class="rail-dot rail-dot--${state}"></span></span>
-        <span class="rail-context"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${RAIL_KIND_ICONS[kind]}</svg>${place ? `<span class="rail-place">${escapeHtml(place.slice(0, 4))}</span>` : ''}</span></button>`;
+        <span class="rail-context"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${RAIL_KIND_ICONS[kind]}</svg>${place ? `<span class="rail-place">${escapeHtml(place.slice(0, ctxShort ? 6 : 4))}</span>` : ''}</span></button>`;
   }).join('');
 }
 

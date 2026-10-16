@@ -908,6 +908,8 @@ function selectProject(id, { tab } = {}) {
 /** Hide every piece of project chrome. Called by hideAllViewers and the other openers. */
 function hideProjectChrome() {
   if (projectViewer) projectViewer.style.display = 'none';
+  // showSession passes through here too; onSessionSplitShown puts the split back.
+  mainEl.classList.remove('proj-split');
   leaveWorking();
 }
 
@@ -2645,35 +2647,22 @@ function buildTrackSettingsRow(project, track) {
 // --- Working mode: strip + panes ---
 
 function renderStrip(project) {
-  // Opened from a PR's panel: back goes to that PR (project-github-view.js).
-  const backToPr = typeof prReturnFor === 'function' && activeSessionId ? prReturnFor(project, activeSessionId) : null;
-  // However it was opened, a session that works on a PR or task links to it.
-  const prLink = !backToPr && typeof githubLinkForSession === 'function' && activeSessionId ? githubLinkForSession(project, activeSessionId) : null;
-  if (!prLink && activeSessionId && typeof isGithubBacked === 'function' && isGithubBacked(project) && !planState(project).data && !planState(project).loadingLinks) {
-    // The links are not loaded yet: fetch them and draw the strip again.
-    planState(project).loadingLinks = true;
-    loadProjectPlan(project).then(() => { planState(project).loadingLinks = false; if (projectsUi.working) renderStrip(project); });
-  }
   const running = runningTasksFor(project);
   const branch = (project.folders || []).find(f => f.mode === 'worktree')?.branch;
   projectStrip.innerHTML = `
-    <button type="button" class="ws-btn ws-btn--sm" id="strip-back" ${backToPr ? `title="Back to ${escapeHtml(backToPr.label)} on the Plan tab"` : ''}>${PICONS.back(13)}<span>${backToPr ? escapeHtml(backToPr.label) : 'Overview'}</span></button>
+    <button type="button" class="ws-btn ws-btn--sm" id="strip-back">${PICONS.back(13)}<span>Overview</span></button>
     ${markHtml(project, 22, 'proj-mark--sm')}
     <span class="strip-name">${escapeHtml(project.name)}</span>
     ${branch ? `<span class="strip-branch mono">${PICONS.branch(11)}<span>${escapeHtml(branch)}</span></span>` : ''}
-    ${prLink ? `<button type="button" class="ws-btn ws-btn--sm" id="strip-pr" title="Open ${escapeHtml(prLink.label)} on the Plan tab: the task this session works on">${escapeHtml(prLink.label)}${PICONS.chevronRight(10)}</button>` : ''}
     <span class="ws-flex"></span>
     <button type="button" class="ws-btn ws-btn--sm project-task-btn" id="strip-tasks" data-project-id="${project.id}" data-project-path="${escapeHtml(project.root)}" data-project-paths="${escapeHtml(taskPseudoProject(project).projectPaths.join('\n'))}">${PICONS.play(11)}<span>Tasks</span><span class="project-task-count ws-badge" ${running ? '' : 'style="display:none"'}>${running || ''}</span></button>
     ${scheduleButtonHtml(project, 'strip-schedules', true)}
     <button type="button" class="ws-btn ws-btn--sm ws-btn--primary" id="strip-new">${PICONS.plus(11)}<span>New session</span>${PICONS.chevronDown(10)}</button>
     <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" id="strip-more" title="More">${PICONS.dots(13)}</button>`;
   projectStrip.querySelector('#strip-back').onclick = () => {
-    if (backToPr) { returnToPr(project); return; }
     setProjectTab(project, 'overview');
     showProjectOverview();
   };
-  const prBtn = projectStrip.querySelector('#strip-pr');
-  if (prBtn) prBtn.onclick = () => openGithubLink(project, prLink);
   projectStrip.querySelector('#strip-tasks').onclick = (e) => showTaskPopover(taskPseudoProject(project), e.currentTarget);
   projectStrip.querySelector('#strip-schedules').onclick = (e) => showProjectScheduleMenu(project, e.currentTarget);
   projectStrip.querySelector('#strip-new').onclick = (e) => showNewSessionMenu(project, null, e.currentTarget);

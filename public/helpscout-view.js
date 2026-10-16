@@ -180,12 +180,14 @@ async function helpscoutViewSession(conv, prompt, label, { focus = true } = {}) 
   options.initialPrompt = prompt;
   delete options.worktree;
   delete options.worktreeName;
-  // Started from the Help Scout tab it opens beside the ticket (onHelpscoutSessionShown).
+  // Started from the Help Scout tab it opens beside the ticket (session-context.js).
+  const origin = sessionPlaceHere();
   const sessionId = await launchNewSession(target, options, { focus });
   if (!sessionId) return null;
   linkHelpscoutSession(sessionId, conv);
+  rememberSessionOrigin(sessionId, origin);
   prSessionLabels.set(sessionId, label);
-  if (typeof updateTerminalHeaderTicket === 'function') updateTerminalHeaderTicket();
+  refreshSessionContextViews(sessionId);
   if (activeTab === 'helpscout' && helpscoutViewState.selectedId === conv.id) renderHelpscoutViewMain();
   return sessionId;
 }
@@ -205,42 +207,43 @@ function helpscoutLogSession(sug) {
 function helpscoutSessionsSection(conv) {
   const ids = helpscoutSessionIds(conv.id);
   if (!ids.length) return '';
-  const shown = mainEl.classList.contains('hsv-split') && ids.includes(helpscoutViewState.splitSession);
-  const hide = shown ? '<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm" id="hsv-hide-session" title="Show the ticket alone; Open on a session brings it back">Hide session</button>' : '';
-  return `<div class="gh-sec gh-sessions hsv-sessions"><div class="gh-sec-h">Claude on this ticket${hide}</div>${ids.map(id =>
+  return `<div class="gh-sec gh-sessions hsv-sessions"><div class="gh-sec-h">Claude on this ticket</div>${ids.map(id =>
     `<div class="gh-sess-row" data-session="${hsvAttr(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
 }
 
 function bindHelpscoutSessionRow(row) {
   row.querySelector('[data-act="open"]').onclick = () => {
     const session = currentSession(row.dataset.session);
-    if (session) openSession(session);
+    if (!session) return;
+    rememberSessionOrigin(row.dataset.session);
+    openSession(session);
   };
 }
 
 // --- A ticket's Claude session beside it ---
 // In this tab a shown session sits on the right of the ticket instead of
-// covering it: showSession hides every viewer, then calls this to put the
-// ticket back on the left.
+// covering it (session-context.js); the header's Hide puts the ticket back
+// alone until a session of it is opened again.
 
-function onHelpscoutSessionShown(sessionId) {
-  if (activeTab !== 'helpscout' || gridViewActive) return;
-  helpscoutViewState.splitSession = sessionId;
-  helpscoutViewState.splitHiddenFor = null;
-  mainEl.classList.add('hsv-split');
-  helpscoutViewer.style.display = 'flex';
-  placeholder.style.display = 'none';
-  terminalArea.style.display = '';
-  // Its Hide button and row state follow the split.
-  if (helpscoutViewState.conversation) renderHelpscoutViewMain();
-  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
-}
+registerSessionSplit('helpscout', {
+  viewer: () => helpscoutViewer,
+  className: 'hsv-split',
+  onShown: (sessionId) => {
+    helpscoutViewState.splitSession = sessionId;
+    helpscoutViewState.splitHiddenFor = null;
+    if (helpscoutViewState.conversation) renderHelpscoutViewMain();
+  },
+  onLeave: () => { helpscoutViewState.splitSession = null; },
+  hide: () => {
+    helpscoutViewState.splitHiddenFor = helpscoutViewState.selectedId;
+    leaveSessionSplit();
+    renderHelpscoutViewMain();
+  },
+});
 
 function leaveHelpscoutSplit() {
+  leaveSessionSplit();
   helpscoutViewState.splitSession = null;
-  if (!mainEl.classList.contains('hsv-split')) return;
-  mainEl.classList.remove('hsv-split');
-  if (activeTab === 'helpscout') terminalArea.style.display = 'none';
 }
 
 /** A ticket's newest running session beside it, or the ticket alone (also after Hide). */
@@ -470,9 +473,6 @@ function bindHelpscoutViewMain(c, draft) {
       btn.onclick = () => (btn.dataset.sugAct === 'log' ? helpscoutLogSession(sug) : helpscoutSetSuggestion(sug.id, btn.dataset.sugAct));
     });
   });
-  if ($('#hsv-hide-session')) {
-    $('#hsv-hide-session').onclick = () => { s.splitHiddenFor = c.id; leaveHelpscoutSplit(); renderHelpscoutViewMain(); };
-  }
   const sessionRows = helpscoutViewer.querySelectorAll('.hsv-sessions .gh-sess-row');
   sessionRows.forEach(row => {
     bindHelpscoutSessionRow(row);
@@ -752,6 +752,6 @@ function showHelpscoutView() {
 
 function hideHelpscoutView() {
   if (helpscoutViewer) helpscoutViewer.style.display = 'none';
-  // showSession passes through here too; onHelpscoutSessionShown puts the split back.
+  // showSession passes through here too; onSessionSplitShown puts the split back.
   mainEl.classList.remove('hsv-split');
 }

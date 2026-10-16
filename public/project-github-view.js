@@ -1160,10 +1160,18 @@ async function startPrSession(project, pr, state, { prompt, label, focus }) {
   const prKey = `${pr.repo}#${pr.number}`;
   if (!project.isGithubView) options.planItem = { file: 'todos', itemText: prKey };
   state.notice = null;
+  // Where it is started from is where it goes back to; in a project it opens beside the panel.
+  const origin = sessionPlaceHere();
+  if (!project.isGithubView) projectSplitNext = true;
   const sessionId = await launchNewSession(target, options, { focus });
+  projectSplitNext = false;
   if (!sessionId) return;
   if (!state.prSessions) state.prSessions = new Map();
   state.prSessions.set(prKey, [sessionId, ...(state.prSessions.get(prKey) || []).filter(id => id !== sessionId)]);
+  // Kept for good (the in-memory list goes with a restart), and the way back.
+  linkSession(sessionId, 'pr', prKey, pr.title);
+  rememberSessionOrigin(sessionId, origin);
+  if (!project.isGithubView) projectSplitSessions.add(sessionId);
   prSessionLabels.set(sessionId, label);
   // Its row shows now, not at the next poll.
   if (githubTabShown(project)) paintGithubPanel(project);
@@ -1179,6 +1187,8 @@ function prSessionIds(project, prKey) {
   const ids = [...(state.prSessions?.get(prKey) || [])];
   const data = typeof planState === 'function' ? planState(project).data : null;
   if (data) for (const { session } of linkedSessions(data, 'todos', prKey)) if (!ids.includes(session.sessionId)) ids.push(session.sessionId);
+  // Started on this PR in an earlier run, also from the GitHub tab (session-context.js keeps those).
+  if (typeof sessionsLinkedTo === 'function') for (const id of sessionsLinkedTo('pr', prKey)) if (!ids.includes(id)) ids.push(id);
   return ids.filter(id => openSessions.has(id) || sessionMap.has(id));
 }
 
@@ -1311,36 +1321,17 @@ function tickPrSessions(project) {
   }, 3000);
 }
 
-// projectId → { sessionId, selection, label }: a session opened from a PR
-// panel; the session strip's back button returns to that PR.
-const prReturnTargets = new Map();
-
+// Opening a session from a PR panel (a project's Plan tab or the GitHub tab)
+// remembers the PR as where it came from, and puts it beside the panel.
 function bindPrSessionRow(row, project) {
   const id = row.dataset.session;
   row.querySelector('[data-act="open"]').onclick = () => {
     const session = currentSession(id);
     if (!session) return;
-    if (project) {
-      const state = githubTabState(project.id);
-      const view = state.selection?.view || '';
-      prReturnTargets.set(project.id, { sessionId: id, selection: state.selection ? { ...state.selection } : null, label: view.includes('#') ? `PR #${view.split('#')[1]}` : 'Plan' });
-    }
+    rememberSessionOrigin(id);
+    if (project && !project.isGithubView) projectSplitSessions.add(id);
     openSession(session);
   };
-}
-
-/** The back button of the session strip: to the PR this session was opened from, if any. */
-function prReturnFor(project, sessionId) {
-  const target = prReturnTargets.get(project.id);
-  return target && target.sessionId === sessionId ? target : null;
-}
-
-function returnToPr(project) {
-  const target = prReturnTargets.get(project.id);
-  prReturnTargets.delete(project.id);
-  if (target?.selection) githubTabState(project.id).selection = target.selection;
-  setProjectTab(project, 'plan');
-  showProjectOverview();
 }
 
 /**
@@ -1377,7 +1368,6 @@ function openGithubLink(project, link) {
   const state = githubTabState(project.id);
   state.review = null;
   state.selection = { itemKey: link.itemKey, view: link.view };
-  prReturnTargets.delete(project.id);
   setProjectTab(project, 'plan');
   showProjectOverview();
 }

@@ -1113,6 +1113,13 @@ function buildSessionItem(session) {
     chip.innerHTML = scheduleChipHtml(session, { compact: true });
     metaEl.appendChild(chip);
   }
+  // What it works on: a ticket, PR, issue, alert or plan item (session-context.js).
+  if (typeof sessionContextChip === 'function') {
+    const ctxEl = document.createElement('span');
+    ctxEl.dataset.ctxSession = session.sessionId;
+    sessionContextChip(ctxEl, session.sessionId);
+    metaEl.appendChild(ctxEl);
+  }
 
   // Action buttons container
   const actions = document.createElement('div');

@@ -233,8 +233,7 @@ function grafanaHeaderHtml() {
     return `<button type="button" class="gfv-vital gfv-vital--${level}" data-vital="${m.key}" title="${gfvAttr(`${m.label}, last hour. Open Platform health`)}"><span class="gfv-vital-l">${m.label}</span><span class="gfv-vital-v">${m.unit(last)}</span>${extra}${grafanaSparkline(series)}</button>`;
   }).join('');
   return `<div class="gfv-head">
-      <div class="gfv-head-top"><div class="gfv-platforms">${platforms.map(p => `<button type="button" class="ws-ghost ws-ghost--sm${p.id === s.platform ? ' active' : ''}" data-platform="${p.id}">${escapeHtml(p.label)}</button>`).join('')}</div>
-        ${s.splitSession && mainEl.classList.contains('gfv-split') ? '<button type="button" class="ws-ghost ws-ghost--sm" id="gfv-hide-session" title="Show the page alone; Ask Claude or the session brings it back">Hide session</button>' : ''}</div>
+      <div class="gfv-head-top"><div class="gfv-platforms">${platforms.map(p => `<button type="button" class="ws-ghost ws-ghost--sm${p.id === s.platform ? ' active' : ''}" data-platform="${p.id}">${escapeHtml(p.label)}</button>`).join('')}</div></div>
       <div class="gfv-vitals">${vit ? tiles : '<span class="gh-muted">Loading…</span>'}</div>
     </div>`;
 }
@@ -261,8 +260,6 @@ function bindGrafanaHeader() {
       if (!s.vitals.has(s.platform)) { await loadGrafanaVitals(); paintGrafanaHeader(); }
     };
   });
-  const hide = grafanaViewer.querySelector('#gfv-hide-session');
-  if (hide) hide.onclick = () => { leaveGrafanaSplit(); paintGrafanaHeader(); };
   grafanaViewer.querySelectorAll('[data-vital]').forEach(b => {
     b.onclick = () => {
       const health = (s.dashboards || []).find(d => /platform health/i.test(d.title));
@@ -555,10 +552,16 @@ async function startGrafanaSession(key, { platform, apps = [], prompt, label }) 
   delete options.worktree;
   delete options.worktreeName;
   if (paths.length > 1) options.addDirs = [options.addDirs, ...paths.slice(1)].filter(Boolean).join(', ');
-  // Started from the Grafana tab it opens beside the page (onGrafanaSessionShown).
+  // Started from the Grafana tab it opens beside the page (session-context.js).
+  const origin = sessionPlaceHere();
   const sessionId = await launchNewSession(target, options, { focus: true });
   if (!sessionId) return;
   grafanaViewState.sessions.set(key, sessionId);
+  // Kept for good: the alert or the platform's logs, and the way back.
+  const [kind, ref] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+  linkSession(sessionId, kind, ref, kind === 'alert' ? label.replace(/^Alert: /, '') : label);
+  rememberSessionOrigin(sessionId, origin);
+  refreshSessionContextViews(sessionId);
   prSessionLabels.set(sessionId, label);
 }
 
@@ -618,25 +621,20 @@ async function askClaudeAboutGrafanaAlert(a) {
 }
 
 // --- The session beside the page ---
-// In this tab a shown session sits on the right instead of covering the page:
-// showSession hides every viewer, then calls this to put the page back.
+// In this tab a shown session sits on the right instead of covering the page
+// (session-context.js); the header's Hide puts the page back alone.
 
-function onGrafanaSessionShown(sessionId) {
-  if (activeTab !== 'grafana' || gridViewActive) return;
-  grafanaViewState.splitSession = sessionId;
-  mainEl.classList.add('gfv-split');
-  grafanaViewer.style.display = 'flex';
-  placeholder.style.display = 'none';
-  terminalArea.style.display = '';
-  paintGrafanaHeader();
-  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
-}
+registerSessionSplit('grafana', {
+  viewer: () => grafanaViewer,
+  className: 'gfv-split',
+  onShown: (sessionId) => { grafanaViewState.splitSession = sessionId; },
+  onLeave: () => { grafanaViewState.splitSession = null; },
+  hide: () => leaveSessionSplit(),
+});
 
 function leaveGrafanaSplit() {
+  leaveSessionSplit();
   grafanaViewState.splitSession = null;
-  if (!mainEl.classList.contains('gfv-split')) return;
-  mainEl.classList.remove('gfv-split');
-  if (activeTab === 'grafana') terminalArea.style.display = 'none';
 }
 
 /** The selected alert's (or the platform's logs') running session beside it, or the page alone. */
@@ -662,7 +660,7 @@ async function showGrafanaView() {
 
 function hideGrafanaView() {
   if (grafanaViewer) grafanaViewer.style.display = 'none';
-  // showSession passes through here too; onGrafanaSessionShown puts the split back.
+  // showSession passes through here too; onSessionSplitShown puts the split back.
   mainEl.classList.remove('gfv-split');
 }
 

@@ -765,12 +765,11 @@ function showSession(sessionId) {
       fitAndScroll(entry);
     }
   }
-  // The Projects tab keeps the project around the terminal (projects-view.js).
-  if (typeof onSessionShown === 'function') onSessionShown(sessionId);
-  // The Help Scout tab keeps the ticket beside it (helpscout-view.js).
-  if (typeof onHelpscoutSessionShown === 'function') onHelpscoutSessionShown(sessionId);
-  // The Grafana tab keeps the alert or the logs beside it (grafana-view.js).
-  if (typeof onGrafanaSessionShown === 'function') onGrafanaSessionShown(sessionId);
+  // A tab with a detail page keeps it beside the session (session-context.js);
+  // else the Projects tab keeps the project around the terminal (projects-view.js).
+  const split = typeof onSessionSplitShown === 'function' && onSessionSplitShown(sessionId);
+  if (!split && typeof onSessionShown === 'function') onSessionShown(sessionId);
+  if (typeof renderSessionContextHeader === 'function') renderSessionContextHeader();
 }
 
 function setupDragAndDrop(container, getSessionId) {

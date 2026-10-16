@@ -170,4 +170,6 @@ function showGithubView() {
 
 function hideGithubView() {
   if (githubViewer) githubViewer.style.display = 'none';
+  // showSession passes through here too; onSessionSplitShown puts the split back.
+  mainEl.classList.remove('ghv-split');
 }
