@@ -311,12 +311,16 @@ function renderSessionContextHeader() {
     const sep = !i ? '' : (['project', 'track'].includes(contexts[i - 1].kind) ? '<span class="ctx-sep">›</span>' : '<span class="ctx-sep">·</span>');
     return `${sep}<button type="button" class="ctx-crumb ctx-crumb--${c.kind}${c.detected ? ' ctx-crumb--detected' : ''}" data-ctx="${i}" title="${escapeHtml(c.title).replace(/"/g, '&quot;')}">${SESSION_CONTEXT_ICONS[c.kind] ? SESSION_CONTEXT_ICONS[c.kind]() : ''}<span>${escapeHtml(c.label)}</span></button>`;
   }).join('');
-  const hide = split ? '<button type="button" class="ctx-hide" data-ctx-hide="1" title="Show the page alone; the session keeps running">Hide session</button>' : '';
+  // Beside a page: take the session full width in the Sessions tab (its back button returns), or hide it.
+  const hide = split ? '<button type="button" class="ctx-hide" data-ctx-full="1" title="Open it full width in the Sessions tab; Back there returns here"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg><span>Open in Sessions</span></button>'
+    + '<button type="button" class="ctx-hide" data-ctx-hide="1" title="Show the page alone; the session keeps running">Hide session</button>' : '';
   terminalHeaderContext.innerHTML = `${back}${crumbs}<span class="ws-flex"></span>${hide}`;
   terminalHeaderContext.style.display = back || crumbs || hide ? '' : 'none';
   terminalHeaderContext.querySelectorAll('[data-ctx]').forEach(b => { b.onclick = () => contexts[Number(b.dataset.ctx)]?.open(); });
   const backBtn = terminalHeaderContext.querySelector('[data-ctx-back]');
   if (backBtn) backBtn.onclick = () => origin.restore();
+  const fullBtn = terminalHeaderContext.querySelector('[data-ctx-full]');
+  if (fullBtn) fullBtn.onclick = () => openSessionInSessionsTab(id);
   const hideBtn = terminalHeaderContext.querySelector('[data-ctx-hide]');
   if (hideBtn) hideBtn.onclick = () => { const spec = sessionSplits.get(activeTab); if (spec?.hide) spec.hide(); else leaveSessionSplit(); };
 }
@@ -333,6 +337,15 @@ function sessionContextChip(el, sessionId) {
 function refreshSidebarContextLabels() {
   document.querySelectorAll('.session-ctx[data-ctx-session]').forEach(el => sessionContextChip(el, el.dataset.ctxSession));
   if (typeof renderSidebarRail === 'function') renderSidebarRail();
+}
+
+/** The session full width in the Sessions tab; where it was beside stays its origin, for Back. */
+function openSessionInSessionsTab(sessionId) {
+  if (!sessionOrigins.has(sessionId)) rememberSessionOrigin(sessionId);
+  leaveSessionSplit();
+  const tab = document.querySelector('.sidebar-tab[data-tab="sessions"]');
+  if (tab && activeTab !== 'sessions') tab.click();
+  if (openSessions.has(sessionId)) showSession(sessionId);
 }
 
 /** A session's context changed (a link came in, its branch PR was found): the header and its rows. */
