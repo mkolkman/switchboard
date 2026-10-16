@@ -1697,11 +1697,12 @@ ipcMain.handle('read-session-jsonl', (_event, sessionId) => {
   }
 });
 
-ipcMain.handle('get-session-last-message', (_event, sessionId) => {
+// `full`: the whole message, not the glance (a phase sort reads its list from the end).
+ipcMain.handle('get-session-last-message', (_event, sessionId, { full = false } = {}) => {
   const row = getCachedSession(sessionId);
   if (!row) return { error: 'Session not found in cache' };
   try {
-    const { text, truncated } = lastAssistantMessage(readSessionViewerEntries(row));
+    const { text, truncated } = lastAssistantMessage(readSessionViewerEntries(row), full ? Infinity : undefined);
     return { text, truncated };
   } catch (err) {
     return { error: err.message };

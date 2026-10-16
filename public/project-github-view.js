@@ -313,6 +313,7 @@ function githubTrackerCard(project, refText, state) {
       + `<span class="gh-group-n">${ph.done}/${ph.total}</span>`
       + (ph.title ? `<button type="button" class="gh-act gh-group-add" title="New issue in ${escapeHtml(ph.title)}">${PICONS.plus(11)}</button>` : '')
       + (ph.title && group.items.some(i => i.status !== 'done' && i.status !== 'dropped') ? `<button type="button" class="gh-act gh-group-start" title="Start a session on this phase">${PICONS.play(10)}</button>` : '')
+      + (!ph.title && typeof githubPhaseSortButton === 'function' ? githubPhaseSortButton(project, refText, group.items) : '')
       : `<span class="gh-group-n">${group.items.length}</span>`;
     html += `<div class="gh-group${open ? '' : ' collapsed'}" data-key="${escapeHtml(key)}" data-ref="${escapeHtml(refText)}" ${ph?.title ? `data-phase="${escapeHtml(ph.title)}"` : ''}>`
       + `<div class="gh-group-h" role="button" tabindex="0" title="${escapeHtml(group.hint)}"><span class="arrow">&#9660;</span><span>${escapeHtml(group.label)}</span>${phaseBits}</div>`
@@ -587,6 +588,10 @@ function bindGithubPlanActions(project, list, state) {
       const phase = githubPhases(project, result).phases.find(p => p.title === phaseTitle);
       if (phase) showGithubStartMenu(project, { repo: null, prompt: githubPhasePrompt(result, phase), itemText: null }, e.currentTarget);
     };
+    const sort = group.querySelector('.gh-group-sort');
+    if (sort && result) sort.onclick = (e) => { e.stopPropagation(); sortGithubUnphased(project, group.dataset.ref); };
+    const sorting = group.querySelector('.gh-group-sorting');
+    if (sorting) sorting.onclick = (e) => { e.stopPropagation(); const s = githubPhaseSorts.get(project.id); if (s?.session) showSession(s.session); };
   });
   list.querySelectorAll('.gh-groupby').forEach(btn => {
     btn.onclick = (e) => {
