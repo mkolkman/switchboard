@@ -389,6 +389,17 @@
       </div>` : ''}
 
       ${!isProject ? `<div class="settings-section">
+        <div class="settings-section-title">Sidebar tabs</div>
+        <div class="settings-field settings-field-stacked">
+          <div class="settings-field-info">
+            <span class="settings-label">Tab bar and ••• menu</span>
+            <div class="settings-description">Ticked tabs sit in the tab bar, the others in the ••• menu, both in this order. Changes apply at once.</div>
+          </div>
+          <div class="settings-field-control"><div class="sv-tabs" id="sv-tabs"></div></div>
+        </div>
+      </div>` : ''}
+
+      ${!isProject ? `<div class="settings-section">
         <div class="settings-section-title">Customers</div>
         <div class="settings-field settings-field-stacked">
           <div class="settings-field-info">
@@ -468,6 +479,42 @@
     }
     harnessToggles.forEach(t => t.addEventListener('change', syncHarnessLock));
     syncHarnessLock();
+
+    // Sidebar tabs: in the bar or the ••• menu, and their order (app.js keeps the layout).
+    const tabsEl = settingsViewerBody.querySelector('#sv-tabs');
+    function paintTabLayout() {
+      if (!tabsEl) return;
+      const { order, shown } = sidebarTabLayout;
+      tabsEl.innerHTML = order.map((id, i) => {
+        const btn = document.querySelector(`.sidebar-tab[data-tab="${id}"]`);
+        const name = (btn?.title || id).split(':')[0];
+        return `<div class="sv-tab-row">
+          <label class="settings-inline-check"><input type="checkbox" data-tab-shown="${id}" ${shown.includes(id) ? 'checked' : ''}>
+            <span class="sv-tab-icon">${btn ? btn.innerHTML.replace(/width="18" height="18"/, 'width="14" height="14"') : ''}</span>${escapeHtml(name)}</label>
+          <span class="ws-flex"></span>
+          <button type="button" class="ws-ghost ws-ghost--sm" data-tab-move="${i}:-1" ${i ? '' : 'disabled'} title="Move up">↑</button>
+          <button type="button" class="ws-ghost ws-ghost--sm" data-tab-move="${i}:1" ${i < order.length - 1 ? '' : 'disabled'} title="Move down">↓</button>
+        </div>`;
+      }).join('');
+      tabsEl.querySelectorAll('[data-tab-shown]').forEach(cb => {
+        cb.onchange = async () => {
+          const id = cb.dataset.tabShown;
+          const next = cb.checked ? [...sidebarTabLayout.shown, id] : sidebarTabLayout.shown.filter(x => x !== id);
+          await setSidebarTabs({ ...sidebarTabLayout, shown: next });
+          paintTabLayout();
+        };
+      });
+      tabsEl.querySelectorAll('[data-tab-move]').forEach(b => {
+        b.onclick = async () => {
+          const [i, d] = b.dataset.tabMove.split(':').map(Number);
+          const next = [...sidebarTabLayout.order];
+          [next[i], next[i + d]] = [next[i + d], next[i]];
+          await setSidebarTabs({ ...sidebarTabLayout, order: next });
+          paintTabLayout();
+        };
+      });
+    }
+    paintTabLayout();
     const fontFamilyInput = settingsViewerBody.querySelector('#sv-font-family');
     if (fontFamilyInput) {
       fontFamilyInput.value = fontFamilyValue;

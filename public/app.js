@@ -581,21 +581,57 @@ globalSettingsBtn.addEventListener('click', () => {
   openSettingsViewer('global');
 });
 
-// --- "More" button: Plans, Agent Files, Stats and Global settings share one
+// --- "More" button: the tabs not in the bar and Global settings share one
 // menu so the tab strip stays short. The tab buttons stay in the DOM, hidden,
 // so everything that clicks them (shortcuts, the quota gauge) keeps working.
 const sidebarMoreBtn = document.getElementById('sidebar-more-btn');
-const MORE_TABS = ['plans', 'memory', 'stats'];
 const moreIdleIcon = sidebarMoreBtn.innerHTML;
 const tabButton = (name) => document.querySelector(`.sidebar-tab[data-tab="${name}"]`);
 const menuIcon = (svg) => svg.replace(/width="18" height="18"/, 'width="14" height="14"');
 
+// Which tabs the bar shows, in what order (the global setting sidebarTabs,
+// edited in Global settings); the others are in the ••• menu in that order.
+const SIDEBAR_TABS_KEY = 'sidebarTabs';
+const SIDEBAR_TAB_IDS = ['todo', 'sessions', 'projects', 'github', 'grafana', 'helpscout', 'plans', 'memory', 'stats'];
+let sidebarTabLayout = { order: [...SIDEBAR_TAB_IDS], shown: ['sessions'] };
+
+/** Every known tab once, in the saved order, new ones at the end; Sessions only by default. */
+function normalizeSidebarTabs(saved) {
+  const order = (Array.isArray(saved?.order) ? saved.order : []).filter(id => SIDEBAR_TAB_IDS.includes(id));
+  for (const id of SIDEBAR_TAB_IDS) if (!order.includes(id)) order.push(id);
+  const shown = Array.isArray(saved?.shown) ? saved.shown.filter(id => SIDEBAR_TAB_IDS.includes(id)) : ['sessions'];
+  return { order: [...new Set(order)], shown };
+}
+
+const sidebarTabOrder = () => sidebarTabLayout.order;
+const moreMenuTabs = () => sidebarTabLayout.order.filter(id => !sidebarTabLayout.shown.includes(id));
+
+/** Put the tab buttons in order before the ••• button, hiding the ones that live in its menu. */
+function applySidebarTabs() {
+  for (const id of sidebarTabLayout.order) {
+    const btn = tabButton(id);
+    if (!btn) continue;
+    sidebarMoreBtn.parentElement.insertBefore(btn, sidebarMoreBtn);
+    btn.style.display = sidebarTabLayout.shown.includes(id) ? '' : 'none';
+  }
+  updateMoreButton();
+  if (typeof renderSidebarRail === 'function') renderSidebarRail();
+}
+
+async function setSidebarTabs(layout) {
+  sidebarTabLayout = normalizeSidebarTabs(layout);
+  applySidebarTabs();
+  await window.api.setSetting(SIDEBAR_TABS_KEY, sidebarTabLayout);
+}
+
 /** Show the active hidden tab's icon on the more button, or the dots when none is active. */
 function updateMoreButton() {
-  const tab = MORE_TABS.includes(activeTab) ? tabButton(activeTab) : null;
+  const tab = moreMenuTabs().includes(activeTab) ? tabButton(activeTab) : null;
   sidebarMoreBtn.innerHTML = tab ? tab.innerHTML : moreIdleIcon;
   sidebarMoreBtn.title = tab ? tab.title : 'More';
   sidebarMoreBtn.classList.toggle('active', !!tab);
+  // Its icon was just redrawn: put the Grafana alert badge back (grafana-view.js).
+  if (typeof paintGrafanaBadge === 'function') paintGrafanaBadge();
 }
 
 sidebarMoreBtn.addEventListener('click', (e) => {
@@ -606,12 +642,18 @@ sidebarMoreBtn.addEventListener('click', (e) => {
     return { label: tab.title, icon: menuIcon(tab.innerHTML), muted: activeTab === name, onClick: () => tab.click() };
   };
   showContextMenu([
-    ...MORE_TABS.map(tabItem),
+    ...moreMenuTabs().map(tabItem),
     { sep: true },
     { label: 'Global settings', icon: ICONS.gear(14), onClick: () => globalSettingsBtn.click() },
     { label: 'Join Slack', icon: slackIcon, onClick: () => window.api.openExternal(slackUrl) },
   ], { anchor: e.currentTarget });
 });
+
+applySidebarTabs();
+window.api.getSetting(SIDEBAR_TABS_KEY).then(saved => {
+  sidebarTabLayout = normalizeSidebarTabs(saved);
+  applySidebarTabs();
+}).catch(() => {});
 
 // --- Add folder / new project buttons ---
 addProjectBtn.addEventListener('click', () => {

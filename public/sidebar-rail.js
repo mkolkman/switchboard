@@ -21,6 +21,8 @@
 const sidebarRail = document.getElementById('sidebar-rail');
 const SIDEBAR_RAIL_LIMIT = 40;
 const SIDEBAR_RAIL_TABS = ['todo', 'sessions', 'projects', 'github', 'grafana', 'helpscout', 'plans', 'memory', 'stats'];
+// The mode menu follows the order picked in Global settings (app.js sidebarTabOrder).
+const railTabOrder = () => (typeof sidebarTabOrder === 'function' ? sidebarTabOrder() : SIDEBAR_RAIL_TABS);
 
 const railTabButton = (name) => document.querySelector(`.sidebar-tab[data-tab="${name}"]`);
 const railIcon = (svg, size) => svg.replace(/width="\d+" height="\d+"/, `width="${size}" height="${size}"`);
@@ -174,7 +176,7 @@ function renderSidebarRail() {
     <div class="rail-list">${list ? list() : ''}</div>`;
   sidebarRail.querySelector('.rail-list').scrollTop = scroll;
   sidebarRail.querySelector('.rail-mode').onclick = (e) => {
-    showContextMenu(SIDEBAR_RAIL_TABS.map(railTabButton).filter(Boolean).map(btn => ({
+    showContextMenu(railTabOrder().map(railTabButton).filter(Boolean).map(btn => ({
       label: btn.title.split(':')[0],
       icon: railIcon(btn.innerHTML, 14),
       muted: btn.dataset.tab === activeTab,

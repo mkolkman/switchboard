@@ -7280,6 +7280,10 @@ body.fp-resizing webview { pointer-events: none; }
 .pane-tag--schedule svg { flex-shrink: 0; }
 /* Icon only: the session list has no room for the task's name. */
 .pane-tag--icon { padding: 1px 3px; gap: 0; }
+.sv-tabs { display: flex; flex-direction: column; gap: 2px; max-width: 360px; }
+.sv-tab-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px; }
+.sv-tab-row:hover { background: rgba(255,255,255,0.03); }
+.sv-tab-icon { display: inline-flex; margin: 0 6px 0 2px; color: #9a9ab0; vertical-align: -2px; }
 .session-schedule-chip { display: inline-flex; margin-left: 6px; min-width: 0; }
 .session-ctx { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; min-width: 0; max-width: 140px; font-size: 10px; font-weight: 600; color: #9aa2ff; cursor: pointer; }
 .session-ctx:empty { display: none; }
@@ -8067,7 +8071,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 #main.gfv-split #terminal-area { left: auto; width: var(--gfv-term-w, 50%); }
 #grafana-content { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; }
 .gfv-tab-badge { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px #18181f; }
-.sidebar-tab[data-tab="grafana"] { position: relative; }
+.sidebar-tab[data-tab="grafana"], #sidebar-more-btn { position: relative; }
 .gfv-tab-badge--firing { background: #e05a5a; }
 .gfv-tab-badge--pending { background: #e0a830; }
 .gfv-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: #c8c8dc; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }

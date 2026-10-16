@@ -105,14 +105,18 @@ function startGrafanaPolling() {
 
 // --- Badge and notifications ---
 
+// On the tab, or on the ••• button while the tab sits in its menu (Global settings).
 function paintGrafanaBadge() {
   const tab = document.querySelector('.sidebar-tab[data-tab="grafana"]');
+  const more = document.getElementById('sidebar-more-btn');
   if (!tab) return;
+  document.querySelectorAll('.gfv-tab-badge').forEach(b => b.remove());
   const alerts = grafanaViewState.alerts || [];
   const kind = alerts.some(a => a.state === 'firing') ? 'firing' : alerts.some(a => a.state === 'pending') ? 'pending' : null;
-  let badge = tab.querySelector('.gfv-tab-badge');
-  if (!kind) { badge?.remove(); return; }
-  if (!badge) { badge = document.createElement('span'); badge.className = 'gfv-tab-badge'; tab.appendChild(badge); }
+  if (!kind) return;
+  const host = tab.style.display === 'none' && more ? more : tab;
+  const badge = document.createElement('span');
+  host.appendChild(badge);
   badge.className = `gfv-tab-badge gfv-tab-badge--${kind}`;
 }
 
