@@ -270,10 +270,27 @@ registerSessionSplit('github', { viewer: () => githubViewer, className: 'ghv-spl
 // the others open in the project's working view (strip, panes, terminal).
 const projectSplitSessions = new Set();
 let projectSplitNext = false; // a PR session being launched from a project's panel
+// The session sits under the project's header: its height, kept current while
+// split (the page redraws its header, so the observer follows the new one).
+let observedProjectHead = null;
+const projectHeadObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => measureProjectHead()) : null;
+function measureProjectHead() {
+  const head = projectViewer.querySelector('.ws-header');
+  if (!head) return;
+  mainEl.style.setProperty('--proj-head-h', `${head.offsetHeight}px`);
+  if (projectHeadObserver && head !== observedProjectHead && mainEl.classList.contains('proj-split')) {
+    projectHeadObserver.disconnect();
+    projectHeadObserver.observe(head);
+    observedProjectHead = head;
+  }
+}
+window.addEventListener('resize', () => { if (mainEl.classList.contains('proj-split')) measureProjectHead(); });
 registerSessionSplit('projects', {
   viewer: () => projectViewer,
   className: 'proj-split',
   applies: (sessionId) => projectSplitSessions.has(sessionId) || projectSplitNext,
+  onShown: () => measureProjectHead(),
+  onLeave: () => { projectHeadObserver?.disconnect(); observedProjectHead = null; },
   hide: () => leaveSessionSplit(),
 });
 
