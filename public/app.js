@@ -1625,9 +1625,11 @@ setTimeout(() => {
 })();
 
 loadProjects().then(async () => {
-  // Open the tab the user was last working in.
+  // Open the tab the user was last working in, unless that tab is hidden now.
+  if (typeof updateTodoTabVisibility === 'function') await updateTodoTabVisibility();
   const lastTab = rememberedTab();
-  if (lastTab !== activeTab) document.querySelector(`.sidebar-tab[data-tab="${lastTab}"]`)?.click();
+  const lastTabButton = document.querySelector(`.sidebar-tab[data-tab="${lastTab}"]`);
+  if (lastTab !== activeTab && lastTabButton?.style.display !== 'none') lastTabButton?.click();
   await restoreActiveTaskView();
   await restorePersistedTerminalProcesses();
   // Restore grid view preference before opening sessions so they enter grid mode

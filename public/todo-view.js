@@ -54,10 +54,21 @@ function todoViewTake(result) {
 }
 
 /** Called by the settings panel after the token or page changed. */
-function todoConfigChanged() {
+async function todoConfigChanged() {
   todoViewState.page = null;
   todoViewState.notices = [];
+  await updateTodoTabVisibility();
   if (activeTab === 'todo') loadTodoView();
+}
+
+/** The Todo tab only shows once a Notion token and page are set up; until then it stays out of the tab strip. */
+async function updateTodoTabVisibility() {
+  const tab = document.querySelector('.sidebar-tab[data-tab="todo"]');
+  if (!tab) return;
+  const config = await window.api.getNotionTodoConfig().catch(() => null);
+  const configured = !!(config?.hasToken && config?.pageId);
+  tab.style.display = configured ? '' : 'none';
+  if (!configured && activeTab === 'todo') document.querySelector('.sidebar-tab[data-tab="sessions"]')?.click();
 }
 
 /** Which todo links lead into a plan: every project's tracking issue, its issues and their PRs. */
