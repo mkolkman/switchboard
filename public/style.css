@@ -7591,6 +7591,11 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-list::-webkit-scrollbar-thumb, .gh-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 .gh-list::-webkit-scrollbar-thumb:hover, .gh-panel::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
 .gh-split.has-panel .gh-panel { display: block; }
+/* A session beside a project's PR panel: the panel takes the page, the plan's
+   list or graph comes back when the session closes or is hidden. */
+#main.proj-split .gh-split.has-panel { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+#main.proj-split .gh-split.has-panel > .gh-list { display: none; }
+#main.proj-split .gh-split.has-panel > .gh-panel { margin-top: 0; }
 @container (max-width: 900px) {
   .gh-split.has-panel { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 0.8fr) minmax(0, 1.2fr); }
   .gh-split.has-panel .gh-panel { margin-top: 2px; }
