@@ -7336,6 +7336,32 @@ body.fp-resizing webview { pointer-events: none; }
   margin-top: 1px;
 }
 
+/* The project a session is filed under, ahead of its repo, on one centred line. */
+.session-source:has(.session-project) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.session-source-repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 60%;
+}
+.session-project .proj-mark { font-size: 6.5px !important; letter-spacing: 0; }
+.session-project-name {
+  color: #a9a9c4;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .project-header .project-group-count {
   flex: none;
   font-size: 10px;
