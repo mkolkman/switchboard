@@ -20,7 +20,7 @@
 
 const sidebarRail = document.getElementById('sidebar-rail');
 const SIDEBAR_RAIL_LIMIT = 40;
-const SIDEBAR_RAIL_TABS = ['projects', 'sessions', 'github', 'todo', 'helpscout', 'grafana', 'plans', 'memory', 'stats'];
+const SIDEBAR_RAIL_TABS = ['todo', 'sessions', 'projects', 'github', 'grafana', 'helpscout', 'plans', 'memory', 'stats'];
 
 const railTabButton = (name) => document.querySelector(`.sidebar-tab[data-tab="${name}"]`);
 const railIcon = (svg, size) => svg.replace(/width="\d+" height="\d+"/, `width="${size}" height="${size}"`);
