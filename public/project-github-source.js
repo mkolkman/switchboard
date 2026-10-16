@@ -309,6 +309,129 @@ async function seedGithubPhases(project) {
   refreshGithubSource(project);
 }
 
+// --- Sorting the issues without a phase: Claude picks, Switchboard writes ---
+
+const githubPhaseSorts = new Map(); // projectId → { ref, session, state, waiting }
+
+/** The "No phase" header's button: start a sort, or the sort at work. */
+function githubPhaseSortButton(project, refText, items) {
+  const sort = githubPhaseSorts.get(project.id);
+  if (sort?.ref === refText) {
+    const needs = sort.state === 'needs' || sort.waiting;
+    return `<button type="button" class="ws-ghost ws-ghost--sm gh-group-sorting${needs ? ' gh-group-sorting--needs' : ''}"${sort.session ? '' : ' disabled'} title="Show the Claude session that sorts these issues">${ICONS.claude(11)}<span>${needs ? 'Claude needs you' : 'Sorting…'}</span></button>`;
+  }
+  if (sort || !unphasedOpen(items).length) return '';
+  return `<button type="button" class="gh-act gh-group-sort" title="Let Claude put these issues in phases, with new phases where none fits. You see the changes before they are made.">${ICONS.claude(11)}</button>`;
+}
+
+/**
+ * Start a Claude session that reads the plan and its open issues without a
+ * phase, and answers with a phase for each (phaseSortPrompt). It runs out of
+ * sight; the "Sorting…" button shows it.
+ */
+async function sortGithubUnphased(project, refText) {
+  if (githubPhaseSorts.has(project.id)) return;
+  const source = githubTabState(project.id).results.get(refText);
+  if (!source?.items) return;
+  const phased = githubPhases(project, source);
+  if (!unphasedOpen(phased.unphased).length) return;
+  githubPhaseSorts.set(project.id, { ref: refText, session: null, state: null });
+  repaintGithubTabIfShown(project);
+  const target = launchTargetFor(project, null);
+  const options = await resolveDefaultSessionOptions(target);
+  options.runtime = 'claude';
+  options.initialPrompt = phaseSortPrompt(source, phased);
+  delete options.worktree;
+  delete options.worktreeName;
+  const sessionId = await launchNewSession(target, options, { focus: false });
+  if (!sessionId) {
+    githubPhaseSorts.delete(project.id);
+    repaintGithubTabIfShown(project);
+    alert('The session that sorts the issues did not start.');
+    return;
+  }
+  prSessionLabels.set(sessionId, 'Sorting issues into phases');
+  githubPhaseSorts.get(project.id).session = sessionId;
+  repaintGithubTabIfShown(project);
+  watchGithubPhaseSort(project, refText, sessionId);
+}
+
+/**
+ * Every 2 s: follow the sort session; once it has worked and stopped working,
+ * its last message holds the phases. An answer without them (a question, say)
+ * shows "Claude needs you" and the watch goes on until the session answers
+ * again or stops.
+ */
+function watchGithubPhaseSort(project, refText, sessionId) {
+  let worked = false;
+  let unanswered = 0;
+  let reading = false; // a tick can outlast the next one while it reads the transcript
+  const current = () => githubPhaseSorts.get(project.id)?.session === sessionId;
+  const finish = (text) => {
+    clearInterval(timer);
+    githubPhaseSorts.delete(project.id);
+    repaintGithubTabIfShown(project);
+    if (text) alert(text);
+  };
+  const timer = setInterval(async () => {
+    if (!current()) { clearInterval(timer); return; }
+    if (reading) return;
+    const sort = githubPhaseSorts.get(project.id);
+    const [state] = prSessionState(sessionId);
+    if (state !== sort.state) { sort.state = state; repaintGithubTabIfShown(project); }
+    if (state === 'working' || state === 'needs') {
+      worked = true;
+      unanswered = 0;
+      if (sort.waiting) { sort.waiting = false; repaintGithubTabIfShown(project); }
+      return;
+    }
+    if (state === 'stopped') { finish('The session that sorts the issues stopped before it answered.'); return; }
+    if (!worked) return;
+    reading = true;
+    const message = await window.api.getSessionLastMessage(sessionId, { full: true }).catch(() => null);
+    reading = false;
+    if (!current()) return;
+    const source = githubTabState(project.id).results.get(refText);
+    const found = source?.items && message?.text ? phaseAssignmentsFrom(message.text, githubPhases(project, source)) : null;
+    if (!found) {
+      // Not indexed yet, or a message from before the answer: give it a few
+      // ticks. Then Claude is waiting on you; read again once it has worked.
+      if (++unanswered >= 5) { worked = false; sort.waiting = true; repaintGithubTabIfShown(project); }
+      return;
+    }
+    finish(null);
+    applyGithubPhaseSort(project, refText, found);
+  }, 2000);
+}
+
+/** Show what the sort would change, and make the changes once agreed. */
+async function applyGithubPhaseSort(project, refText, { assignments, skipped }) {
+  const source = githubTabState(project.id).results.get(refText);
+  const { by } = githubPhases(project, source);
+  const line = ({ item }) => `${item.repo.split('/')[1]}#${item.number} ${item.title}`;
+  const fresh = new Set(assignments.filter(a => a.isNew).map(a => a.title));
+  const byPhase = new Map();
+  for (const a of assignments) byPhase.set(a.title, [...(byPhase.get(a.title) || []), a]);
+  const summary = [...byPhase].map(([title, list]) => `${title}${fresh.has(title) ? ' (new)' : ''}\n${list.map(a => `  ${line(a)}`).join('\n')}`).join('\n\n');
+  const left = skipped.length ? `\n\nLeft without a phase:\n${skipped.map(s => `  ${line(s)}: ${s.reason}`).join('\n')}` : '';
+  if (!assignments.length) { alert(`Claude put no issue in a phase.${left}`); return; }
+  const what = fresh.size && by.kind === 'milestone'
+    ? `Put ${assignments.length} issue${assignments.length === 1 ? '' : 's'} in a ${phaseSourceLabel(by)}, creating ${fresh.size} new milestone${fresh.size === 1 ? '' : 's'} where missing:`
+    : `Put ${assignments.length} issue${assignments.length === 1 ? '' : 's'} in a phase (${phaseSourceLabel(by)}):`;
+  if (!confirm(`${what}\n\n${summary}${left}\n\nGo ahead?`)) return;
+  // One at a time: a new milestone is made by the first issue that needs it.
+  const failed = [];
+  for (const a of assignments) {
+    const target = githubTarget(`${a.item.repo}#${a.item.number}`);
+    const result = await (by.kind === 'field'
+      ? window.api.setGithubField(target, by.key, a.title)
+      : window.api.setGithubMilestone(target, a.title)).catch(err => ({ error: err?.message || String(err) }));
+    if (result?.error) failed.push(`${line(a)}: ${result.error}`);
+  }
+  loadGithubTracker(project, refText, { force: true });
+  if (failed.length) alert(`These issues could not be put in a phase:\n\n${failed.join('\n')}`);
+}
+
 // --- Overview: Plan, Todos and Attached Folders from GitHub ---
 
 function githubStatusLine(source) {

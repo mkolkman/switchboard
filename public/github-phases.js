@@ -114,7 +114,95 @@
     return (items || []).filter(item => !phaseOf(item, by, definition));
   }
 
-  const api = { phaseSources, pickPhaseSource, fieldDefinition, phasesFrom, unphasedItems, PHASE_FIELD_TYPES };
+  const isOpen = (item) => item.status !== 'done' && item.status !== 'dropped';
+  const itemRef = (item) => `${item.repo}#${item.number}`;
+
+  /** Whether `by` takes only phases that already exist: a single-select's options are set on GitHub. */
+  function phasesAreFixed(by, definition) {
+    return by.kind === 'field' && definition?.type === 'single_select';
+  }
+
+  /** The open issues without a phase, the ones a sort session places. */
+  function unphasedOpen(unphased) {
+    return (unphased || []).filter(i => i.number && !i.isPullRequest && isOpen(i));
+  }
+
+  /**
+   * The prompt for a session that sorts the plan's open issues without a
+   * phase into its phases, or into new ones where none fits. The session
+   * writes nothing to GitHub; its answer ends with a <phases> list that
+   * phaseAssignmentsFrom reads, and Switchboard makes the changes.
+   */
+  function phaseSortPrompt(source, { by, def, phases, unphased }) {
+    const fixed = phasesAreFixed(by, def);
+    const numeric = by.kind === 'field' && def?.type === 'number';
+    const holder = by.kind === 'milestone' ? 'milestones' : `the "${by.label || by.name}" field`;
+    const read = source.kind === 'issue'
+      ? `Read the plan first, comments included: \`gh issue view ${source.url} --comments\`.`
+      : `The plan is the GitHub Project ${source.url}. Its README:\n\n${String(source.plan?.body || '(empty)').trim()}`;
+    const phaseLines = phases.length
+      ? phases.flatMap(p => [`- ${p.title}${p.complete ? ' (done)' : ''}`, ...p.items.slice(0, 8).map(i => `  - ${itemRef(i)}: ${i.title}`)])
+      : ['(none yet)'];
+    const rule = fixed
+      ? `Use only these phases: they are the options of ${holder} and cannot be added from here. An issue that fits none of them goes in the list as "none".`
+      : `Put each issue in the phase it belongs to. When none fits, name a new phase in the style of the existing ones${numeric ? ' (a number)' : ''}, and give issues that belong together the same new phase. Prefer an open phase over one that is done.`;
+    return [
+      `Sort the issues without a phase into the phases of the plan "${source.title}" (${source.url}). Phases are ${holder}.`,
+      read,
+      '',
+      'The phases, with some of their issues:',
+      ...phaseLines,
+      '',
+      'Issues without a phase:',
+      ...unphasedOpen(unphased).map(i => `- ${itemRef(i)}: ${i.title}`),
+      '',
+      `Read each of these issues (\`gh issue view <number> -R <owner/repo>\`) and decide where it goes. ${rule}`,
+      'Change nothing on GitHub yourself: Switchboard makes the changes from your answer once I agree.',
+      'End your answer with the list, one issue per line, exactly like this:',
+      '',
+      '<phases>',
+      'owner/repo#123 -> Phase title',
+      '</phases>',
+      '',
+      'Above the list, say in a sentence or two why, for any issue that was not obvious.',
+    ].join('\n');
+  }
+
+  /**
+   * The assignments in a sort session's answer: its last <phases> list, read
+   * against the plan. A title that matches a phase (case aside) takes that
+   * phase's spelling; another is a new phase, unless phases are fixed. Lines
+   * for issues that are not waiting for a phase are left out. Returns null
+   * when the answer has no list.
+   */
+  function phaseAssignmentsFrom(text, { by, def, phases, unphased }) {
+    const blocks = [...String(text || '').matchAll(/<phases>([\s\S]*?)<\/phases>/gi)];
+    if (!blocks.length) return null;
+    const fixed = phasesAreFixed(by, def);
+    const numeric = by.kind === 'field' && def?.type === 'number';
+    const waiting = new Map(unphasedOpen(unphased).map(i => [itemRef(i).toLowerCase(), i]));
+    const known = new Map(phases.map(p => [p.title.trim().toLowerCase(), p.title]));
+    const assignments = [];
+    const skipped = [];
+    const seen = new Set();
+    for (const line of blocks[blocks.length - 1][1].split('\n')) {
+      const m = line.match(/^\s*[-*]?\s*`?([\w.-]+\/[\w.-]+#\d+)`?\s*(?:->|→)\s*(.+?)\s*$/);
+      if (!m) continue;
+      const item = waiting.get(m[1].toLowerCase());
+      if (!item || seen.has(item)) continue;
+      seen.add(item);
+      const wanted = m[2].replace(/^["'`]+|["'`]+$/g, '').trim();
+      if (!wanted || /^none$/i.test(wanted)) { skipped.push({ item, reason: 'no phase fits' }); continue; }
+      const existing = known.get(wanted.toLowerCase());
+      if (existing) { assignments.push({ item, title: existing, isNew: false }); continue; }
+      if (fixed) { skipped.push({ item, reason: `"${wanted}" is not an option` }); continue; }
+      if (numeric && !Number.isFinite(Number(wanted))) { skipped.push({ item, reason: `"${wanted}" is not a number` }); continue; }
+      assignments.push({ item, title: wanted, isNew: true });
+    }
+    return { assignments, skipped };
+  }
+
+  const api = { phaseSources, pickPhaseSource, fieldDefinition, phasesFrom, unphasedItems, phasesAreFixed, unphasedOpen, phaseSortPrompt, phaseAssignmentsFrom, PHASE_FIELD_TYPES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else Object.assign(root, api);
 })(typeof window !== 'undefined' ? window : globalThis);
