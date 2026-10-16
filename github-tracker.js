@@ -1399,6 +1399,19 @@ async function setThreadResolved(threadId, resolved) {
   return { ok: true };
 }
 
+/** The newest pull request whose head is `branch`, open or not: { key, number, title, state, url } or null. */
+async function pullRequestForBranch(owner, repo, branch) {
+  const data = await graphql(`query($owner: String!, $repo: String!, $branch: String!) {
+    repository(owner: $owner, name: $repo) {
+      nameWithOwner
+      pullRequests(headRefName: $branch, first: 1, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { number title state url } }
+    }
+  }`, { owner, repo, branch });
+  const r = data?.repository;
+  const pr = r?.pullRequests?.nodes?.[0];
+  return pr ? { key: `${r.nameWithOwner}#${pr.number}`, number: pr.number, title: pr.title, state: pr.state, url: pr.url } : null;
+}
+
 /**
  * The GitHub view's two lists: open PRs you opened, and open PRs that ask for
  * your review. Shaped like a tracker's items (one PR each), so the PR panel
@@ -1456,7 +1469,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, getRefStates, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,

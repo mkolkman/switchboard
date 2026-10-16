@@ -3,6 +3,7 @@ const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { execFile } = require('child_process');
 const pty = require('node-pty');
 const log = require('electron-log');
 // getFolderIndexMtimeMs moved to session-cache.js
@@ -51,7 +52,7 @@ const { createTaskManager } = require('./task-manager');
 const { lastAssistantMessage, currentActivity } = require('./session-preview');
 const { createPreviewWatcher } = require('./preview-urls');
 const { createPreviewMcpServer } = require('./preview-mcp');
-const { repoInfoForPaths, findLocalClones } = require('./repo-info');
+const { repoInfoForPath, repoInfoForPaths, findLocalClones } = require('./repo-info');
 const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
@@ -101,6 +102,7 @@ const {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   copySessionAssignment, moveSessionAssignment, rekeyPlanLinks,
+  addSessionLink, listSessionLinks, rekeySessionLinks,
   closeDb,
 } = require('./db');
 const dbModule = require('./db');
@@ -1747,6 +1749,65 @@ ipcMain.handle('helpscout-draft-reply', (_event, sessionId) => {
   }
 });
 
+// --- IPC: what a session works on (session-context.js) ---
+
+ipcMain.handle('session-links', guarded(() => listSessionLinks()));
+ipcMain.handle('add-session-link', guarded((link) => {
+  if (!link?.sessionId || !link?.kind || !link?.ref) throw new Error('A session link needs sessionId, kind and ref.');
+  addSessionLink(link);
+  return {};
+}));
+
+const NOT_A_PR_BRANCH = new Set(['main', 'master', 'develop', 'development', 'staging']);
+const branchPrCache = new Map(); // "owner/repo|branch" → { at, pr }
+
+/**
+ * The folder a session last worked in and the branch Claude recorded there,
+ * from the newest entry of its transcript that has both. That gitBranch is the
+ * branch of the folder it started in; a session that moved into a worktree
+ * says so only through cwd, so the caller reads cwd's own branch.
+ */
+function sessionBranch(row) {
+  const file = transcriptPath(row);
+  const size = fs.statSync(file).size;
+  const length = Math.min(size, 1024 * 1024);
+  const fd = fs.openSync(file, 'r');
+  const buf = Buffer.alloc(length);
+  try { fs.readSync(fd, buf, 0, length, size - length); } finally { fs.closeSync(fd); }
+  const lines = buf.toString('utf8').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"gitBranch"')) continue;
+    try {
+      const entry = JSON.parse(lines[i]);
+      if (entry.cwd) return { branch: entry.gitBranch || null, cwd: entry.cwd };
+    } catch {}
+  }
+  return null;
+}
+
+// The pull request of the branch a session works on, if any: a session in a
+// worktree for a PR gets that PR as its context without being started from it.
+ipcMain.handle('session-branch-pr', guarded(async (sessionId) => {
+  const row = getCachedSession(sessionId);
+  if (!row || (row.runtime && row.runtime !== 'claude')) return { pr: null };
+  let found = null;
+  try { found = sessionBranch(row); } catch { return { pr: null }; }
+  if (!found) return { pr: null };
+  // The folder's own branch now; a detached HEAD (a rebase in progress) or a gone folder leaves Claude's.
+  const own = await new Promise(resolve => execFile('git', ['-C', found.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }, (err, out) => resolve(err ? null : String(out).trim())));
+  if (own && own !== 'HEAD') found.branch = own;
+  if (!found.branch || found.branch === 'HEAD' || NOT_A_PR_BRANCH.has(found.branch)) return { pr: null };
+  const repo = repoInfoForPath(found.cwd);
+  if (!repo) return { pr: null };
+  const key = `${repo.owner}/${repo.name}|${found.branch}`;
+  const cached = branchPrCache.get(key);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return { pr: cached.pr, branch: found.branch };
+  const pr = await githubTracker.pullRequestForBranch(repo.owner, repo.name, found.branch).catch(() => undefined);
+  if (pr === undefined) return { pr: null, branch: found.branch };
+  branchPrCache.set(key, { at: Date.now(), pr });
+  return { pr, branch: found.branch };
+}));
+
 // --- IPC: archive-session ---
 
 ipcMain.handle('archive-session', (_event, sessionId, archived) => {
@@ -2515,6 +2576,7 @@ function resolvePendingLaunches(candidatePaths) {
         } catch (err) { log.error('[projects] assignment move failed', err); }
       }
       try { dbModule.rekeyScheduleSession(tempId, realId); } catch (err) { log.error('[schedule] rekey failed', err); }
+      try { rekeySessionLinks(tempId, realId); } catch (err) { log.error('[session-links] rekey failed', err); }
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('session-detected', tempId, realId);
       }

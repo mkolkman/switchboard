@@ -327,6 +327,20 @@ db.exec(`
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_plan_links_project ON plan_links(projectId)');
 
+// What a session works on outside a project plan: a pull request or issue
+// (owner/repo#n), a Help Scout ticket, a Grafana alert or log search. Written
+// when a session is started from one of those (session-context.js reads them).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS session_links (
+    sessionId TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    label TEXT,
+    at TEXT NOT NULL,
+    PRIMARY KEY (sessionId, kind, ref)
+  )
+`);
+
 // --- FTS5 full-text search ---
 db.exec(`
   CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
@@ -497,6 +511,13 @@ const stmts = {
   planLinksByProject: db.prepare('SELECT * FROM plan_links WHERE projectId = ? ORDER BY at'),
   planLinksDeleteByProject: db.prepare('DELETE FROM plan_links WHERE projectId = ?'),
   planLinksRekey: db.prepare('UPDATE plan_links SET sessionId = ? WHERE sessionId = ?'),
+  // Session links
+  sessionLinkUpsert: db.prepare(`
+    INSERT INTO session_links (sessionId, kind, ref, label, at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(sessionId, kind, ref) DO UPDATE SET label = excluded.label
+  `),
+  sessionLinksAll: db.prepare('SELECT * FROM session_links ORDER BY at'),
+  sessionLinksRekey: db.prepare('UPDATE OR IGNORE session_links SET sessionId = ? WHERE sessionId = ?'),
 };
 
 function getMeta(sessionId) {
@@ -752,6 +773,18 @@ function rekeyPlanLinks(fromId, toId) {
   return stmts.planLinksRekey.run(toId, fromId).changes;
 }
 
+function addSessionLink({ sessionId, kind, ref, label = null }) {
+  stmts.sessionLinkUpsert.run(String(sessionId), String(kind), String(ref), label == null ? null : String(label), new Date().toISOString());
+}
+
+function listSessionLinks() {
+  return stmts.sessionLinksAll.all();
+}
+
+function rekeySessionLinks(fromId, toId) {
+  return stmts.sessionLinksRekey.run(toId, fromId).changes;
+}
+
 function deleteProject(id) {
   deleteProjectTx(id);
 }
@@ -942,6 +975,6 @@ module.exports = {
   getImportedScheduleFiles, importLegacySchedule,
   recordScheduleRun, rekeyScheduleSession,
   setSessionAssignment, copySessionAssignment, moveSessionAssignment,
-  insertPlanLink, listPlanLinks, rekeyPlanLinks,
+  insertPlanLink, listPlanLinks, rekeyPlanLinks, addSessionLink, listSessionLinks, rekeySessionLinks,
   closeDb,
 };

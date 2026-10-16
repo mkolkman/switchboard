@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   readSessionJsonl: (sessionId) => ipcRenderer.invoke('read-session-jsonl', sessionId),
   getSessionLastMessage: (sessionId) => ipcRenderer.invoke('get-session-last-message', sessionId),
   getSessionGlance: (sessionId) => ipcRenderer.invoke('get-session-glance', sessionId),
+  getSessionLinks: () => ipcRenderer.invoke('session-links'),
+  addSessionLink: (link) => ipcRenderer.invoke('add-session-link', link),
+  getSessionBranchPr: (sessionId) => ipcRenderer.invoke('session-branch-pr', sessionId),
 
   // Settings
   getSetting: (key) => ipcRenderer.invoke('get-setting', key),
