@@ -7336,6 +7336,19 @@ body.fp-resizing webview { pointer-events: none; }
   margin-top: 1px;
 }
 
+/* The project a session is filed under, ahead of its repo. */
+.session-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: -2px;
+}
+.session-project .proj-mark { font-size: 7px !important; letter-spacing: 0; }
+.session-project-name {
+  color: #a9a9c4;
+  font-weight: 600;
+}
+
 .project-header .project-group-count {
   flex: none;
   font-size: 10px;
