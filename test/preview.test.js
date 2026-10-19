@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const { findPreviewUrls, createPreviewWatcher } = require('../preview-urls');
-const { handleRpc, previewTarget, prFilesTarget, createPreviewMcpServer, TOOL_ID, PR_FILES_TOOL_ID } = require('../preview-mcp');
+const { handleRpc, previewTarget, prFilesTarget, prFilesReply, createPreviewMcpServer, TOOL_ID, PR_FILES_TOOL_ID } = require('../preview-mcp');
 
 test('findPreviewUrls finds dev servers and artifact links, not other sites', () => {
   const out = '  VITE ready\n  \x1b[32m➜\x1b[39m  Local:   \x1b[36mhttp://localhost:\x1b[1m5173\x1b[22m/\x1b[39m\n'
@@ -54,17 +54,33 @@ test('prFilesTarget takes a PR by key or URL and the files of a step with their 
   assert.ok(prFilesTarget({ pr: 'owner/repo#5', files: [] }).error);
 });
 
-test('handleRpc offers show_pr_files only with a handler, and sends the step for the session', () => {
+test('handleRpc offers show_pr_files only with a handler, and sends the step for the session', async () => {
   const onOpen = () => true;
   const steps = [];
-  const onShow = (sid, step) => { steps.push([sid, step.pr, step.files.length]); return true; };
+  const onShow = (sid, step) => { steps.push([sid, step.pr, step.files.length]); return Promise.resolve({ shown: true, missing: [] }); };
   assert.deepEqual(handleRpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, 's1', onOpen).result.tools.map(t => t.name), ['open_preview']);
   assert.deepEqual(handleRpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, 's1', onOpen, onShow).result.tools.map(t => t.name), ['open_preview', 'show_pr_files']);
-  const res = handleRpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'show_pr_files', arguments: { pr: 'o/r#1', files: [{ path: 'a.js' }] } } }, 's1', onOpen, onShow);
+  const res = await handleRpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'show_pr_files', arguments: { pr: 'o/r#1', files: [{ path: 'a.js' }] } } }, 's1', onOpen, onShow);
   assert.ok(!res.result.isError);
+  assert.match(res.result.content[0].text, /^Showing 1 file of o\/r#1/);
   assert.deepEqual(steps, [['s1', 'o/r#1', 1]]);
-  assert.ok(handleRpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'show_pr_files', arguments: { pr: 'nope', files: ['a.js'] } } }, 's1', onOpen, onShow).result.isError);
+  assert.ok((await handleRpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'show_pr_files', arguments: { pr: 'nope', files: ['a.js'] } } }, 's1', onOpen, onShow)).result.isError);
   assert.ok(handleRpc({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'show_pr_files', arguments: {} } }, 's1', onOpen).error);
+});
+
+// The bug behind this: a step for a session that was not on screen was queued,
+// but the tool still said "Showing ... beside the session".
+test('show_pr_files answers with what the window did, never success it did not have', async () => {
+  const step = prFilesTarget({ pr: 'o/r#1', files: ['a.js', 'b.js'] });
+  const queued = prFilesReply(step, { queued: true });
+  assert.ok(!/^Showing/.test(queued.content[0].text));
+  assert.match(queued.content[0].text, /not on screen/);
+  assert.ok(prFilesReply(step, { error: 'None of these files are in o/r#1' }).isError);
+  assert.ok(prFilesReply(step, null).isError);
+  assert.match(prFilesReply(step, { shown: true, missing: ['b.js'] }).content[0].text, /^Showing 1 file of o\/r#1.*Not in the PR, so not shown: b\.js/);
+  const failing = await handleRpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'show_pr_files', arguments: { pr: 'o/r#1', files: ['a.js'] } } }, 's1', () => true, () => Promise.reject(new Error('window gone')));
+  assert.ok(failing.result.isError);
+  assert.match(failing.result.content[0].text, /window gone/);
 });
 
 test('a server with a step handler allows both tools', async () => {

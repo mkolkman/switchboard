@@ -136,13 +136,28 @@ function sendPreview(sessionId, url, source) {
   mainWindow.webContents.send('preview-open', session?.realSessionId || sessionId, url, source);
   return true;
 }
-// A walkthrough's step: its files in Files changed beside the session (session-context.js).
+// A walkthrough's step: its files in Files changed beside the session
+// (session-context.js). Resolves with what the window did: { shown, missing },
+// { queued } or { error }, so the tool never reports what did not happen.
+const prStepReplies = new Map(); // request id → resolve
+const PR_STEP_REPLY_MS = 8000;
 function sendPrStep(sessionId, step) {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ error: 'Switchboard has no window to show them in.' });
   const session = activeSessions.get(sessionId);
-  mainWindow.webContents.send('pr-step-show', session?.realSessionId || sessionId, step);
-  return true;
+  const requestId = require('crypto').randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      prStepReplies.delete(requestId);
+      resolve({ error: 'Switchboard did not answer in time; the files may not be shown.' });
+    }, PR_STEP_REPLY_MS);
+    prStepReplies.set(requestId, (result) => { clearTimeout(timer); resolve(result || { error: 'No answer from the window.' }); });
+    mainWindow.webContents.send('pr-step-show', session?.realSessionId || sessionId, step, requestId);
+  });
 }
+ipcMain.on('pr-step-result', (_event, requestId, result) => {
+  const done = prStepReplies.get(requestId);
+  if (done) { prStepReplies.delete(requestId); done(result); }
+});
 const previewMcp = createPreviewMcpServer({
   onOpen: (sessionId, url) => sendPreview(sessionId, url, 'tool'),
   onShowPrFiles: (sessionId, step) => sendPrStep(sessionId, step),

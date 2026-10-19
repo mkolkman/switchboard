@@ -770,6 +770,8 @@ function showSession(sessionId) {
   const split = typeof onSessionSplitShown === 'function' && onSessionSplitShown(sessionId);
   if (!split && typeof onSessionShown === 'function') onSessionShown(sessionId);
   if (typeof renderSessionContextHeader === 'function') renderSessionContextHeader();
+  // A walkthrough step it sent while out of sight opens beside it now (session-context.js).
+  if (typeof applyPendingPrStep === 'function') applyPendingPrStep(sessionId);
 }
 
 function setupDragAndDrop(container, getSessionId) {

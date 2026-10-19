@@ -41,6 +41,27 @@ function openGithubReviewStep(project, prKey, step, title = '') {
   paintGithubReview(project);
 }
 
+/**
+ * Once the PR's files are read: whether the step's files are among them, for
+ * the tool's answer. { shown, missing } or { error }.
+ */
+async function githubReviewStepOutcome(project, step) {
+  const state = githubTabState(project.id);
+  const same = () => state.review?.prKey === step.pr;
+  for (let i = 0; i < 60 && same() && !state.review.files && !state.review.error; i++) await new Promise(r => setTimeout(r, 100));
+  const review = state.review;
+  if (!same()) return { error: 'Files changed moved on to another PR before these files showed.' };
+  if (review.error) return { error: `Could not read the files of ${step.pr}: ${review.error}` };
+  // Still reading: they show when they arrive.
+  if (!review.files) return { shown: true, missing: [] };
+  const have = new Set(review.files.map(f => f.path));
+  const missing = step.files.map(f => f.path).filter(p => !have.has(p));
+  if (missing.length === step.files.length) {
+    return { error: `None of these files are in ${step.pr}: ${missing.join(', ')}. Give paths from the repository root, as the PR lists them.` };
+  }
+  return { shown: true, missing };
+}
+
 /** The files the tree shows: a step's own, unless it shows them all or none of them are in the PR. */
 function githubReviewShownFiles(review) {
   const files = review.files || [];

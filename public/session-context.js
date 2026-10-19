@@ -250,8 +250,6 @@ function onSessionSplitShown(sessionId) {
   terminalArea.style.display = '';
   if (spec.onShown) spec.onShown(sessionId);
   requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
-  // A walkthrough step that came in while the session was out of sight.
-  if (pendingPrSteps.has(sessionId)) setTimeout(() => showPrStepBeside(sessionId, pendingPrSteps.get(sessionId)));
   return true;
 }
 
@@ -305,12 +303,13 @@ function sessionSplitActive() {
 // it explains. With the session on screen, Files changed of that PR opens
 // beside it, on those files: in the project the session was started from, else
 // in the GitHub tab. Out of sight, the step waits until the session is shown
-// beside a page again.
+// (applyPendingPrStep). The tool hears back what happened (preview-mcp.js).
 
 const pendingPrSteps = new Map(); // sessionId → { pr, title, files }
 
-function showPrStepBeside(sessionId, step) {
-  if (sessionId !== activeSessionId || terminalArea.style.display === 'none') { pendingPrSteps.set(sessionId, step); return; }
+/** Show a step beside its session: { shown, missing }, { queued } or { error }. */
+async function showPrStepBeside(sessionId, step) {
+  if (sessionId !== activeSessionId || terminalArea.style.display === 'none' || gridViewActive) { pendingPrSteps.set(sessionId, step); return { queued: true }; }
   pendingPrSteps.delete(sessionId);
   const inProject = projectSplitSessions.has(sessionId) ? prInProject(step.pr) : {};
   const project = inProject.project || GITHUB_VIEW_PROJECT;
@@ -326,9 +325,19 @@ function showPrStepBeside(sessionId, step) {
   const link = (sessionLinkRows.get(sessionId) || []).find(l => l.kind === 'pr' && String(l.ref).toLowerCase() === step.pr.toLowerCase());
   openGithubReviewStep(project, step.pr, step, link?.label || '');
   if (!sessionSplitActive()) showSession(sessionId);
+  return githubReviewStepOutcome(project, step);
 }
 
-window.api.onPrStepShow((sessionId, step) => showPrStepBeside(sessionId, step));
+/** From showSession: a step that came in while the session was out of sight. */
+function applyPendingPrStep(sessionId) {
+  const step = pendingPrSteps.get(sessionId);
+  if (step && !gridViewActive) setTimeout(() => showPrStepBeside(sessionId, step));
+}
+
+window.api.onPrStepShow(async (sessionId, step, requestId) => {
+  const result = await showPrStepBeside(sessionId, step).catch(err => ({ error: err?.message || String(err) }));
+  if (requestId) window.api.prStepResult(requestId, result);
+});
 
 // --- The status of what a session works on ---
 // A PR's state, reviews and checks, and a ticket's status, for its label and

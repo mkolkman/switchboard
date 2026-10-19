@@ -123,7 +123,22 @@ function prFilesTarget(args) {
   return { pr: `${m[1]}/${m[2]}#${m[3]}`, title: String(args?.step || '').trim().slice(0, 120), files };
 }
 
-/** One JSON-RPC request in, its response out (null for a notification). */
+/** The tool's answer for what the window reported: { shown, queued, missing } or { error }. */
+function prFilesReply(step, result) {
+  const text = (t) => [{ type: 'text', text: t }];
+  if (!result || result.error) return { content: text(result?.error || 'Switchboard has no window to show them in.'), isError: true };
+  if (result.queued) {
+    return { content: text('Not shown yet: this session is not on screen in Switchboard. The files open beside it as soon as the user opens the session. Mention that to the user and go on.') };
+  }
+  const missing = result.missing || [];
+  const shown = step.files.length - missing.length;
+  return { content: text(`Showing ${shown} file${shown === 1 ? '' : 's'} of ${step.pr} beside the session.${missing.length ? ` Not in the PR, so not shown: ${missing.join(', ')}.` : ''}`) };
+}
+
+/**
+ * One JSON-RPC request in, its response out (null for a notification). A
+ * show_pr_files call answers with a promise: it waits for the window.
+ */
 function handleRpc(msg, sessionId, onOpen, onShowPrFiles = null) {
   const reply = (result) => ({ jsonrpc: '2.0', id: msg.id, result });
   const fail = (code, message) => ({ jsonrpc: '2.0', id: msg.id, error: { code, message } });
@@ -143,8 +158,9 @@ function handleRpc(msg, sessionId, onOpen, onShowPrFiles = null) {
       if (msg.params?.name === PR_FILES_TOOL_NAME && onShowPrFiles) {
         const step = prFilesTarget(msg.params?.arguments);
         if (step.error) return reply({ content: [{ type: 'text', text: step.error }], isError: true });
-        const shown = onShowPrFiles(sessionId, step);
-        return reply({ content: [{ type: 'text', text: shown ? `Showing ${step.files.length} file${step.files.length === 1 ? '' : 's'} of ${step.pr} beside the session.` : 'Switchboard has no window to show them in.' }] });
+        // What the window did with it, not that it was sent: shown, waiting, or why not.
+        return Promise.resolve(onShowPrFiles(sessionId, step)).catch(err => ({ error: err?.message || String(err) }))
+          .then(result => reply(prFilesReply(step, result)));
       }
       if (msg.params?.name !== TOOL_NAME) return fail(-32602, `Unknown tool ${msg.params?.name}`);
       const target = previewTarget(msg.params?.arguments?.url);
@@ -190,9 +206,11 @@ function createPreviewMcpServer({ onOpen, onShowPrFiles = null, log, scriptDir }
           return;
         }
         const list = Array.isArray(msg) ? msg : [msg];
-        const out = list.map(m => handleRpc(m, match[2], onOpen, onShowPrFiles)).filter(Boolean);
-        if (!out.length) { res.writeHead(202).end(); return; }
-        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(Array.isArray(msg) ? out : out[0]));
+        Promise.all(list.map(m => handleRpc(m, match[2], onOpen, onShowPrFiles))).then((answers) => {
+          const out = answers.filter(Boolean);
+          if (!out.length) { res.writeHead(202).end(); return; }
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(Array.isArray(msg) ? out : out[0]));
+        });
       });
     });
     await new Promise((resolve, reject) => {
@@ -231,4 +249,4 @@ function createPreviewMcpServer({ onOpen, onShowPrFiles = null, log, scriptDir }
   return { start, launchArgs, launchEnv, stop };
 }
 
-module.exports = { createPreviewMcpServer, handleRpc, previewTarget, prFilesTarget, browserScript, TOOL_ID, PR_FILES_TOOL_ID };
+module.exports = { createPreviewMcpServer, handleRpc, previewTarget, prFilesTarget, prFilesReply, browserScript, TOOL_ID, PR_FILES_TOOL_ID };
