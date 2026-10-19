@@ -7577,6 +7577,7 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-request-review[disabled], .gh-unrequest[disabled] { opacity: 0.35; cursor: not-allowed; }
 /* Starting a session on a PR, in the heading of its sessions. */
 .gh-pr-session { gap: 4px; text-transform: none; letter-spacing: 0; }
+.gh-pr-session + .gh-pr-session { margin-left: 6px; }
 .gh-sessions .gh-sec-h:last-child { margin-bottom: 0; }
 .gh-review { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 10px; }
 .gh-review--approved { color: #6fcf8f; }
@@ -8175,3 +8176,25 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gfv-ctx { padding: 4px 0 8px 24px; }
 .gfv-ctx-line { display: flex; gap: 8px; padding: 1px 0; color: #9a9ab0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gfv-ctx-line.here { color: #e0e0f0; background: rgba(120,130,255,0.1); }
+
+/* A PR walkthrough (session-context.js): the session on the left, under a brief
+   of the PR beside a PR or plan, and Files changed on the right. */
+#session-brief { display: none; }
+#main.pr-walk--brief #session-brief { display: block; flex-shrink: 0; padding: 10px 16px 9px; background: #15151c; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.swb-place { font-size: 11px; color: #8a8aa0; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swb-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.swb-title .session-ctx { margin-left: 0; flex: none; max-width: none; font-size: 11px; }
+.swb-name { min-width: 0; font-size: 13px; font-weight: 700; color: #d0d0e8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swb-intro { margin-top: 5px; font-size: 12px; color: #a8aec8; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.swb-intro p { margin: 0; }
+#main.pr-walk #terminal-area { left: 0; right: auto; width: 50%; }
+#main.pr-walk #github-viewer { left: 50%; right: 0; border-left: 1px solid rgba(255,255,255,0.06); }
+
+/* Files changed in a narrow place: the tree above the diff. */
+.gh-review-view { container-type: inline-size; }
+@container (max-width: 700px) {
+  .gh-review-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .gh-review-tree { max-height: 28vh; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.055); padding-bottom: 4px; }
+}
+/* Beside a walkthrough its session is already there: room for the step's title instead. */
+#main.pr-walk #gh-review-session, #main.pr-walk #gh-review-walkthrough { display: none; }

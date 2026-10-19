@@ -49,7 +49,8 @@ function githubRoot(project) {
 
 /** Whether this context's PR views are on screen: its tab, its window. */
 function githubContextVisible(project) {
-  if (project?.isGithubView) return typeof activeTab !== 'undefined' && activeTab === 'github' && githubRoot(project)?.style.display !== 'none';
+  // Also beside a PR walkthrough, in any tab (session-context.js).
+  if (project?.isGithubView) return typeof activeTab !== 'undefined' && (activeTab === 'github' || mainEl.classList.contains('pr-walk')) && githubRoot(project)?.style.display !== 'none';
   return selectedProject()?.id === project.id && projectTab(project) === 'plan';
 }
 
@@ -1151,7 +1152,11 @@ async function startPrSessionByKey(project, prKey, kind, itemKey) {
     if (!pr || pr.error) { alert(`Could not read ${prKey}: ${pr?.error || 'no answer from GitHub.'}`); return; }
   }
   const k = PR_SESSION_KINDS[kind];
-  await startPrSession(project, pr, state, { prompt: k.prompt(pr), label: k.running, focus: k.focus });
+  // A walkthrough opens in its own layout from the first show (session-context.js).
+  if (kind === 'walkthrough') prWalkLaunching = prKey;
+  try {
+    await startPrSession(project, pr, state, { prompt: k.prompt(pr), label: k.running, focus: k.focus });
+  } finally { prWalkLaunching = null; }
   if (itemKey && !k.focus && state.selection?.view !== prKey) selectGithubItem(project, itemKey, prKey);
   else if (state.selection) paintGithubPanel(project);
 }
@@ -1289,11 +1294,15 @@ function githubPrSessionButton(pr) {
   return `<button type="button" class="ws-btn ws-btn--sm gh-pr-session" id="gh-pr-session" title="Start a Claude session on this PR: review it, work through its review, or one that waits for you">${ICONS.claude(12)}<span>Start session</span>${PICONS.chevronDown(10)}</button>`;
 }
 
+function githubPrWalkthroughButton() {
+  return `<button type="button" class="ws-btn ws-btn--sm gh-pr-session" id="gh-pr-walkthrough" title="A Claude session that walks you through this PR step by step (/pr-walkthrough), with each step's files beside it">${ICONS.claude(12)}<span>Walkthrough</span></button>`;
+}
+
 function githubSessionsSection(project, pr) {
   const ids = prSessionIds(project, `${pr.repo}#${pr.number}`);
   const open = pr.state === 'OPEN';
-  if (!ids.length && !open) return '';
-  const start = open ? githubPrSessionButton(pr) : '';
+  // A walkthrough also reads well after the merge; the other sessions are for open PRs.
+  const start = githubPrWalkthroughButton() + (open ? githubPrSessionButton(pr) : '');
   return `<div class="gh-sec gh-sessions"><div class="gh-sec-h">Claude on this PR<span class="ws-flex"></span>${start}</div>${ids.map(id =>
     `<div class="gh-sess-row" data-session="${escapeHtml(id)}">${prSessionRowInner(id)}</div>`).join('')}</div>`;
 }
@@ -1688,6 +1697,8 @@ function bindGithubPrActions(project, panel, pr) {
   }
   const resolveBtn = panel.querySelector('#gh-resolve');
   if (resolveBtn) resolveBtn.onclick = () => resolveConflictsWithClaude(project, pr);
+  const walkBtn = panel.querySelector('#gh-pr-walkthrough');
+  if (walkBtn) walkBtn.onclick = () => startPrSessionByKey(project, `${pr.repo}#${pr.number}`, 'walkthrough');
   const sessionBtn = panel.querySelector('#gh-pr-session');
   if (sessionBtn) {
     sessionBtn.onclick = (e) => showContextMenu(

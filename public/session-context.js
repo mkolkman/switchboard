@@ -242,6 +242,8 @@ function registerSessionSplit(tab, spec) {
 
 /** From showSession: put the page back beside the session, in a tab that has one. */
 function onSessionSplitShown(sessionId) {
+  // A PR walkthrough: the session on the left, the PR's files on the right.
+  if (prWalkApplies(sessionId)) { showPrWalk(sessionId); return true; }
   const spec = sessionSplits.get(activeTab);
   if (!spec || gridViewActive || (spec.applies && !spec.applies(sessionId))) return false;
   mainEl.classList.add(spec.className);
@@ -255,6 +257,16 @@ function onSessionSplitShown(sessionId) {
 
 /** Undo any split: the page alone again. */
 function leaveSessionSplit() {
+  if (mainEl.classList.contains('pr-walk')) {
+    mainEl.classList.remove('pr-walk', 'pr-walk--brief');
+    if (activeTab === 'github') terminalArea.style.display = 'none';
+    else githubViewer.style.display = 'none';
+    // The Sessions tab: the session alone until its next step.
+    if (activeTab === 'sessions') prWalkSteps.delete(activeSessionId);
+    if (activeTab === 'projects') { terminalArea.style.display = 'none'; projectViewer.style.display = ''; }
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    renderSessionContextHeader();
+  }
   for (const [tab, spec] of sessionSplits) {
     if (!mainEl.classList.contains(spec.className)) continue;
     mainEl.classList.remove(spec.className);
@@ -295,37 +307,102 @@ registerSessionSplit('projects', {
 });
 
 function sessionSplitActive() {
-  return [...sessionSplits.values()].some(spec => mainEl.classList.contains(spec.className));
+  return mainEl.classList.contains('pr-walk') || [...sessionSplits.values()].some(spec => mainEl.classList.contains(spec.className));
 }
 
-// --- A walkthrough's step beside its session ---
-// A session's show_pr_files tool (preview-mcp.js) sends the files of the step
-// it explains. With the session on screen, Files changed of that PR opens
-// beside it, on those files: in the project the session was started from, else
-// in the GitHub tab. Out of sight, the step waits until the session is shown
-// (applyPendingPrStep). The tool hears back what happened (preview-mcp.js).
+// --- A PR walkthrough: the session on the left, the PR's files on the right ---
+// A walkthrough session (/pr-walkthrough) sends the files of each step it
+// explains through its show_pr_files tool (preview-mcp.js). They show in Files
+// changed (the GitHub tab's review, in githubViewer) right of the session, in
+// whatever tab it is open: in the Sessions tab from its first step on, in the
+// GitHub tab and beside a project's plan from the start, there under a short
+// brief of the PR and plan item. Out of sight, a step waits until the session
+// is shown (applyPendingPrStep). The tool hears back what happened.
 
 const pendingPrSteps = new Map(); // sessionId → { pr, title, files }
+const prWalkSteps = new Map(); // sessionId → the last step shown
+const prWalkDetails = new Map(); // PR key (lower case) → its detail for the brief, a promise while read
+let prWalkLaunching = null; // the PR a walkthrough is being started on (startPrSessionByKey)
+
+/** A session that walks through a PR: started as one, or one that sent a step. */
+function isPrWalkSession(sessionId) {
+  if (prWalkLaunching || prWalkSteps.has(sessionId) || pendingPrSteps.has(sessionId)) return true;
+  if (typeof prSessionLabels !== 'undefined' && prSessionLabels.get(sessionId) === PR_SESSION_KINDS.walkthrough.running) return true;
+  const session = sessionMap.get(sessionId) || openSessions.get(sessionId)?.session;
+  return /^\/pr-walkthrough\b/.test(String(session?.firstPrompt || '').trim());
+}
+
+/** The PR a walkthrough session is on: its last step's, else the one it is linked to. */
+function prWalkKey(sessionId) {
+  const step = prWalkSteps.get(sessionId) || pendingPrSteps.get(sessionId);
+  if (step) return step.pr;
+  const link = (sessionLinkRows.get(sessionId) || []).find(l => l.kind === 'pr');
+  if (link) return String(link.ref);
+  return prWalkLaunching || sessionContexts(sessionId).find(c => c.kind === 'pr')?.ref || null;
+}
+
+/** Whether a session on screen takes the walkthrough layout in this tab. */
+function prWalkApplies(sessionId) {
+  if (gridViewActive || !isPrWalkSession(sessionId) || !prWalkKey(sessionId)) return false;
+  if (prWalkSteps.has(sessionId)) return true;
+  return activeTab === 'github' || (activeTab === 'projects' && (projectSplitSessions.has(sessionId) || projectSplitNext));
+}
+
+function showPrWalk(sessionId) {
+  const key = prWalkKey(sessionId);
+  // Beside a PR or plan the session gets a brief of what it walks through.
+  const brief = activeTab !== 'sessions';
+  mainEl.classList.add('pr-walk');
+  mainEl.classList.toggle('pr-walk--brief', brief);
+  if (activeTab === 'projects') projectViewer.style.display = 'none';
+  githubViewer.style.display = 'flex';
+  placeholder.style.display = 'none';
+  terminalArea.style.display = '';
+  const state = githubTabState(GITHUB_VIEW_PROJECT.id);
+  const step = prWalkSteps.get(sessionId);
+  if (step && state.review?.step?.source !== step) openGithubReviewStep(GITHUB_VIEW_PROJECT, step.pr, step);
+  else if (!step && state.review?.prKey !== key) openGithubReview(GITHUB_VIEW_PROJECT, key, '');
+  else if (typeof renderGithubViewMain === 'function') renderGithubViewMain();
+  renderPrWalkBrief(sessionId, brief ? key : null);
+  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+}
+
+// Put above the terminal on first use: app.js, which holds terminalArea, loads after this file.
+const sessionBrief = document.createElement('div');
+sessionBrief.id = 'session-brief';
+
+/** The brief above a walkthrough session: plan item, the PR with its status, its first paragraph. */
+function renderPrWalkBrief(sessionId, key) {
+  if (!sessionBrief.isConnected) terminalArea.prepend(sessionBrief);
+  if (!key) { sessionBrief.innerHTML = ''; return; }
+  const lower = key.toLowerCase();
+  if (!prWalkDetails.has(lower)) {
+    prWalkDetails.set(lower, window.api.getGithubPullRequest(githubTarget(key)).catch(() => null).then((d) => {
+      prWalkDetails.set(lower, d && !d.error ? d : { failed: true });
+      if (sessionId === activeSessionId && mainEl.classList.contains('pr-walk--brief')) renderPrWalkBrief(sessionId, key);
+    }));
+  }
+  const known = prWalkDetails.get(lower);
+  const detail = known && !known.then && !known.failed ? known : null;
+  const contexts = sessionContexts(sessionId);
+  const place = contexts.filter(c => ['project', 'track', 'plan'].includes(c.kind)).map(c => escapeHtml(c.label)).join(' › ');
+  const ctx = { kind: 'pr', key: lower, ref: key, label: `PR #${key.split('#')[1]}` };
+  const status = sessionContextStatus(ctx);
+  const intro = detail?.body ? (githubFirstParagraph(detail.body) || githubMarkdown(detail.body)) : '';
+  sessionBrief.innerHTML = `${place ? `<div class="swb-place">${place}</div>` : ''}
+    <div class="swb-title"><span class="session-ctx session-ctx--pr${status ? ` ctx-state--${status.state}` : ''}" title="${escapeHtml(status?.text || '').replace(/"/g, '&quot;')}">${sessionContextInner(ctx, status)}</span>
+      <span class="swb-name">${escapeHtml(detail?.title || sessionCtxPr(lower)?.title || key)}</span></div>
+    ${intro ? `<div class="swb-intro gh-md">${intro}</div>` : ''}`;
+}
 
 /** Show a step beside its session: { shown, missing }, { queued } or { error }. */
 async function showPrStepBeside(sessionId, step) {
   if (sessionId !== activeSessionId || terminalArea.style.display === 'none' || gridViewActive) { pendingPrSteps.set(sessionId, step); return { queued: true }; }
   pendingPrSteps.delete(sessionId);
-  const inProject = projectSplitSessions.has(sessionId) ? prInProject(step.pr) : {};
-  const project = inProject.project || GITHUB_VIEW_PROJECT;
-  const reviewing = githubTabState(project.id).review?.prKey === step.pr;
-  if (inProject.project) {
-    if (!(activeTab === 'projects' && reviewing)) {
-      openProjectAt(project, 'plan');
-      selectGithubItem(project, inProject.item.itemKey, step.pr);
-    }
-  } else if (!(activeTab === 'github' && reviewing)) {
-    openGithubViewPullRequest(step.pr);
-  }
-  const link = (sessionLinkRows.get(sessionId) || []).find(l => l.kind === 'pr' && String(l.ref).toLowerCase() === step.pr.toLowerCase());
-  openGithubReviewStep(project, step.pr, step, link?.label || '');
-  if (!sessionSplitActive()) showSession(sessionId);
-  return githubReviewStepOutcome(project, step);
+  prWalkSteps.set(sessionId, step);
+  // Shown again, the session takes the walkthrough layout with the step's files.
+  showSession(sessionId);
+  return githubReviewStepOutcome(GITHUB_VIEW_PROJECT, step);
 }
 
 /** From showSession: a step that came in while the session was out of sight. */
@@ -481,7 +558,9 @@ function renderSessionContextHeader() {
     return `${sep}<button type="button" class="ctx-crumb ctx-crumb--${c.kind}${status ? ` ctx-state--${status.state}` : ''}${c.detected ? ' ctx-crumb--detected' : ''}" data-ctx="${i}" title="${escapeHtml(title).replace(/"/g, '&quot;')}">${sessionContextInner(c, status)}</button>`;
   }).join('');
   // Beside a page: take the session full width in the Sessions tab (its back button returns), or hide it.
-  const hide = split ? '<button type="button" class="ctx-hide" data-ctx-full="1" title="Open it full width in the Sessions tab; Back there returns here"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg><span>Open in Sessions</span></button>'
+  const walkHere = split && activeTab === 'sessions' && mainEl.classList.contains('pr-walk');
+  const hide = walkHere ? '<button type="button" class="ctx-hide" data-ctx-hide="1" title="The session alone; the next step shows its files again">Hide files</button>'
+    : split ? '<button type="button" class="ctx-hide" data-ctx-full="1" title="Open it full width in the Sessions tab; Back there returns here"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg><span>Open in Sessions</span></button>'
     + '<button type="button" class="ctx-hide" data-ctx-hide="1" title="Show the page alone; the session keeps running">Hide session</button>' : '';
   terminalHeaderContext.innerHTML = `${back}${crumbs}<span class="ws-flex"></span>${hide}`;
   terminalHeaderContext.style.display = back || crumbs || hide ? '' : 'none';

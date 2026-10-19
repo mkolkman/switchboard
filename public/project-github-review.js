@@ -35,7 +35,7 @@ function openGithubReviewStep(project, prKey, step, title = '') {
   openGithubReview(project, prKey, title);
   const review = githubTabState(project.id).review;
   if (!review) return;
-  review.step = { title: step.title || '', files: step.files || [], all: false };
+  review.step = { title: step.title || '', files: step.files || [], all: false, source: step };
   const first = review.step.files.find(f => !review.files || review.files.some(x => x.path === f.path));
   if (first) { review.selected = first.path; review.stepScrollTo = first.path; }
   paintGithubReview(project);
