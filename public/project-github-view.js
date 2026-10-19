@@ -82,31 +82,52 @@ function sharedTitlePrefix(items) {
   return first && items.every(i => i.title.startsWith(first)) ? first : '';
 }
 
-function githubChecksDot(state) {
-  if (!state) return '';
-  const kind = state === 'SUCCESS' ? 'ok' : (state === 'FAILURE' || state === 'ERROR') ? 'fail' : 'pending';
-  const text = kind === 'ok' ? 'Checks passed' : kind === 'fail' ? 'Checks failed' : 'Checks running';
-  return `<span class="gh-ci gh-ci--${kind}" title="${text}"></span>`;
+function githubChecksKind(state) {
+  return state === 'SUCCESS' ? 'ok' : (state === 'FAILURE' || state === 'ERROR') ? 'fail' : 'pending';
 }
 
-function githubPrChip(pr, itemKey) {
-  const state = pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.isDraft ? 'draft' : 'open';
-  const stateText = { merged: 'Merged', closed: 'Closed', draft: 'Draft', open: 'Open' }[state];
+/** The checks in words, for a tooltip; '' without checks. */
+function githubChecksText(state) {
+  if (!state) return '';
+  return { ok: 'Checks passed', fail: 'Checks failed', pending: 'Checks running' }[githubChecksKind(state)];
+}
+
+function githubChecksDot(state) {
+  if (!state) return '';
+  return `<span class="gh-ci gh-ci--${githubChecksKind(state)}" title="${githubChecksText(state)}"></span>`;
+}
+
+/** A PR's state for its colour and icon: merged, closed, draft or open. */
+function githubPrState(pr) {
+  return pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : pr.isDraft ? 'draft' : 'open';
+}
+
+/**
+ * What a PR chip shows after its number: your review, a person's review, a
+ * review request and the checks, as html, with the words for its tooltip.
+ */
+function githubPrMarks(pr) {
   // A person's review only: movelabbot's approval is a permission check.
   const review = pr.state === 'OPEN' && pr.humanReview
     ? { APPROVED: ['approved', 'Approved'], CHANGES_REQUESTED: ['changes', 'Changes requested'] }[pr.humanReview]
     : null;
   const requested = pr.state === 'OPEN' ? (pr.requested || []) : [];
-  const linkText = { closes: 'closes this issue', linked: 'linked in Development', mentions: 'mentions this issue' }[pr.link] || '';
   const mine = githubMineMark(pr);
-  const title = `${pr.repo}#${pr.number}: ${pr.title}\n${stateText}${review ? ', ' + review[1].toLowerCase() : ''}, ${linkText}${requested.length ? `\nReview requested from ${requested.join(', ')}` : ''}${mine ? '\n' + mine.text : ''}\nClick to review here`;
-  return `<button type="button" class="gh-pr gh-pr--${state}${pr.link === 'mentions' ? ' gh-pr--mention' : ''}" data-item="${escapeHtml(itemKey)}" data-pr="${escapeHtml(`${pr.repo}#${pr.number}`)}" title="${escapeHtml(title)}">`
-    + `<span class="gh-pr-num">#${pr.number}</span>`
-    + (mine ? `<span class="gh-mine gh-mine--${mine.kind}">${mine.kind === 'reviewed' ? GITHUB_MINE_REVIEWED_ICON : GITHUB_MINE_CHANGED_ICON}</span>` : '')
+  const html = (mine ? `<span class="gh-mine gh-mine--${mine.kind}">${mine.kind === 'reviewed' ? GITHUB_MINE_REVIEWED_ICON : GITHUB_MINE_CHANGED_ICON}</span>` : '')
     + (review ? `<span class="gh-review gh-review--${review[0]}">${review[0] === 'approved' ? '✓' : '±'}</span>` : '')
     + (requested.length ? GITHUB_REQUESTED_ICON : '')
-    + githubChecksDot(pr.state === 'OPEN' ? pr.checks : null)
-    + '</button>';
+    + githubChecksDot(pr.state === 'OPEN' ? pr.checks : null);
+  return { html, review: review ? review[1].toLowerCase() : '', requested: requested.length ? `Review requested from ${requested.join(', ')}` : '', mine: mine ? mine.text : '' };
+}
+
+function githubPrChip(pr, itemKey) {
+  const state = githubPrState(pr);
+  const stateText = { merged: 'Merged', closed: 'Closed', draft: 'Draft', open: 'Open' }[state];
+  const marks = githubPrMarks(pr);
+  const linkText = { closes: 'closes this issue', linked: 'linked in Development', mentions: 'mentions this issue' }[pr.link] || '';
+  const title = `${pr.repo}#${pr.number}: ${pr.title}\n${stateText}${marks.review ? ', ' + marks.review : ''}, ${linkText}${marks.requested ? `\n${marks.requested}` : ''}${marks.mine ? '\n' + marks.mine : ''}\nClick to review here`;
+  return `<button type="button" class="gh-pr gh-pr--${state}${pr.link === 'mentions' ? ' gh-pr--mention' : ''}" data-item="${escapeHtml(itemKey)}" data-pr="${escapeHtml(`${pr.repo}#${pr.number}`)}" title="${escapeHtml(title)}">`
+    + `<span class="gh-pr-num">#${pr.number}</span>${marks.html}</button>`;
 }
 
 // --- Release status: which tag a merged PR shipped in (github-releases.js words it) ---

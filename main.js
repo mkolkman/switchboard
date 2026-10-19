@@ -809,6 +809,7 @@ ipcMain.handle('get-github-tracker', guarded((ref, opts) => githubTracker.getTra
 // with the user's own gh login, only when they click in the panel.
 const ghTarget = (t) => [String(t?.owner || ''), String(t?.repo || ''), Number(t?.number)];
 ipcMain.handle('github-pull-request', (_e, t) => githubTracker.asResult(githubTracker.getPullRequest(...ghTarget(t))));
+ipcMain.handle('github-pr-summaries', (_e, keys) => githubTracker.asResult(githubTracker.getPrSummaries(Array.isArray(keys) ? keys : [])));
 ipcMain.handle('github-issue', (_e, t) => githubTracker.asResult(githubTracker.getIssue(...ghTarget(t))));
 ipcMain.handle('github-my-prs', () => githubTracker.asResult(githubTracker.getMyPullRequests()));
 ipcMain.handle('github-release-status', (_e, prs, opts) => githubTracker.asResult(githubTracker.getReleaseStatus(Array.isArray(prs) ? prs : [], { force: !!opts?.force })));
@@ -868,6 +869,7 @@ ipcMain.handle('grafana-session-note', () => grafana.sessionToolsNote());
 // you send it in Help Scout itself.
 ipcMain.handle('helpscout-inbox', () => helpscout.asResult(helpscout.getInbox()));
 ipcMain.handle('helpscout-conversation', (_e, id) => helpscout.asResult(helpscout.getConversation(id)));
+ipcMain.handle('helpscout-statuses', (_e, ids) => helpscout.asResult(helpscout.getStatuses(Array.isArray(ids) ? ids : [])));
 ipcMain.handle('helpscout-save-draft', (_e, id, spec) => helpscout.asResult(helpscout.saveDraft(id, spec || {})));
 ipcMain.handle('helpscout-send-reply', (_e, id, spec) => helpscout.asResult(helpscout.sendReply(id, spec || {})));
 ipcMain.handle('helpscout-add-note', (_e, id, text) => helpscout.asResult(helpscout.addNote(id, String(text || ''))));

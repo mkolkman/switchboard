@@ -111,7 +111,7 @@ function sessionContexts(sessionId) {
     if (link) {
       const isPr = link.view && link.view !== 'issue';
       const key = isPr ? link.view : link.itemKey;
-      push({ kind: isPr ? 'pr' : 'issue', key: key.toLowerCase(), label: link.label, title: `${key} in ${project.name}'s plan`, open: () => openGithubContext(key, { project, item: link }) });
+      push({ kind: isPr ? 'pr' : 'issue', key: key.toLowerCase(), ref: key, label: link.label, title: `${key} in ${project.name}'s plan`, open: () => openGithubContext(key, { project, item: link }) });
     }
     for (const l of state.data?.links || []) {
       if (l.sessionId !== sessionId || /#\d+$/.test(l.itemText)) continue;
@@ -121,7 +121,7 @@ function sessionContexts(sessionId) {
   for (const l of sessionLinkRows.get(sessionId) || []) {
     if (l.kind === 'pr' || l.kind === 'issue') {
       const n = String(l.ref).split('#')[1];
-      push({ kind: l.kind, key: String(l.ref).toLowerCase(), label: `${l.kind === 'pr' ? 'PR' : 'Issue'} #${n}`, title: `${l.ref}${l.label ? `: ${l.label}` : ''}`, open: () => openGithubContext(l.ref) });
+      push({ kind: l.kind, key: String(l.ref).toLowerCase(), ref: l.ref, label: `${l.kind === 'pr' ? 'PR' : 'Issue'} #${n}`, title: `${l.ref}${l.label ? `: ${l.label}` : ''}`, open: () => openGithubContext(l.ref) });
     } else if (l.kind === 'alert') {
       push({ kind: 'alert', key: `alert:${l.ref}`, label: l.label ? `Alert: ${l.label}` : 'Alert', title: `Grafana alert ${l.label || l.ref}`, open: () => openGrafanaAlert(l.ref) });
     } else if (l.kind === 'logs') {
@@ -129,10 +129,10 @@ function sessionContexts(sessionId) {
     }
   }
   const ticket = typeof helpscoutLinkFor === 'function' ? helpscoutLinkFor(sessionId) : null;
-  if (ticket) push({ kind: 'ticket', key: `ticket:${ticket.conversation}`, label: `Ticket #${ticket.number}`, title: `Help Scout ticket: ${ticket.subject || ''}`, open: () => openHelpscoutTicket(ticket.conversation) });
+  if (ticket) push({ kind: 'ticket', key: `ticket:${ticket.conversation}`, ref: ticket.conversation, label: `Ticket #${ticket.number}`, title: `Help Scout ticket: ${ticket.subject || ''}`, open: () => openHelpscoutTicket(ticket.conversation) });
   // Only for sessions open in this run: reading every listed session's branch would be a flood.
   const branchPr = session && openSessions.has(sessionId) ? sessionBranchPr(sessionId) : null;
-  if (branchPr) push({ kind: 'pr', key: branchPr.key.toLowerCase(), label: `PR #${branchPr.number}`, title: `${branchPr.key}: ${branchPr.title}\nThe PR of the branch this session works on`, detected: true, open: () => openGithubContext(branchPr.key, { url: branchPr.url, ...prInProject(branchPr.key) }) });
+  if (branchPr) push({ kind: 'pr', key: branchPr.key.toLowerCase(), ref: branchPr.key, label: `PR #${branchPr.number}`, title: `${branchPr.key}: ${branchPr.title}\nThe PR of the branch this session works on`, detected: true, open: () => openGithubContext(branchPr.key, { url: branchPr.url, ...prInProject(branchPr.key) }) });
   return out;
 }
 
@@ -298,6 +298,102 @@ function sessionSplitActive() {
   return [...sessionSplits.values()].some(spec => mainEl.classList.contains(spec.className));
 }
 
+// --- The status of what a session works on ---
+// A PR's state, reviews and checks, and a ticket's status, for its label and
+// its crumb: read for the contexts on screen in one batch, and again once
+// SESSION_CTX_STATUS_MS has passed. A list loaded more recently (the GitHub
+// tab, the ticket open in the Help Scout tab) wins over what was read here.
+
+const SESSION_CTX_STATUS_MS = 3 * 60 * 1000;
+const sessionCtxPrs = new Map(); // 'owner/repo#n' (lower case) → { pr, at }
+const sessionCtxTickets = new Map(); // conversation id → { status, at }
+const sessionCtxWanted = { prs: new Set(), tickets: new Set(), timer: null };
+
+function wantSessionCtxStatus(set, value) {
+  set.add(value);
+  if (!sessionCtxWanted.timer) sessionCtxWanted.timer = setTimeout(readSessionCtxStatuses, 50);
+}
+
+async function readSessionCtxStatuses() {
+  const prs = [...sessionCtxWanted.prs];
+  const tickets = [...sessionCtxWanted.tickets];
+  sessionCtxWanted.prs.clear();
+  sessionCtxWanted.tickets.clear();
+  sessionCtxWanted.timer = null;
+  const now = Date.now();
+  // Marked as read before the answer, so a failing call is not retried on every render.
+  for (const key of prs) sessionCtxPrs.set(key, { pr: sessionCtxPrs.get(key)?.pr || null, at: now });
+  for (const id of tickets) sessionCtxTickets.set(id, { status: sessionCtxTickets.get(id)?.status || null, at: now });
+  const [prResult, ticketResult] = await Promise.all([
+    prs.length ? window.api.getGithubPrSummaries(prs).catch(() => null) : null,
+    tickets.length ? window.api.getHelpscoutStatuses(tickets).catch(() => null) : null,
+  ]);
+  let changed = false;
+  for (const key of prs) {
+    const pr = prResult?.prs?.[key];
+    if (!pr) continue;
+    changed = changed || JSON.stringify(pr) !== JSON.stringify(sessionCtxPrs.get(key)?.pr);
+    sessionCtxPrs.set(key, { pr, at: now });
+  }
+  for (const id of tickets) {
+    const status = ticketResult?.statuses?.[id];
+    if (!status) continue;
+    changed = changed || status !== sessionCtxTickets.get(id)?.status;
+    sessionCtxTickets.set(id, { status, at: now });
+  }
+  if (changed) refreshSessionContextViews(activeSessionId);
+}
+
+/** A PR as the chips show it (shapePr), or null until it is read. */
+function sessionCtxPr(key) {
+  const known = sessionCtxPrs.get(key);
+  const listedAt = typeof githubViewState !== 'undefined' && githubViewState.fetchedAt ? new Date(githubViewState.fetchedAt).getTime() : 0;
+  const listed = listedAt > (known?.at || 0) && typeof githubViewItems === 'function'
+    ? githubViewItems().map(i => i.pullRequests?.[0]).find(p => p && `${p.repo}#${p.number}`.toLowerCase() === key) : null;
+  if (listed) return listed;
+  if (!known || Date.now() - known.at > SESSION_CTX_STATUS_MS) wantSessionCtxStatus(sessionCtxWanted.prs, key);
+  return known?.pr || null;
+}
+
+/** A ticket's status (active, pending, closed or spam), or null until it is read. */
+function sessionCtxTicketStatus(id) {
+  const open = typeof helpscoutViewState !== 'undefined' ? helpscoutViewState.conversation : null;
+  if (open?.id === id && open.status) return open.status;
+  const known = sessionCtxTickets.get(id);
+  if (!known || Date.now() - known.at > SESSION_CTX_STATUS_MS) wantSessionCtxStatus(sessionCtxWanted.tickets, id);
+  return known?.status || null;
+}
+
+const SESSION_CTX_PR_STATE_TEXT = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
+const SESSION_CTX_TICKET_STATE_TEXT = { active: 'Active', pending: 'Pending', closed: 'Closed', spam: 'Spam' };
+
+/**
+ * A PR's or ticket's status on its label: { state, icon, marks, text }, the
+ * state naming its colour (ctx-state--…); null for other contexts and while unknown.
+ */
+function sessionContextStatus(ctx) {
+  if (ctx.kind === 'pr' && typeof githubPrState === 'function') {
+    const pr = sessionCtxPr(ctx.key);
+    if (!pr) return null;
+    const state = githubPrState(pr);
+    const marks = githubPrMarks(pr);
+    const text = [`${SESSION_CTX_PR_STATE_TEXT[state]}${marks.review ? `, ${marks.review}` : ''}`, marks.requested, marks.mine, githubChecksText(pr.state === 'OPEN' ? pr.checks : null)].filter(Boolean).join('\n');
+    return { state: `pr-${state}`, icon: SESSION_CONTEXT_STATE_ICONS[`pr-${state}`](), marks: marks.html, text };
+  }
+  if (ctx.kind === 'ticket') {
+    const status = sessionCtxTicketStatus(ctx.ref);
+    if (!SESSION_CTX_TICKET_STATE_TEXT[status]) return null;
+    return { state: `ticket-${status}`, icon: SESSION_CONTEXT_STATE_ICONS[`ticket-${status}`](), marks: '', text: SESSION_CTX_TICKET_STATE_TEXT[status] };
+  }
+  return null;
+}
+
+/** A crumb's or label's inside: the status icon (else its kind's), the label, the PR's marks. */
+function sessionContextInner(ctx, status) {
+  const icon = status ? status.icon : SESSION_CONTEXT_ICONS[ctx.kind] ? SESSION_CONTEXT_ICONS[ctx.kind]() : '';
+  return `${icon}<span>${escapeHtml(ctx.label)}</span>${status?.marks ? `<span class="ctx-marks">${status.marks}</span>` : ''}`;
+}
+
 // --- The terminal header's breadcrumb ---
 
 const SESSION_CONTEXT_ICONS = {
@@ -307,6 +403,19 @@ const SESSION_CONTEXT_ICONS = {
   ticket: () => '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H8l-4 4z"/></svg>',
   alert: () => '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>',
   logs: () => PICONS.list(11),
+};
+
+// A PR's and a ticket's icon by status, coloured by ctx-state--… (style.css).
+const SESSION_CTX_SVG = (body, extra = '') => `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"${extra}>${body}</svg>`;
+const SESSION_CONTEXT_STATE_ICONS = {
+  'pr-open': () => SESSION_CONTEXT_ICONS.pr(),
+  'pr-draft': () => SESSION_CTX_SVG('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 9v1.5"/><path d="M18 13v1.5"/>'),
+  'pr-merged': () => SESSION_CTX_SVG('<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9"/><path d="M6 7.5c0 2.6 2.4 4.5 5.4 4.5h4.1"/>'),
+  'pr-closed': () => SESSION_CTX_SVG('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="m15.5 4.5 5 5"/><path d="m20.5 4.5-5 5"/>'),
+  'ticket-active': () => SESSION_CONTEXT_ICONS.ticket(),
+  'ticket-pending': () => SESSION_CTX_SVG('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  'ticket-closed': () => SESSION_CTX_SVG('<path d="M4 4h16v12H8l-4 4z"/><path d="m8.5 10 2.5 2.5 4.5-4.5"/>'),
+  'ticket-spam': () => SESSION_CTX_SVG('<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>'),
 };
 
 const terminalHeaderContext = document.getElementById('terminal-header-context');
@@ -326,7 +435,9 @@ function renderSessionContextHeader() {
   // Project › track › what it works on · and more: a chevron down the hierarchy, a dot between the rest.
   const crumbs = contexts.map((c, i) => {
     const sep = !i ? '' : (['project', 'track'].includes(contexts[i - 1].kind) ? '<span class="ctx-sep">›</span>' : '<span class="ctx-sep">·</span>');
-    return `${sep}<button type="button" class="ctx-crumb ctx-crumb--${c.kind}${c.detected ? ' ctx-crumb--detected' : ''}" data-ctx="${i}" title="${escapeHtml(c.title).replace(/"/g, '&quot;')}">${SESSION_CONTEXT_ICONS[c.kind] ? SESSION_CONTEXT_ICONS[c.kind]() : ''}<span>${escapeHtml(c.label)}</span></button>`;
+    const status = sessionContextStatus(c);
+    const title = status ? `${c.title}\n${status.text}` : c.title;
+    return `${sep}<button type="button" class="ctx-crumb ctx-crumb--${c.kind}${status ? ` ctx-state--${status.state}` : ''}${c.detected ? ' ctx-crumb--detected' : ''}" data-ctx="${i}" title="${escapeHtml(title).replace(/"/g, '&quot;')}">${sessionContextInner(c, status)}</button>`;
   }).join('');
   // Beside a page: take the session full width in the Sessions tab (its back button returns), or hide it.
   const hide = split ? '<button type="button" class="ctx-hide" data-ctx-full="1" title="Open it full width in the Sessions tab; Back there returns here"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg><span>Open in Sessions</span></button>'
@@ -345,9 +456,10 @@ function renderSessionContextHeader() {
 /** A session row's context label (sidebar.js): what it works on, a click goes there. */
 function sessionContextChip(el, sessionId) {
   const ctx = sessionContextLabel(sessionId);
-  el.innerHTML = ctx ? `${SESSION_CONTEXT_ICONS[ctx.kind] ? SESSION_CONTEXT_ICONS[ctx.kind]() : ''}<span>${escapeHtml(ctx.label)}</span>` : '';
-  el.className = `session-ctx${ctx ? ` session-ctx--${ctx.kind}` : ''}`;
-  el.title = ctx ? `${ctx.title}\nClick to open` : '';
+  const status = ctx ? sessionContextStatus(ctx) : null;
+  el.innerHTML = ctx ? sessionContextInner(ctx, status) : '';
+  el.className = `session-ctx${ctx ? ` session-ctx--${ctx.kind}` : ''}${status ? ` ctx-state--${status.state}` : ''}`;
+  el.title = ctx ? `${ctx.title}${status ? `\n${status.text}` : ''}\nClick to open` : '';
   el.onclick = ctx ? (e) => { e.stopPropagation(); ctx.open(); } : null;
 }
 
@@ -372,3 +484,5 @@ function refreshSessionContextViews(sessionId) {
 }
 
 loadSessionLinks().then(() => refreshSessionContextViews(activeSessionId));
+// Read the statuses again now and then; a change redraws the labels (readSessionCtxStatuses).
+setInterval(() => { if (!document.hidden) refreshSessionContextViews(activeSessionId); }, SESSION_CTX_STATUS_MS + 5000);

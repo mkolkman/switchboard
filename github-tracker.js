@@ -970,6 +970,28 @@ async function getRefStates(keys) {
   return out;
 }
 
+/**
+ * PRs by `owner/repo#n` as the chips show them (shapePr), keyed by that text
+ * in lower case. For the PR a session works on; PRs GitHub does not find are left out.
+ */
+async function getPrSummaries(keys) {
+  const refs = [...new Set(keys.map(k => String(k).toLowerCase()))].map(k => ({ key: k, ref: parseRef(k) })).filter(r => r.ref?.kind === 'issue');
+  const out = {};
+  const me = refs.length ? await ghLogin() : null;
+  for (let i = 0; i < refs.length; i += ITEM_BATCH) {
+    const batch = refs.slice(i, i + ITEM_BATCH);
+    const data = await graphql(`query($me: String) {\n${batch.map(({ ref }, j) =>
+      `  r${j}: repository(owner: ${JSON.stringify(ref.owner)}, name: ${JSON.stringify(ref.repo)}) { pullRequest(number: ${ref.number}) { ${PR_FIELDS} } }`
+    ).join('\n')}\n}`, { me });
+    batch.forEach(({ key }, j) => {
+      const node = data?.[`r${j}`]?.pullRequest;
+      if (node) out[key] = shapePr(node, 'linked');
+    });
+  }
+  await addReviewChanges(Object.values(out));
+  return { prs: out };
+}
+
 /** Turn auto-rebase on or off for a PR: the autorebase:opt-in label. */
 async function setAutorebase(owner, repo, number, on) {
   const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
@@ -1469,7 +1491,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,

@@ -227,6 +227,13 @@ async function getConversation(id) {
   };
 }
 
+/** The status of conversations by id, without their threads: { [id]: 'active' | 'pending' | 'closed' | 'spam' }. */
+async function getStatuses(ids) {
+  const unique = [...new Set(ids.map(Number).filter(Boolean))];
+  const found = await Promise.all(unique.map(id => api('GET', `/conversations/${id}`).then(({ data }) => [id, data?.status || null]).catch(() => [id, null])));
+  return { statuses: Object.fromEntries(found.filter(([, status]) => status)) };
+}
+
 /** An attachment's bytes, base64, read through the API (its web link wants a signed-in browser). */
 async function getAttachment(conversationId, attachmentId) {
   const { data } = await api('GET', `/conversations/${Number(conversationId)}/attachments/${Number(attachmentId)}/data`);
@@ -377,5 +384,5 @@ function asResult(promise) {
 
 module.exports = {
   htmlToText, textToHtml, groupOf, shapeConversation, shapeThread, CLAUDE_NOTE_LABEL,
-  getInbox, getConversation, getAttachment, openAttachment, draftPrompt, getDraftPrompt, splitDraftReply, saveDraft, sendReply, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
+  getInbox, getConversation, getStatuses, getAttachment, openAttachment, draftPrompt, getDraftPrompt, splitDraftReply, saveDraft, sendReply, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
 };

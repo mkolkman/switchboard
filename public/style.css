@@ -7292,6 +7292,16 @@ body.fp-resizing webview { pointer-events: none; }
 .session-ctx--ticket { color: #7ee2a0; }
 .session-ctx--alert, .session-ctx--logs { color: #e0b860; }
 .session-ctx--plan { color: #8a8aa0; }
+/* A PR's or ticket's status on its label and crumb (session-context.js), the GitHub chip's colours. */
+.ctx-state--pr-open, .ctx-state--ticket-active { color: #7ee2a0; }
+.ctx-state--pr-draft { color: #9a9ab0; }
+.ctx-state--pr-merged { color: #c49cf5; }
+.ctx-state--pr-closed, .ctx-state--ticket-spam { color: #e08a8a; }
+.ctx-state--ticket-pending { color: #e0b860; }
+.ctx-state--ticket-closed { color: #8a8aa0; }
+.ctx-marks { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: 2px; }
+.ctx-marks svg { width: 10px; height: 10px; }
+.session-ctx .ctx-marks { overflow: visible; }
 .session-schedule-chip .pane-tag { font-size: 9px; }
 
 /* The dialog. */

@@ -98,6 +98,8 @@ async function helpscoutViewWrite(label, call, done) {
   s.notice = result?.error ? { bad: true, text: result.error } : { text: done };
   if (s.selectedId) await openHelpscoutConversation(s.selectedId, { quiet: true });
   loadHelpscoutView({ quiet: true });
+  // A new status shows on the labels of the ticket's sessions (session-context.js).
+  if (typeof refreshSessionContextViews === 'function') refreshSessionContextViews(activeSessionId);
   return !result?.error;
 }
 
