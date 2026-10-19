@@ -8190,11 +8190,24 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 #main.pr-walk #terminal-area { left: 0; right: auto; width: 50%; }
 #main.pr-walk #github-viewer { left: 50%; right: 0; border-left: 1px solid rgba(255,255,255,0.06); }
 
-/* Files changed in a narrow place: the tree above the diff. */
+/* Files changed in a narrow place: the tree above the diff. Side by side the
+   tree takes 220px or more, which leaves the diff too little long before 1000px. */
 .gh-review-view { container-type: inline-size; }
-@container (max-width: 700px) {
+@container (max-width: 1000px) {
   .gh-review-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .gh-review-tree { max-height: 28vh; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.055); padding-bottom: 4px; }
 }
 /* Beside a walkthrough its session is already there: room for the step's title instead. */
 #main.pr-walk #gh-review-session, #main.pr-walk #gh-review-walkthrough { display: none; }
+
+/* Beside a walkthrough Files changed fills its half: no margins or rounded card around it. */
+#main.pr-walk #github-viewer { padding-top: 0; }
+#main.pr-walk #github-viewer > .ws-body:has(> .gh-review-view) { padding: 0; }
+#main.pr-walk .gh-review-view { border: none; border-radius: 0; }
+
+/* Scrollbars in Files changed and the code editors, as elsewhere in the app. */
+.gh-review-view ::-webkit-scrollbar, .cm-scroller::-webkit-scrollbar { width: 8px; height: 8px; }
+.gh-review-view ::-webkit-scrollbar-track, .gh-review-view ::-webkit-scrollbar-corner,
+.cm-scroller::-webkit-scrollbar-track, .cm-scroller::-webkit-scrollbar-corner { background: transparent; }
+.gh-review-view ::-webkit-scrollbar-thumb, .cm-scroller::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+.gh-review-view ::-webkit-scrollbar-thumb:hover, .cm-scroller::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
