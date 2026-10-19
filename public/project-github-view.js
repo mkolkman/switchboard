@@ -1118,6 +1118,14 @@ const PR_SESSION_KINDS = {
       'Then tell me in a few lines what the PR does and where it stands, and wait for my instruction.',
     ].join('\n'),
   },
+  // A tour you read along with, step by step: to the front as well.
+  walkthrough: {
+    label: 'Walk through this PR',
+    hint: 'pr-walkthrough, step by step',
+    running: 'Walking through',
+    focus: true,
+    prompt: (pr) => `/pr-walkthrough ${pr.url}\n\nTo read the code at the PR's head: ${prWorktreeLine(pr)}`,
+  },
 };
 
 /** Context-menu rows that start each kind of session on an open PR. */

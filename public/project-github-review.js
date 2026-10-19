@@ -322,6 +322,8 @@ function paintGithubReview(project) {
         ${order.length ? `<button type="button" class="ws-ghost ws-ghost--sm" id="gh-review-prev" ${index <= 0 ? 'disabled' : ''} title="Previous file (k)">${PICONS.back(11)}</button>
         <span class="gh-muted">${index + 1} / ${order.length}</span>
         <button type="button" class="ws-ghost ws-ghost--sm" id="gh-review-next" ${index >= order.length - 1 ? 'disabled' : ''} title="Next file (j)">${PICONS.chevronRight(11)}</button>` : ''}
+        <button type="button" class="ws-ghost ws-ghost--sm" id="gh-review-session" title="A Claude session beside these changes: it reads the PR, then waits for your instruction">${ICONS.claude(12)}<span>Session</span></button>
+        <button type="button" class="ws-ghost ws-ghost--sm" id="gh-review-walkthrough" title="A Claude session beside these changes that walks you through the PR step by step (/pr-walkthrough)">${ICONS.claude(12)}<span>Walkthrough</span></button>
         <button type="button" class="ws-ghost ws-ghost--sm" id="gh-review-refresh" title="Fetch the files again">${PICONS.refresh(12)}</button>
       </div>
       ${review.error ? `<div class="git-empty-state"><div class="git-empty-title">Could not read the changes</div><div>${escapeHtml(review.error)}</div></div>`
@@ -338,6 +340,9 @@ function paintGithubReview(project) {
 
   const select = (path) => { review.selected = path; paintGithubReview(project); };
   body.querySelector('#gh-review-back').onclick = () => closeGithubReview(project);
+  // Started here, the session opens beside the changes (session-context.js).
+  body.querySelector('#gh-review-session').onclick = () => startPrSessionByKey(project, review.prKey, 'context');
+  body.querySelector('#gh-review-walkthrough').onclick = () => startPrSessionByKey(project, review.prKey, 'walkthrough');
   body.querySelector('#gh-review-refresh').onclick = () => { review.files = null; review.contents = new Map(); loadGithubReviewFiles(project); };
   const prev = body.querySelector('#gh-review-prev');
   if (prev) prev.onclick = () => order[index - 1] && select(order[index - 1].path);
