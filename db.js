@@ -555,8 +555,20 @@ function getAllCached() {
   return stmts.cacheGetAll.all();
 }
 
+// Sessions started to try out a change to Switchboard (a dev window's test
+// sessions): archived as soon as they are indexed, so they stay out of the
+// history. Once only, when the session is first seen as one: unarchived by
+// hand, it stays that way. Recognised by the first prompt they are started with.
+const TEST_SESSION_PROMPT = /^\[switchboard-test\]|^Say hi, no tools please$/;
+
+function isTestSessionPrompt(prompt) {
+  return TEST_SESSION_PROMPT.test(String(prompt || '').trim());
+}
+
 const upsertCachedSessionsBatch = db.transaction((sessions) => {
   for (const s of sessions) {
+    const before = isTestSessionPrompt(stmts.cacheGetSession.get(s.sessionId)?.firstPrompt);
+    if (!before && isTestSessionPrompt(s.firstPrompt)) stmts.upsertArchived.run(s.sessionId, 1);
     stmts.cacheUpsert.run(
       s.sessionId, s.folder, s.projectPath, s.summary,
       s.firstPrompt, s.created, s.modified, s.messageCount || 0,
@@ -571,6 +583,16 @@ const upsertCachedSessionsBatch = db.transaction((sessions) => {
 function upsertCachedSessions(sessions) {
   upsertCachedSessionsBatch(sessions);
 }
+
+// The test sessions indexed before they were archived on sight: once.
+db.transaction(() => {
+  const key = 'test_sessions_archived_v1';
+  if (db.prepare('SELECT value FROM settings WHERE key = ?').get(key)) return;
+  for (const row of db.prepare('SELECT sessionId, firstPrompt FROM session_cache').all()) {
+    if (isTestSessionPrompt(row.firstPrompt)) stmts.upsertArchived.run(row.sessionId, 1);
+  }
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, 'true');
+})();
 
 function getCachedByFolder(folder) {
   return stmts.cacheGetByFolder.all(folder);
@@ -961,7 +983,7 @@ function closeDb() {
 module.exports = {
   DATA_DIR,
   getMeta, getAllMeta, setName, toggleStar, setArchived,
-  isCachePopulated, getAllCached, getCachedByFolder, getCachedSession, upsertCachedSessions,
+  isCachePopulated, getAllCached, getCachedByFolder, getCachedSession, upsertCachedSessions, isTestSessionPrompt,
   updateCachedAiTitle,
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,

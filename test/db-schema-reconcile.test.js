@@ -658,3 +658,52 @@ test('incremental refresh persists resume state and keeps Codex, search and disp
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('test sessions are archived once when indexed, and stay unarchived when undone by hand', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-test-sessions-'));
+  try {
+    const r = runInElectronNode(`
+      const assert = require('node:assert/strict');
+      const db = require('./db');
+      const row = (sessionId, firstPrompt) => ({ sessionId, folder: 'f', projectPath: '/p', summary: '', firstPrompt,
+        created: '2026-10-19T00:00:00Z', modified: '2026-10-19T00:00:00Z' });
+      db.upsertCachedSessions([row('marked', '[switchboard-test] Say hi, no tools please'), row('old', 'Say hi, no tools please'),
+        row('real', 'Say hi, no tools please, and then fix the login bug'), row('later', null)]);
+      assert.equal(db.getMeta('marked')?.archived, 1);
+      assert.equal(db.getMeta('old')?.archived, 1);
+      assert.ok(!db.getMeta('real')?.archived);
+      assert.ok(!db.getMeta('later')?.archived);
+      // Its first prompt only read on a later pass: archived then.
+      db.upsertCachedSessions([row('later', '[switchboard-test] hi')]);
+      assert.equal(db.getMeta('later')?.archived, 1);
+      // Unarchived by hand: a re-index leaves it be.
+      db.setArchived('marked', 0);
+      db.upsertCachedSessions([row('marked', '[switchboard-test] Say hi, no tools please')]);
+      assert.equal(db.getMeta('marked')?.archived, 0);
+    `, dir);
+    assert.equal(r.status, 0, r.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('test sessions indexed before the rule are archived once at start-up', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-test-sessions-sweep-'));
+  try {
+    // A database from before: the test session is in the cache, not archived, and the sweep has not run.
+    let r = runInElectronNode(`
+      const db = require('./db');
+      db.upsertCachedSessions([{ sessionId: 'old-test', folder: 'f', projectPath: '/p', summary: '', firstPrompt: 'x', created: '', modified: '' }]);
+      const Database = require('better-sqlite3');
+      const raw = new Database(require('path').join(process.env.SWITCHBOARD_DATA_DIR, 'switchboard.db'));
+      raw.prepare("UPDATE session_cache SET firstPrompt = 'Say hi, no tools please' WHERE sessionId = 'old-test'").run();
+      raw.prepare("DELETE FROM settings WHERE key = 'test_sessions_archived_v1'").run();
+      raw.close();
+    `, dir);
+    assert.equal(r.status, 0, r.stderr);
+    r = runInElectronNode(`
+      const assert = require('node:assert/strict');
+      const db = require('./db');
+      assert.equal(db.getMeta('old-test')?.archived, 1);
+    `, dir);
+    assert.equal(r.status, 0, r.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
