@@ -250,6 +250,8 @@ function onSessionSplitShown(sessionId) {
   terminalArea.style.display = '';
   if (spec.onShown) spec.onShown(sessionId);
   requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  // A walkthrough step that came in while the session was out of sight.
+  if (pendingPrSteps.has(sessionId)) setTimeout(() => showPrStepBeside(sessionId, pendingPrSteps.get(sessionId)));
   return true;
 }
 
@@ -297,6 +299,36 @@ registerSessionSplit('projects', {
 function sessionSplitActive() {
   return [...sessionSplits.values()].some(spec => mainEl.classList.contains(spec.className));
 }
+
+// --- A walkthrough's step beside its session ---
+// A session's show_pr_files tool (preview-mcp.js) sends the files of the step
+// it explains. With the session on screen, Files changed of that PR opens
+// beside it, on those files: in the project the session was started from, else
+// in the GitHub tab. Out of sight, the step waits until the session is shown
+// beside a page again.
+
+const pendingPrSteps = new Map(); // sessionId → { pr, title, files }
+
+function showPrStepBeside(sessionId, step) {
+  if (sessionId !== activeSessionId || terminalArea.style.display === 'none') { pendingPrSteps.set(sessionId, step); return; }
+  pendingPrSteps.delete(sessionId);
+  const inProject = projectSplitSessions.has(sessionId) ? prInProject(step.pr) : {};
+  const project = inProject.project || GITHUB_VIEW_PROJECT;
+  const reviewing = githubTabState(project.id).review?.prKey === step.pr;
+  if (inProject.project) {
+    if (!(activeTab === 'projects' && reviewing)) {
+      openProjectAt(project, 'plan');
+      selectGithubItem(project, inProject.item.itemKey, step.pr);
+    }
+  } else if (!(activeTab === 'github' && reviewing)) {
+    openGithubViewPullRequest(step.pr);
+  }
+  const link = (sessionLinkRows.get(sessionId) || []).find(l => l.kind === 'pr' && String(l.ref).toLowerCase() === step.pr.toLowerCase());
+  openGithubReviewStep(project, step.pr, step, link?.label || '');
+  if (!sessionSplitActive()) showSession(sessionId);
+}
+
+window.api.onPrStepShow((sessionId, step) => showPrStepBeside(sessionId, step));
 
 // --- The status of what a session works on ---
 // A PR's state, reviews and checks, and a ticket's status, for its label and

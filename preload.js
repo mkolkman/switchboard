@@ -239,6 +239,9 @@ contextBridge.exposeInMainWorld('api', {
   onPreviewOpen: (callback) => {
     ipcRenderer.on('preview-open', (_event, sessionId, url, source) => callback(sessionId, url, source));
   },
+  onPrStepShow: (callback) => {
+    ipcRenderer.on('pr-step-show', (_event, sessionId, step) => callback(sessionId, step));
+  },
   onMcpCloseTab: (callback) => {
     ipcRenderer.on('mcp-close-tab', (_event, sessionId, diffId) => callback(sessionId, diffId));
   },

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const { findPreviewUrls, createPreviewWatcher } = require('../preview-urls');
-const { handleRpc, previewTarget, createPreviewMcpServer, TOOL_ID } = require('../preview-mcp');
+const { handleRpc, previewTarget, prFilesTarget, createPreviewMcpServer, TOOL_ID, PR_FILES_TOOL_ID } = require('../preview-mcp');
 
 test('findPreviewUrls finds dev servers and artifact links, not other sites', () => {
   const out = '  VITE ready\n  \x1b[32m➜\x1b[39m  Local:   \x1b[36mhttp://localhost:\x1b[1m5173\x1b[22m/\x1b[39m\n'
@@ -42,6 +42,37 @@ test('handleRpc lists the tool and opens a preview for the session', () => {
   const res = handleRpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'open_preview', arguments: { url: 'http://localhost:5173' } } }, 's1', onOpen);
   assert.deepEqual(opened, [['s1', 'http://localhost:5173']]);
   assert.ok(!res.result.isError);
+});
+
+test('prFilesTarget takes a PR by key or URL and the files of a step with their lines', () => {
+  assert.deepEqual(prFilesTarget({ pr: 'https://github.com/MoveLab-Studio/App/pull/12/files', step: ' Stap 3: Adapters ', files: [{ path: '/app/A.php', lines: '31-23' }, { path: 'b.js', lines: '7' }, 'c.js', { path: '' }] }), {
+    pr: 'MoveLab-Studio/App#12', title: 'Stap 3: Adapters',
+    files: [{ path: 'app/A.php', start: 23, end: 31 }, { path: 'b.js', start: 7, end: 7 }, { path: 'c.js', start: null, end: null }],
+  });
+  assert.equal(prFilesTarget({ pr: 'owner/repo#5', files: ['x.js'] }).pr, 'owner/repo#5');
+  assert.ok(prFilesTarget({ pr: '#5', files: ['x.js'] }).error);
+  assert.ok(prFilesTarget({ pr: 'owner/repo#5', files: [] }).error);
+});
+
+test('handleRpc offers show_pr_files only with a handler, and sends the step for the session', () => {
+  const onOpen = () => true;
+  const steps = [];
+  const onShow = (sid, step) => { steps.push([sid, step.pr, step.files.length]); return true; };
+  assert.deepEqual(handleRpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, 's1', onOpen).result.tools.map(t => t.name), ['open_preview']);
+  assert.deepEqual(handleRpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, 's1', onOpen, onShow).result.tools.map(t => t.name), ['open_preview', 'show_pr_files']);
+  const res = handleRpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'show_pr_files', arguments: { pr: 'o/r#1', files: [{ path: 'a.js' }] } } }, 's1', onOpen, onShow);
+  assert.ok(!res.result.isError);
+  assert.deepEqual(steps, [['s1', 'o/r#1', 1]]);
+  assert.ok(handleRpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'show_pr_files', arguments: { pr: 'nope', files: ['a.js'] } } }, 's1', onOpen, onShow).result.isError);
+  assert.ok(handleRpc({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'show_pr_files', arguments: {} } }, 's1', onOpen).error);
+});
+
+test('a server with a step handler allows both tools', async () => {
+  const server = createPreviewMcpServer({ onOpen: () => true, onShowPrFiles: () => true });
+  try {
+    const args = await server.launchArgs('abc-123');
+    assert.deepEqual(args.slice(2), ['--allowedTools', `${TOOL_ID} ${PR_FILES_TOOL_ID}`]);
+  } finally { server.stop(); }
 });
 
 test('the server answers MCP over HTTP behind its token', async () => {

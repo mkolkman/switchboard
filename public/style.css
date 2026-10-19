@@ -7833,6 +7833,8 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-review-bar { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); }
 .gh-review-bar .ws-btn { gap: 4px; }
 .gh-review-title { font-size: 13px; font-weight: 700; color: #d0d0e8; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-review-step { font-size: 12px; font-weight: 700; color: #c0c4ff; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-diff .gh-diff-row.gh-step-line { box-shadow: inset 3px 0 0 #8088ff; background-color: rgba(128,136,255,0.08); }
 .gh-review-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(220px, 26%) minmax(0, 1fr); }
 .gh-review-tree { min-height: 0; overflow-y: auto; border-right: 1px solid rgba(255,255,255,0.055); background: rgba(0,0,0,0.08); padding: 4px 0 12px; }
 .gh-review-tree .git-file-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

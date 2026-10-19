@@ -27,6 +27,35 @@ function openGithubReview(project, prKey, title, focus = null) {
   if (!state.review.files) loadGithubReviewFiles(project);
 }
 
+/**
+ * Open the review on a walkthrough's step (session-context.js): only its
+ * files in the tree, the first one open, scrolled to its lines and marked.
+ */
+function openGithubReviewStep(project, prKey, step, title = '') {
+  openGithubReview(project, prKey, title);
+  const review = githubTabState(project.id).review;
+  if (!review) return;
+  review.step = { title: step.title || '', files: step.files || [], all: false };
+  const first = review.step.files.find(f => !review.files || review.files.some(x => x.path === f.path));
+  if (first) { review.selected = first.path; review.stepScrollTo = first.path; }
+  paintGithubReview(project);
+}
+
+/** The files the tree shows: a step's own, unless it shows them all or none of them are in the PR. */
+function githubReviewShownFiles(review) {
+  const files = review.files || [];
+  if (!review.step || review.step.all) return files;
+  const want = new Set(review.step.files.map(f => f.path));
+  const shown = files.filter(f => want.has(f.path));
+  return shown.length ? shown : files;
+}
+
+/** The step's lines in a file: { start, end } in the new version, or null. */
+function githubReviewStepLines(review, filePath) {
+  const f = review.step?.files.find(x => x.path === filePath);
+  return f?.start ? { start: f.start, end: f.end } : null;
+}
+
 function closeGithubReview(project) {
   const state = githubTabState(project.id);
   state.review = null;
@@ -71,8 +100,12 @@ async function reloadGithubReviewComments(project) {
 // The files in tree order (folders first, natural sort), which is also the
 // order Previous and Next walk through, collapsed folders included.
 function githubReviewOrder(review) {
-  const rows = gitTreeRows(buildGitChangeTree(review.files || []), new Set(), '');
-  return rows.filter(r => r.kind === 'file').map(r => r.change);
+  const rows = gitTreeRows(buildGitChangeTree(githubReviewShownFiles(review)), new Set(), '');
+  const files = rows.filter(r => r.kind === 'file').map(r => r.change);
+  // A step's files in the order it discusses them; the tree keeps its folders.
+  if (!review.step || review.step.all) return files;
+  const rank = new Map(review.step.files.map((f, i) => [f.path, i]));
+  return files.sort((a, b) => (rank.get(a.path) ?? Infinity) - (rank.get(b.path) ?? Infinity));
 }
 
 /** A GitHub patch as rows with old and new line numbers. */
@@ -216,6 +249,7 @@ function githubDiffHtml(review, file, whole = null) {
     byKey.get(key).push(t);
   }
   const placed = new Set();
+  const stepLines = githubReviewStepLines(review, file.path);
   const composer = review.composer && !review.composer.replyTo && review.composer.path === file.path ? review.composer : null;
   let html = '';
   rows.forEach((r, i) => {
@@ -227,7 +261,8 @@ function githubDiffHtml(review, file, whole = null) {
     const side = r.kind === 'remove' ? 'LEFT' : 'RIGHT';
     const line = r.kind === 'remove' ? r.oldNo : r.newNo;
     const commentable = (r.kind === 'add' || r.kind === 'remove' || r.kind === 'context') && !!line;
-    html += `<div class="gh-diff-row ${r.kind}${r.filler ? ' filler' : ''}">`
+    const inStep = stepLines && r.kind !== 'remove' && r.newNo >= stepLines.start && r.newNo <= stepLines.end;
+    html += `<div class="gh-diff-row ${r.kind}${r.filler ? ' filler' : ''}${inStep ? ' gh-step-line' : ''}">`
       + `<span class="gh-ln">${r.oldNo ?? ''}</span><span class="gh-ln">${r.newNo ?? ''}</span>`
       + `<span class="gh-code">${code || ' '}</span>`
       + (commentable ? `<button type="button" class="gh-add-comment" data-side="${side}" data-line="${line}" title="Comment on this line">+</button>` : '')
@@ -251,7 +286,7 @@ function githubDiffHtml(review, file, whole = null) {
 }
 
 function githubReviewTreeHtml(review) {
-  const rows = gitTreeRows(buildGitChangeTree(review.files || []), review.collapsed, '');
+  const rows = gitTreeRows(buildGitChangeTree(githubReviewShownFiles(review)), review.collapsed, '');
   const code = { added: 'A', deleted: 'D', renamed: 'R', modified: 'M' };
   return rows.map(row => {
     if (row.kind === 'folder') {
@@ -316,8 +351,10 @@ function paintGithubReview(project) {
     <div class="gh-review-view">
       <div class="gh-review-bar">
         <button type="button" class="ws-btn ws-btn--sm" id="gh-review-back" title="Back to the PR (Esc)">${PICONS.back(13)}<span>PR #${escapeHtml(number)}</span></button>
-        <span class="gh-review-title" title="${escapeHtml(review.title)}">${escapeHtml(review.title)}</span>
-        ${review.files ? `<span class="gh-muted">${files.length} file${files.length === 1 ? '' : 's'} · <span class="gh-plus">+${totals.add}</span> <span class="gh-minus">−${totals.del}</span></span>` : ''}
+        ${review.step ? `<span class="gh-review-step" title="${escapeHtml(review.step.title)}">${escapeHtml(review.step.title || 'Step')}</span>
+        <button type="button" class="ws-ghost ws-ghost--sm${review.step.all ? '' : ' active'}" id="gh-review-step-only" title="${review.step.all ? 'Show only this step\'s files' : 'Show all files of the PR'}">${review.step.all ? `Step: ${review.step.files.length}` : 'All files'}</button>`
+          : `<span class="gh-review-title" title="${escapeHtml(review.title)}">${escapeHtml(review.title)}</span>`}
+        ${review.files && !(review.step && !review.step.all) ? `<span class="gh-muted">${files.length} file${files.length === 1 ? '' : 's'} · <span class="gh-plus">+${totals.add}</span> <span class="gh-minus">−${totals.del}</span></span>` : ''}
         <span class="ws-flex"></span>
         ${order.length ? `<button type="button" class="ws-ghost ws-ghost--sm" id="gh-review-prev" ${index <= 0 ? 'disabled' : ''} title="Previous file (k)">${PICONS.back(11)}</button>
         <span class="gh-muted">${index + 1} / ${order.length}</span>
@@ -337,8 +374,17 @@ function paintGithubReview(project) {
   if (tree) tree.scrollTop = prevTree;
   const diff = body.querySelector('.gh-review-diff');
   if (diff) diff.scrollTop = prevDiffScroll;
+  // A step's file just opened: its marked lines in view, a little below the top.
+  if (diff && review.stepScrollTo && review.stepScrollTo === review.selected && review.files) {
+    const mark = diff.querySelector('.gh-step-line');
+    if (mark) diff.scrollTop = Math.max(0, mark.getBoundingClientRect().top - diff.getBoundingClientRect().top + diff.scrollTop - diff.clientHeight / 4);
+    review.stepScrollTo = null;
+  }
 
-  const select = (path) => { review.selected = path; paintGithubReview(project); };
+  // Back on a step's file: to its lines again.
+  const select = (path) => { review.selected = path; if (githubReviewStepLines(review, path)) review.stepScrollTo = path; paintGithubReview(project); };
+  const stepOnly = body.querySelector('#gh-review-step-only');
+  if (stepOnly) stepOnly.onclick = () => { review.step.all = !review.step.all; paintGithubReview(project); };
   body.querySelector('#gh-review-back').onclick = () => closeGithubReview(project);
   // Started here, the session opens beside the changes (session-context.js).
   body.querySelector('#gh-review-session').onclick = () => startPrSessionByKey(project, review.prKey, 'context');

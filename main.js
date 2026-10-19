@@ -136,8 +136,16 @@ function sendPreview(sessionId, url, source) {
   mainWindow.webContents.send('preview-open', session?.realSessionId || sessionId, url, source);
   return true;
 }
+// A walkthrough's step: its files in Files changed beside the session (session-context.js).
+function sendPrStep(sessionId, step) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const session = activeSessions.get(sessionId);
+  mainWindow.webContents.send('pr-step-show', session?.realSessionId || sessionId, step);
+  return true;
+}
 const previewMcp = createPreviewMcpServer({
   onOpen: (sessionId, url) => sendPreview(sessionId, url, 'tool'),
+  onShowPrFiles: (sessionId, step) => sendPrStep(sessionId, step),
   log,
   scriptDir: app.getPath('userData'),
 });
