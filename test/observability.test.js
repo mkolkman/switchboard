@@ -145,6 +145,8 @@ test('the registry: unique component ids, NOHRD backends under both products', (
   for (const p of PRODUCTS.filter(x => x.owner)) assert.ok(PRODUCTS.some(x => x.id === p.owner), p.id);
   assert.equal(findComponent('waterrower-account').repo, 'NOHRD-Account');
   assert.equal(findComponent('waterrower-account').product, 'waterrower');
+  assert.equal(findComponent('cityrow-web').repo, 'MoveLab-Connect-Web');
+  assert.equal(findComponent('cityrow-web').product, 'cityrow');
   assert.equal(findComponent('nope'), null);
 });
 
@@ -165,13 +167,14 @@ test('versionWindow: from the deploy to the next version, and the stretch before
   assert.equal(versionWindow(state, 'nope'), null);
 });
 
-test('errorMatchesFiles: an error belongs to WaterRower by its file or its route', () => {
+test('errorMatchesFiles: an error belongs to WaterRower by its route, else by its file', () => {
   const only = { only: /(^|\/)water_?rower/i, shared: /^app\/Models\// };
   const not = { not: /(^|\/)water_?rower/i };
   const wrRoute = { file: 'app/Http/Middleware/AcceptLanguage.php', context: 'GET /api/waterrower/community' };
   const wrFile = { file: 'app/WaterRower/Leaderboard.php', context: 'GET /api/waterrower/leaderboard' };
   const nohrd = { file: 'app/Training/Plan.php', context: 'GET /api/training/enrollments' };
-  assert.ok(errorMatchesFiles(wrRoute, only) && errorMatchesFiles(wrRoute, not));
+  // A WaterRower request that failed in shared middleware is WaterRower's only.
+  assert.ok(errorMatchesFiles(wrRoute, only) && !errorMatchesFiles(wrRoute, not));
   assert.ok(errorMatchesFiles(wrFile, only) && !errorMatchesFiles(wrFile, not));
   assert.ok(!errorMatchesFiles(nohrd, only) && errorMatchesFiles(nohrd, not));
   assert.ok(errorMatchesFiles({ file: 'app/Models/User.php', context: 'POST /oauth/token' }, only));

@@ -17,10 +17,12 @@ const OWNER = 'MoveLab-Studio';
 const STAGES = ['internal', 'beta', 'production'];
 const CACHE_MS = 5 * 60 * 1000;
 
-// Files of the NOHRD backends that serve WaterRower only (its route files and
-// namespaces), and the shared code that serves both apps.
+// Files (and routes) of a backend that serve one product only: WaterRower's
+// in the NOHRD backends, CITYROW's in MLC Web. And the shared code of a
+// Laravel backend, which serves every product on it.
 const WATERROWER_FILES = /(^|\/)water_?rower/i;
-const NOHRD_SHARED_FILES = /^(app\/Models\/|app\/Http\/Middleware\/|app\/Auth|config\/|database\/migrations\/|composer\.(json|lock)$)/;
+const CITYROW_FILES = /(^|\/)city_?row/i;
+const SHARED_BACKEND_FILES = /^(app\/Models\/|app\/Http\/Middleware\/|app\/Http\/Controllers\/Auth\/|app\/Auth|config\/|database\/migrations\/|composer\.(json|lock)$)/;
 // MoveLab-Connect-Android builds the commercial (machine) apps of the other products too.
 const COMMERCIAL_ELSEWHERE = /^(rp3|nohrd|waterrower|dr_wolff)[-_]/;
 
@@ -33,12 +35,14 @@ const COMMERCIAL_ELSEWHERE = /^(rp3|nohrd|waterrower|dr_wolff)[-_]/;
  * which changed files (and errors) make a PR part of it, `grafana` its
  * platform and Loki app in grafana.js, `bugsnag` its production projects,
  * `flagFiles` an app's flag code and `firebase` its Remote Config project,
- * `envFlags` env keys of a backend that are flags without a flag's name. The NOHRD backends serve both NOHRD and WaterRower: one
- * component each, under both products, each seeing its own part of the code.
+ * `envFlags` env keys of a backend that are flags without a flag's name.
+ * A backend serving two products is a component under each, each seeing its
+ * own part of the code: the NOHRD backends serve NOHRD and WaterRower, MLC
+ * Web serves MLC and CITYROW.
  */
 const PRODUCTS = [
   { id: 'mlc', label: 'MLC', short: 'MLC', components: [
-    { id: 'mlc-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' }, bugsnag: ['movelab-connect-production'], envFlags: ['CITYROW_IDENTITY_PROVIDER'] },
+    { id: 'mlc-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' }, bugsnag: ['movelab-connect-production'], envFlags: ['CITYROW_IDENTITY_PROVIDER'], files: { not: CITYROW_FILES } },
     { id: 'mlc-android', label: 'Android', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { not: COMMERCIAL_ELSEWHERE }, flagFiles: ['utils/featureflags/src/main/kotlin/mls/connect/utils/featureflags/FeatureFlags.kt'], firebase: 'movelab-connect' },
   ] },
   { id: 'nohrd', label: 'NOHRD', short: 'NH', components: [
@@ -50,12 +54,13 @@ const PRODUCTS = [
   ] },
   { id: 'waterrower', label: 'WaterRower', short: 'WR', components: [
     { id: 'waterrower-connect', label: 'WATERROWER Connect', kind: 'app', repo: 'WATERROWER-NOHRD-Connect', targets: ['wra', 'wri'], flagFiles: ['waterrower-connect/waterrower-connect-android/featureflags/src/main/java/waterrower/connect/featureflags/FeatureFlags.kt', 'waterrower-connect/waterrower-connect-ios/iOS/Flags/Sources/FeatureFlags.swift'], firebase: 'waterrower-monitor' },
-    { id: 'waterrower-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, bugsnag: ['nohrd-account-production'], files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
-    { id: 'waterrower-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, bugsnag: ['nohrd-data-production'], files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
+    { id: 'waterrower-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, bugsnag: ['nohrd-account-production'], files: { only: WATERROWER_FILES, shared: SHARED_BACKEND_FILES } },
+    { id: 'waterrower-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, bugsnag: ['nohrd-data-production'], files: { only: WATERROWER_FILES, shared: SHARED_BACKEND_FILES } },
     { id: 'waterrower-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^waterrower[-_]/ } },
   ] },
   { id: 'cityrow', label: 'CITYROW', short: 'CR', owner: 'nohrd', components: [
     { id: 'cityrow-app', label: 'App', kind: 'app', repo: 'CityRow-App', flagFiles: ['android/app/src/main/kotlin/com/cityrowgo/featureflags/RemoteConfigFeatureFlagsSource.kt', 'ios/App/Sources/RemoteConfigFeatureFlagsSource.swift'], firebase: 'cityrow-64783' },
+    { id: 'cityrow-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' }, bugsnag: ['movelab-connect-production'], envFlags: ['CITYROW_IDENTITY_PROVIDER'], files: { only: CITYROW_FILES, shared: SHARED_BACKEND_FILES } },
   ] },
   { id: 'drwolff', label: 'Dr. Wolff', short: 'DW', owner: 'nohrd', components: [
     { id: 'drwolff-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^dr_wolff[-_]/ } },
@@ -432,14 +437,18 @@ function versionWindow(state, tag) {
   return { since, until, previous };
 }
 
-/** Whether an error is part of a component that sees only some of the code: its top file, or its route. */
+/**
+ * Whether an error is part of a component that sees only some of the code.
+ * Its route decides first (a request on a product's route is that product's,
+ * whatever code it failed in), then its top file, as for PRs.
+ */
 function errorMatchesFiles(error, files) {
   if (!files) return true;
-  const where = [error.file, error.context].filter(Boolean);
-  if (!where.length) return true;
-  if (files.only) return where.some(w => files.only.test(w) || files.shared?.test(w));
-  if (files.not) return where.some(w => !files.not.test(w)) || !error.file;
-  return true;
+  const own = files.only || files.not;
+  if (error.context && own.test(error.context)) return !!files.only;
+  if (!error.file) return true;
+  if (files.only) return files.only.test(error.file) || !!files.shared?.test(error.file);
+  return !files.not.test(error.file);
 }
 
 /** The PRs of a version that changed the file an error comes from. */
