@@ -5,11 +5,13 @@
 // (GitHub Releases, their Targets and Promotions tables, the production
 // deployments), what a version holds: the merged PRs between two tags,
 // grouped per linked issue, and how it fares: a backend's Bugsnag errors
-// while the version ran. Grafana's alerts, figures and logs come from
-// grafana.js; the renderer puts them on the same components. Read-only.
+// while the version ran, and its flags (observability-flags.js). Grafana's
+// alerts, figures and logs come from grafana.js; the renderer puts them on
+// the same components. Read-only.
 
 const { graphql, parseReleaseTargets, releaseModel } = require('./github-tracker');
 const bugsnag = require('./bugsnag');
+const flagsSource = require('./observability-flags');
 
 const OWNER = 'MoveLab-Studio';
 const STAGES = ['internal', 'beta', 'production'];
@@ -29,36 +31,38 @@ const COMMERCIAL_ELSEWHERE = /^(rp3|nohrd|waterrower|dr_wolff)[-_]/;
  * `targets` the mls targets it is made of (a list, or a pattern `only` or `not`
  * matching their names; none: all of the repo's), `files`
  * which changed files (and errors) make a PR part of it, `grafana` its
- * platform and Loki app in grafana.js, `bugsnag` its production projects. The NOHRD backends serve both NOHRD and WaterRower: one
+ * platform and Loki app in grafana.js, `bugsnag` its production projects,
+ * `flagFiles` an app's flag code and `firebase` its Remote Config project,
+ * `envFlags` env keys of a backend that are flags without a flag's name. The NOHRD backends serve both NOHRD and WaterRower: one
  * component each, under both products, each seeing its own part of the code.
  */
 const PRODUCTS = [
   { id: 'mlc', label: 'MLC', short: 'MLC', components: [
-    { id: 'mlc-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' }, bugsnag: ['movelab-connect-production'] },
-    { id: 'mlc-android', label: 'Android', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { not: COMMERCIAL_ELSEWHERE } },
+    { id: 'mlc-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' }, bugsnag: ['movelab-connect-production'], envFlags: ['CITYROW_IDENTITY_PROVIDER'] },
+    { id: 'mlc-android', label: 'Android', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { not: COMMERCIAL_ELSEWHERE }, flagFiles: ['utils/featureflags/src/main/kotlin/mls/connect/utils/featureflags/FeatureFlags.kt'], firebase: 'movelab-connect' },
   ] },
   { id: 'nohrd', label: 'NOHRD', short: 'NH', components: [
     { id: 'nohrd-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, bugsnag: ['nohrd-account-production'], files: { not: WATERROWER_FILES } },
     { id: 'nohrd-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, bugsnag: ['nohrd-data-production'], files: { not: WATERROWER_FILES } },
     { id: 'nohrd-fixed', label: 'Fixed', kind: 'app', repo: 'NOHRD-Fixed', bugsnag: ['slimbeam-fixed', 'wall-fixed', 'watergrinder-fixed'] },
-    { id: 'nohrd-connect', label: 'NOHRD Connect', kind: 'app', repo: 'WATERROWER-NOHRD-Connect', targets: ['nca', 'nci'] },
+    { id: 'nohrd-connect', label: 'NOHRD Connect', kind: 'app', repo: 'WATERROWER-NOHRD-Connect', targets: ['nca', 'nci'], flagFiles: ['nohrd-connect/nohrd-app-android/featureflags/src/main/java/nohrd/featureflags/FeatureFlags.kt', 'nohrd-connect/nohrd-app-ios/Flags/Sources/FeatureFlags.swift'], firebase: 'nohrd-app' },
     { id: 'nohrd-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^nohrd[-_]/ } },
   ] },
   { id: 'waterrower', label: 'WaterRower', short: 'WR', components: [
-    { id: 'waterrower-connect', label: 'WATERROWER Connect', kind: 'app', repo: 'WATERROWER-NOHRD-Connect', targets: ['wra', 'wri'] },
+    { id: 'waterrower-connect', label: 'WATERROWER Connect', kind: 'app', repo: 'WATERROWER-NOHRD-Connect', targets: ['wra', 'wri'], flagFiles: ['waterrower-connect/waterrower-connect-android/featureflags/src/main/java/waterrower/connect/featureflags/FeatureFlags.kt', 'waterrower-connect/waterrower-connect-ios/iOS/Flags/Sources/FeatureFlags.swift'], firebase: 'waterrower-monitor' },
     { id: 'waterrower-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, bugsnag: ['nohrd-account-production'], files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
     { id: 'waterrower-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, bugsnag: ['nohrd-data-production'], files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
     { id: 'waterrower-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^waterrower[-_]/ } },
   ] },
   { id: 'cityrow', label: 'CITYROW', short: 'CR', owner: 'nohrd', components: [
-    { id: 'cityrow-app', label: 'App', kind: 'app', repo: 'CityRow-App' },
+    { id: 'cityrow-app', label: 'App', kind: 'app', repo: 'CityRow-App', flagFiles: ['android/app/src/main/kotlin/com/cityrowgo/featureflags/RemoteConfigFeatureFlagsSource.kt', 'ios/App/Sources/RemoteConfigFeatureFlagsSource.swift'], firebase: 'cityrow-64783' },
   ] },
   { id: 'drwolff', label: 'Dr. Wolff', short: 'DW', owner: 'nohrd', components: [
     { id: 'drwolff-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^dr_wolff[-_]/ } },
   ] },
   { id: 'rp3', label: 'RP3', short: 'RP3', components: [
     { id: 'rp3-web', label: 'Web', kind: 'backend', repo: 'RP3-Rowing-Web', grafana: { platform: 'rp3', app: 'rp3' }, bugsnag: ['rp3-analyze-production', 'rp3-analyze-front-end-production'] },
-    { id: 'rp3-app', label: 'App', kind: 'app', repo: 'RP3-App' },
+    { id: 'rp3-app', label: 'App', kind: 'app', repo: 'RP3-App', flagFiles: ['android/featureflags/src/main/java/rp3/featureflags/FeatureFlags.kt'], firebase: 'rp3-rowing' },
     { id: 'rp3-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^rp3[-_]/ } },
   ] },
 ];
@@ -233,7 +237,7 @@ async function getOverview({ force = false } = {}) {
     short: p.short,
     owner: p.owner || null,
     components: await Promise.all(p.components.map(async (c) => {
-      const base = { id: c.id, label: c.label, kind: c.kind, repo: c.repo, grafana: c.grafana || null, bugsnag: c.bugsnag || [], product: p.id, filtered: !!c.files };
+      const base = { id: c.id, label: c.label, kind: c.kind, repo: c.repo, grafana: c.grafana || null, bugsnag: c.bugsnag || [], product: p.id, filtered: !!c.files, flags: c.kind === 'backend' || !!c.flagFiles };
       try {
         return { ...base, ...componentState(c, await readRepo(c.repo, { force })) };
       } catch (err) {
@@ -502,12 +506,153 @@ function readToml(repo) {
   return tomlCache.get(repo);
 }
 
+// --- Flags ---
+
+/** The newest tag in production on any of a component's targets, with its date. */
+function productionOf(state) {
+  const order = state.tags.map(t => t.name); // newest first
+  return state.targets.map(t => t.stages?.production).filter(Boolean).sort((a, b) => order.indexOf(a.tag) - order.indexOf(b.tag))[0] || null;
+}
+
+/** Files at a tag, as { path: text } (missing ones left out). */
+async function filesAt(repo, tag, paths) {
+  if (!paths.length) return {};
+  const data = await graphql(`query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {
+    ${paths.map((p, i) => `f${i}: object(expression: ${JSON.stringify(`${tag}:${p}`)}) { ... on Blob { text } }`).join('\n    ')}
+  } }`, { owner: OWNER, repo });
+  return Object.fromEntries(paths.map((p, i) => [p, data?.repository?.[`f${i}`]?.text]).filter(([, text]) => text != null));
+}
+
+/** The config/ files of a Laravel repo at a tag (one level of subfolders). */
+async function configAt(repo, tag) {
+  const data = await graphql(`query($owner: String!, $repo: String!, $expr: String!) { repository(owner: $owner, name: $repo) {
+    object(expression: $expr) { ... on Tree { entries { name object { ... on Blob { text } ... on Tree { entries { name object { ... on Blob { text } } } } } } } }
+  } }`, { owner: OWNER, repo, expr: `${tag}:config` });
+  const files = [];
+  for (const e of data?.repository?.object?.entries || []) {
+    if (e.object?.text != null) files.push({ file: `config/${e.name}`, text: e.object.text });
+    for (const sub of e.object?.entries || []) if (sub.object?.text != null) files.push({ file: `config/${e.name}/${sub.name}`, text: sub.object.text });
+  }
+  return files;
+}
+
+/** The PRs of commits (by sha), as { sha: { number, title, url } }. */
+async function prsOfCommits(repo, shas) {
+  const list = [...new Set(shas.filter(Boolean))];
+  if (!list.length) return {};
+  const data = await graphql(`query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {
+    ${list.map((sha, i) => `c${i}: object(oid: ${JSON.stringify(sha)}) { ... on Commit { associatedPullRequests(first: 1) { nodes { number title url } } } }`).join('\n    ')}
+  } }`, { owner: OWNER, repo }).catch(() => null);
+  return Object.fromEntries(list.map((sha, i) => [sha, data?.repository?.[`c${i}`]?.associatedPullRequests?.nodes?.[0] || null]));
+}
+
+/** Each flag's PR: the one whose commit first added its key (in the local clone). */
+async function addPrs(repo, flags, needleOf, paths) {
+  const shas = await Promise.all(flags.map(f => flagsSource.commitThatAdded(repo, needleOf(f), paths)));
+  const prs = await prsOfCommits(repo, shas);
+  flags.forEach((f, i) => { f.pr = (shas[i] && prs[shas[i]]) || null; });
+}
+
+const flagKind = (...names) => (names.some(n => n && flagsSource.isTechnical(n)) ? 'technical' : 'feature');
+
+/** A Remote Config key without its platform suffix, and the platform it names. */
+function remoteKeyBase(key) {
+  const m = String(key).match(/^(.*)_(android|ios)$/i);
+  return m ? { base: m[1], platform: /ios/i.test(m[2]) ? 'iOS' : 'Android' } : { base: String(key), platform: null };
+}
+
+/**
+ * The flags of a component's production version and how they stand now.
+ * A backend: { source: 'env', tag, flags: [{ name, kind, value, from: 'env'|'default', file, pr }],
+ * env: { title, updated, deployed, changedAfterDeploy } }. An app: { source: 'app', tag,
+ * flags: [{ name, kind, platforms: { Android|iOS: { how, key, value, conditions, missing } }, pr }],
+ * remoteOnly: [{ key, value, conditions }], remote: { project, updated } }.
+ */
+async function getFlags({ component: id, force = false }) {
+  const component = findComponent(id);
+  if (!component) throw new Error(`Unknown component: ${id}`);
+  const state = componentState(component, await readRepo(component.repo, { force }));
+  const prod = productionOf(state);
+  const tag = prod?.tag || state.tags[0]?.name;
+  if (!tag) return { source: null, flags: [] };
+
+  if (component.kind === 'backend') {
+    const [config, workflow] = await Promise.all([
+      configAt(component.repo, tag),
+      filesAt(component.repo, tag, ['.github/workflows/deploy.yml']).then(f => f['.github/workflows/deploy.yml']),
+    ]);
+    const found = flagsSource.envFlagsInConfig(config, component.envFlags || []);
+    const ref = flagsSource.productionEnvRef(workflow);
+    let env = null;
+    let envError = null;
+    if (ref) {
+      try {
+        const item = await flagsSource.readEnvItem(ref, found.map(f => f.key), { force });
+        const deployed = prod?.date || null;
+        env = { title: item.title, updated: item.updated, deployed, changedAfterDeploy: !!(deployed && item.updated && new Date(item.updated) > new Date(deployed)), values: item.values };
+      } catch (err) { envError = err.message; }
+    }
+    const flags = found.map(f => {
+      const set = env?.values.has(f.key);
+      return { name: f.key, kind: flagKind(f.key), value: flagsSource.flagValue(set ? env.values.get(f.key) : f.fallback), from: set ? 'env' : 'default', file: f.file };
+    });
+    await addPrs(component.repo, flags, f => f.name, ['config']);
+    if (env) delete env.values;
+    return { source: 'env', tag, flags, env, envError: envError || (ref ? null : 'deploy.yml names no 1Password item for production.') };
+  }
+
+  const files = await filesAt(component.repo, tag, component.flagFiles || []);
+  let remote = null;
+  let remoteError = null;
+  if (component.firebase) {
+    try { remote = await flagsSource.readRemoteConfig(component.firebase, { force }); } catch (err) { remoteError = err.message; }
+  }
+  // One row per flag: the same name, or the same Remote Config key (without
+  // its platform suffix), on Android and iOS.
+  const rows = [];
+  const rowFor = (name, key) => rows.find(r => r.name === name || (key && r.bases.includes(remoteKeyBase(key).base)));
+  const used = new Set();
+  for (const [file, text] of Object.entries(files)) {
+    const platform = /\.swift$|(^|\/)ios\//i.test(file) ? 'iOS' : 'Android';
+    for (const f of flagsSource.appFlagsInFile(text)) {
+      let row = rowFor(f.name, f.key);
+      if (!row) { row = { name: f.name, platforms: {}, keys: [], bases: [] }; rows.push(row); }
+      let entry = { how: f.how, value: f.how === 'debug' ? 'off' : f.value || null };
+      if (f.how === 'remote') {
+        used.add(f.key);
+        row.keys.push(f.key);
+        row.bases.push(remoteKeyBase(f.key).base);
+        const param = remote?.parameters?.[f.key];
+        const v = flagsSource.remoteValue(param);
+        entry = { how: 'remote', key: f.key, value: v ? v.value : remote ? 'off' : null, conditions: v?.conditions || [], missing: !!remote && !param };
+      }
+      row.platforms[platform] = entry;
+    }
+  }
+  // A key for the other platform that this version's flag code does not read goes on its row, marked.
+  for (const [key, param] of Object.entries(remote?.parameters || {})) {
+    const { base, platform } = remoteKeyBase(key);
+    const row = !used.has(key) && platform && rows.find(r => r.bases.includes(base));
+    if (!row || row.platforms[platform]) continue;
+    used.add(key);
+    const v = flagsSource.remoteValue(param);
+    row.platforms[platform] = { how: 'remote', key, value: v.value, conditions: v.conditions, notInCode: true };
+  }
+  const flags = rows.map(r => ({ name: r.name, kind: flagKind(r.name, ...r.keys), platforms: r.platforms, keys: r.keys }));
+  await addPrs(component.repo, flags, f => f.keys[0] || f.name, component.flagFiles || []);
+  flags.forEach(f => delete f.keys);
+  const remoteOnly = Object.entries(remote?.parameters || {})
+    .filter(([key, p]) => !used.has(key) && (p.valueType === 'BOOLEAN' || /^(true|false)$/.test(p.defaultValue?.value || '')))
+    .map(([key, p]) => ({ key, kind: flagKind(key), ...flagsSource.remoteValue(p) }));
+  return { source: 'app', tag, flags, remoteOnly, remote: component.firebase ? { project: component.firebase, updated: remote?.updated || null } : null, remoteError };
+}
+
 function asResult(promise) {
   return Promise.resolve(promise).then(v => ({ ok: true, ...v })).catch(err => ({ error: err.message || String(err) }));
 }
 
 module.exports = {
-  PRODUCTS, findComponent, getOverview, getFeatures, getProblems, asResult,
+  PRODUCTS, findComponent, getOverview, getFeatures, getProblems, getFlags, asResult,
   versionWindow, errorMatchesFiles, prsForError, eventsPerHour,
   markdownTable, parsePromotions, releaseSummary, componentState, currentTargets, isChore, prMatchesFiles, prMatchesTargets, riskProductPaths, groupFeatures,
 };

@@ -894,6 +894,7 @@ ipcMain.handle('grafana-session-note', () => grafana.sessionToolsNote());
 ipcMain.handle('observability-overview', (_e, opts) => observability.asResult(observability.getOverview({ force: !!opts?.force })));
 ipcMain.handle('observability-features', (_e, spec) => observability.asResult(observability.getFeatures(spec || {})));
 ipcMain.handle('observability-problems', (_e, spec) => observability.asResult(observability.getProblems(spec || {})));
+ipcMain.handle('observability-flags', (_e, spec) => observability.asResult(observability.getFlags(spec || {})));
 ipcMain.handle('bugsnag-config', () => observability.asResult(bugsnag.getConfig()));
 ipcMain.handle('bugsnag-session-note', () => bugsnag.sessionToolsNote());
 

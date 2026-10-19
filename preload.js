@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('api', {
   getObservabilityOverview: (opts) => ipcRenderer.invoke('observability-overview', opts),
   getObservabilityFeatures: (spec) => ipcRenderer.invoke('observability-features', spec),
   getObservabilityProblems: (spec) => ipcRenderer.invoke('observability-problems', spec),
+  getObservabilityFlags: (spec) => ipcRenderer.invoke('observability-flags', spec),
   getBugsnagConfig: () => ipcRenderer.invoke('bugsnag-config'),
   getBugsnagSessionNote: () => ipcRenderer.invoke('bugsnag-session-note'),
   getHelpscoutInbox: () => ipcRenderer.invoke('helpscout-inbox'),

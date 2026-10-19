@@ -11,7 +11,9 @@
 // that changed its file, and the error rate against the version before.
 // Releases and errors come through observability.js (main); everything
 // Grafana from grafana-view.js, which draws the alert, dashboard and logs
-// pages and calls in here for the rest.
+// pages and calls in here for the rest. Flags: what the production version
+// switches on or off, from its code and the live values (1Password .env for
+// a backend, Remote Config for an app), features apart from technical ones.
 // Depends on: utils.js (escapeHtml), projects-view.js (PICONS),
 // grafana-view.js (grafanaViewState, selectGrafana, grafanaAlertRow,
 // grafanaVitalsHtml, grafanaService, renderGrafanaMain, renderGrafanaList,
@@ -24,6 +26,7 @@ const observabilityState = {
   expanded: new Set(), // product ids unfolded in the sidebar
   features: new Map(), // "component|tag" or "component|staging" → { loading } | result | { error }
   problems: new Map(), // "component|tag|rate" → { loading } | Bugsnag errors | { error }
+  flags: new Map(), // component id → { loading } | its production version's flags | { error }
   versions: new Map(), // component id → the tag picked on its page ("staging" for main)
   unfolded: new Set(), // folded-by-default parts opened: "chores:<feature key>", "quiet:<page>", "dash:<component>"
   timer: null,
@@ -71,6 +74,18 @@ function loadObservabilityProblems(componentId, tag, rate = false) {
     if (activeTab !== 'grafana') return;
     renderGrafanaList();
     if (['product', 'component'].includes(grafanaViewState.selected.kind)) renderGrafanaMain();
+  });
+}
+
+/** A component's production flags, read once (1Password may ask to unlock). */
+function loadObservabilityFlags(componentId) {
+  const s = observabilityState;
+  if (s.flags.has(componentId)) return;
+  s.flags.set(componentId, { loading: true });
+  window.api.getObservabilityFlags({ component: componentId }).then(result => {
+    s.flags.set(componentId, result || { error: 'No answer.' });
+  }).catch(err => s.flags.set(componentId, { error: err?.message || String(err) })).finally(() => {
+    if (activeTab === 'grafana' && ['product', 'component'].includes(grafanaViewState.selected.kind)) renderGrafanaMain();
   });
 }
 
@@ -221,6 +236,7 @@ function renderObservabilityList() {
   grafanaViewContent.querySelector('#obs-refresh').onclick = async () => {
     grafanaViewState.config = null;
     observabilityState.features.clear();
+    observabilityState.flags.clear();
     await Promise.all([loadObservabilityOverview({ force: true }), loadGrafanaView()]);
     renderGrafanaView();
   };
@@ -375,6 +391,57 @@ function observabilityErrorsHtml(c, tag, { rate = false, limit = null } = {}) {
     ${rest > 0 ? `<button type="button" class="obs-chores" data-obs-component="${obsAttr(c.id)}">${rest} more on its page</button>` : ''}`;
 }
 
+// --- Flags ---
+
+const obsPill = (value) => `<span class="obs-flag obs-flag--${value === 'on' ? 'on' : value === 'off' ? 'off' : 'val'}">${escapeHtml(value ?? '?')}</span>`;
+
+/** How one platform (or a backend) decides a flag: its value and why. */
+function observabilityFlagState(entry) {
+  if (!entry) return '';
+  if (entry.how === 'debug') return `${obsPill('off')}<span class="gh-muted">debug builds only</span>`;
+  if (entry.how === 'fixed') return `${obsPill(entry.value)}<span class="gh-muted">in code</span>`;
+  const conditions = (entry.conditions || []).filter(c => c.value !== entry.value)
+    .map(c => `${escapeHtml(c.value)} for ${escapeHtml(c.name)}${c.percent != null && c.percent < 100 ? ` (${c.percent}%)` : ''}`);
+  return `${obsPill(entry.value)}${conditions.length ? `<span class="obs-flag-cond">${conditions.join(', ')}</span>` : ''}
+    ${entry.missing ? '<span class="gh-muted">not in Remote Config</span>' : ''}${entry.notInCode ? '<span class="gh-muted">not read by this version</span>' : ''}`;
+}
+
+function observabilityFlagRow(f) {
+  const pr = f.pr ? obsLink(f.pr.url, `#${f.pr.number}`, `Added in: ${f.pr.title}`) : '';
+  if (f.platforms) {
+    const platforms = Object.entries(f.platforms);
+    return `<div class="obs-flag-row"><span class="obs-flag-name" title="${obsAttr(platforms.map(([, e]) => e.key).filter(Boolean).join(', '))}">${escapeHtml(f.name)}</span>
+        <div class="obs-flag-states">${platforms.map(([p, e]) => `<div class="obs-flag-state">${platforms.length > 1 || p === 'iOS' ? `<span class="obs-flag-plat">${escapeHtml(p)}</span>` : ''}${observabilityFlagState(e)}</div>`).join('')}</div>${pr}</div>`;
+  }
+  return `<div class="obs-flag-row"><span class="obs-flag-name" title="${obsAttr(f.file || '')}">${escapeHtml(f.name)}</span>
+      <div class="obs-flag-states"><div class="obs-flag-state">${obsPill(f.value)}${f.from === 'default' ? '<span class="gh-muted">default, not set in the .env</span>' : ''}</div></div>${pr}</div>`;
+}
+
+/** A component's flags: the features, the technical ones folded (or both open on its own page). */
+function observabilityFlagsHtml(c, { compact = false } = {}) {
+  const r = observabilityState.flags.get(c.id);
+  if (!r || r.loading) return '<div class="gh-muted">Reading the flags…</div>';
+  if (r.error) return `<div class="gh-error obs-err">${escapeHtml(r.error)}</div>`;
+  const features = r.flags.filter(f => f.kind === 'feature');
+  const technical = r.flags.filter(f => f.kind === 'technical');
+  const techKey = `tech:${c.id}`;
+  const techOpen = !compact || observabilityState.unfolded.has(techKey);
+  const remoteOnlyKey = `rconly:${c.id}`;
+  const notes = [];
+  if (r.env) notes.push(`<span>Values from 1Password "${escapeHtml(r.env.title)}", last changed ${escapeHtml(obsDay(r.env.updated))}</span>`);
+  const late = r.env?.changedAfterDeploy ? `<span class="obs-flag-warn">changed after the deploy of ${escapeHtml(obsDay(r.env.deployed))}: the server may still run the values before it</span>` : '';
+  if (late) notes.push(late);
+  if (r.envError) notes.push(`<span class="gh-error">${escapeHtml(r.envError)}</span>`);
+  if (r.remote) notes.push(`<span>Remote Config of ${escapeHtml(r.remote.project)}${r.remote.updated ? `, last changed ${escapeHtml(obsDay(r.remote.updated))}` : ''}</span>`);
+  if (r.remoteError) notes.push(`<span class="gh-error">${escapeHtml(r.remoteError)}</span>`);
+  return `${!compact && notes.length ? `<div class="obs-flag-notes gh-muted">${notes.join(' · ')}</div>` : ''}
+    ${compact && late ? `<div class="obs-flag-notes">${late}</div>` : ''}
+    ${features.length ? features.map(observabilityFlagRow).join('') : '<div class="gh-muted">No feature flags.</div>'}
+    ${technical.length ? (compact ? `<button type="button" class="obs-chores" data-obs-unfold="${obsAttr(techKey)}"><span class="ghv-fold${techOpen ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>Technical (${technical.length})</button>` : '<div class="obs-sub">Technical</div>') + (techOpen ? technical.map(observabilityFlagRow).join('') : '') : ''}
+    ${r.remoteOnly?.length ? `<button type="button" class="obs-chores" data-obs-unfold="${obsAttr(remoteOnlyKey)}"><span class="ghv-fold${observabilityState.unfolded.has(remoteOnlyKey) ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>Only in Remote Config (${r.remoteOnly.length})</button>
+      ${observabilityState.unfolded.has(remoteOnlyKey) ? r.remoteOnly.map(x => `<div class="obs-flag-row"><span class="obs-flag-name">${escapeHtml(x.key)}</span><div class="obs-flag-states"><div class="obs-flag-state">${observabilityFlagState({ how: 'remote', ...x })}</div></div></div>`).join('') : ''}` : ''}`;
+}
+
 // --- The pages ---
 
 function observabilityPageHtml() {
@@ -418,6 +485,9 @@ function observabilityProductHtml(p) {
           return `<div class="obs-block"><div class="obs-block-h"><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button><b>${escapeHtml(prod.tag)}</b><span class="gh-muted">Bugsnag, since it came out</span></div>
             ${observabilityErrorsHtml(c, prod.tag, { limit: 5 })}</div>`;
         }).join('')}</div>
+      ${p.components.some(c => c.flags && !c.error) ? `<div class="gfv-sec"><div class="gh-sec-h">Flags in production</div>
+        ${p.components.filter(c => c.flags && !c.error).map(c => `<div class="obs-block"><div class="obs-block-h"><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button>
+          <b>${escapeHtml(observabilityProductionTag(c)?.tag || c.tags?.[0]?.name || '')}</b></div>${observabilityFlagsHtml(c, { compact: true })}</div>`).join('')}</div>` : ''}
       <div class="gfv-sec"><div class="gh-sec-h">In the production versions</div>${features || '<div class="gh-muted">Nothing in production.</div>'}</div>
     </div>`;
 }
@@ -444,6 +514,7 @@ function observabilityComponentHtml(c) {
         ${c.url ? `<button type="button" class="ws-ghost" data-obs-url="${obsAttr(`${c.url}/releases`)}">${PICONS.open(12)}<span>Releases</span></button>` : ''}</div>
       ${backend ? grafanaVitalsHtml(c.grafana) : ''}
       <div class="gfv-sec"><div class="gh-sec-h">Where it runs</div>${observabilityRunsHtml(c)}</div>
+      ${c.flags ? `<div class="gfv-sec"><div class="gh-sec-h">Flags in production <span class="obs-h-tag">${escapeHtml(observabilityProductionTag(c)?.tag || c.tags?.[0]?.name || '')}</span></div>${observabilityFlagsHtml(c)}</div>` : ''}
       ${backend ? `<div class="gfv-sec"><div class="gh-sec-h">Alerts</div>${observabilityAlertsHtml(observabilityAlerts(c), `quiet:${c.id}`)}</div>` : ''}
       <div class="gfv-sec"><div class="gh-sec-h obs-ver-h">Version <select class="gfv-select" id="obs-version">${options}</select>
           ${tag?.url ? obsLink(tag.url, 'Release on GitHub') : ''}</div>
@@ -480,6 +551,7 @@ function bindObservabilityPage() {
       const prod = observabilityProductionTag(c);
       if (prod) loadObservabilityFeatures(c.id, prod.tag);
       if (prod && c.bugsnag?.length) loadObservabilityProblems(c.id, prod.tag);
+      if (c.flags) loadObservabilityFlags(c.id);
       if (c.model === 'tagged' && c.staging) loadObservabilityFeatures(c.id, 'staging');
     }
   }
@@ -488,6 +560,7 @@ function bindObservabilityPage() {
     const version = c && observabilityVersion(c);
     if (version) loadObservabilityFeatures(c.id, version);
     if (version && version !== 'staging' && c.bugsnag?.length) loadObservabilityProblems(c.id, version, true);
+    if (c?.flags) loadObservabilityFlags(c.id);
   }
   root.querySelectorAll('[data-obs-url]').forEach(b => { b.onclick = (e) => { e.stopPropagation(); window.api.openExternal(b.dataset.obsUrl); }; });
   root.querySelectorAll('[data-obs-component]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'component', id: b.dataset.obsComponent }); });

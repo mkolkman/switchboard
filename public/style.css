@@ -8243,6 +8243,19 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .obs-error-n { flex: none; color: #8a8aa0; font-variant-numeric: tabular-nums; }
 .obs-new { display: inline-block; margin-right: 6px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 5px; border-radius: 4px; color: #e0b860; background: rgba(224,176,74,0.14); }
 .obs-ask { font-family: inherit; font-size: 11.5px; }
+.obs-h-tag { margin-left: 6px; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; text-transform: none; letter-spacing: 0; color: #a8aec8; }
+.obs-flag-notes { margin: 0 0 6px; font-size: 11.5px; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.obs-flag-warn { color: #e0b860; }
+.obs-flag-row { display: grid; grid-template-columns: minmax(160px, 320px) minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.035); font-size: 12px; }
+.obs-flag-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px 'SF Mono', 'Fira Code', Menlo, monospace; color: #c8c8dc; }
+.obs-flag-states { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.obs-flag-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.obs-flag-plat { width: 52px; font-size: 10px; font-weight: 700; color: #7a7a92; }
+.obs-flag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 6px; border-radius: 9px; }
+.obs-flag--on { color: #7ee2a0; background: rgba(76,196,121,0.14); }
+.obs-flag--off { color: #9a9ab0; background: rgba(154,154,176,0.12); }
+.obs-flag--val { color: #b0b6ff; background: rgba(120,130,255,0.14); text-transform: none; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }
+.obs-flag-cond { color: #a8aec8; }
 .rail-obs { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
 
 /* A PR walkthrough (session-context.js): the session on the left, under a brief
