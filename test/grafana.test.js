@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { alertPlatform, alertApps, logQuery, PLATFORMS } = require('../grafana');
+const { alertPlatform, alertApps, logQuery, serviceOf, PLATFORMS } = require('../grafana');
 
 test('alerts are told apart by platform and service from their query', () => {
   assert.equal(alertPlatform('rate(mlc_graphql_operation_duration_seconds_count{env="prod"}[15m])'), 'mlc');
@@ -22,4 +22,12 @@ test('logQuery: the platform\'s apps in prod, the levels, a text it contains; a 
 
 test('every platform names a repo for each of its log apps', () => {
   for (const p of PLATFORMS) for (const app of p.apps) assert.ok(p.repos[app], `${p.id}: ${app}`);
+});
+
+test('serviceOf: one service of a platform keeps its own job, app and metric prefix', () => {
+  const nohrd = PLATFORMS.find(p => p.id === 'nohrd');
+  const data = serviceOf(nohrd, 'nohrd-data');
+  assert.deepEqual([data.jobs, data.apps, data.prefix], [['nohrd-data'], ['nohrd-data'], 'wnd']);
+  assert.equal(serviceOf(nohrd, ''), nohrd);
+  assert.equal(serviceOf(nohrd, 'MoveLabConnect'), nohrd);
 });

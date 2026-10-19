@@ -205,7 +205,7 @@ function sessionPlaceHere() {
   if (tab === 'grafana') {
     const sel = { ...grafanaViewState.selected };
     const alert = sel.kind === 'alert' ? grafanaViewState.alerts?.find(a => a.uid === sel.id) : null;
-    return { tab, label: alert ? `Alert: ${alert.title}` : sel.kind === 'logs' ? 'Logs' : 'Grafana', restore: () => (sel.kind === 'alert' ? openGrafanaAlert(sel.id) : openGrafanaLogs(grafanaViewState.platform)) };
+    return { tab, label: alert ? `Alert: ${alert.title}` : sel.kind === 'logs' ? 'Logs' : 'Observability', restore: () => (sel.kind === 'alert' ? openGrafanaAlert(sel.id) : openGrafanaLogs(grafanaViewState.platform)) };
   }
   return null;
 }

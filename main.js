@@ -57,6 +57,7 @@ const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
 const grafana = require('./grafana');
+const observability = require('./observability');
 const sleepControl = require('./sleep-control');
 
 
@@ -881,11 +882,16 @@ ipcMain.handle('grafana-config', () => grafana.asResult(grafana.getConfig()));
 ipcMain.handle('grafana-save-config', (_e, spec) => grafana.asResult(grafana.saveConfig(spec || {})));
 ipcMain.handle('grafana-alerts', () => grafana.asResult(grafana.getAlerts()));
 ipcMain.handle('grafana-dashboards', () => grafana.asResult(grafana.getDashboards()));
-ipcMain.handle('grafana-vitals', (_e, platform) => grafana.asResult(grafana.getVitals(String(platform || ''))));
+ipcMain.handle('grafana-vitals', (_e, platform, app) => grafana.asResult(grafana.getVitals(String(platform || ''), String(app || ''))));
 ipcMain.handle('grafana-logs', (_e, spec) => grafana.asResult(grafana.getLogs(spec || {})));
 ipcMain.handle('grafana-log-context', (_e, spec) => grafana.asResult(grafana.getLogContext(spec || {})));
 ipcMain.handle('grafana-alert-series', (_e, spec) => grafana.asResult(grafana.getAlertSeries(spec || {})));
 ipcMain.handle('grafana-session-note', () => grafana.sessionToolsNote());
+
+// --- IPC: Observability (observability.js), read-only ---
+
+ipcMain.handle('observability-overview', (_e, opts) => observability.asResult(observability.getOverview({ force: !!opts?.force })));
+ipcMain.handle('observability-features', (_e, spec) => observability.asResult(observability.getFeatures(spec || {})));
 
 // --- IPC: Help Scout (helpscout.js) ---
 // Each write is a click in the Help Scout tab. A reply is always a draft:

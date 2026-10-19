@@ -160,17 +160,34 @@ async function lokiRange(expr, { start, end, step }) {
   return (data?.data?.result || []).map(s => ({ labels: s.metric || {}, points: (s.values || []).map(([t, v]) => [Number(t), Number(v)]) }));
 }
 
+/**
+ * A platform narrowed to one of its services: its job, its Loki app and its
+ * metric prefix sit at the same place in their lists. Unknown: the platform.
+ */
+function serviceOf(platform, app) {
+  const i = app ? platform.apps.indexOf(app) : -1;
+  if (i < 0) return platform;
+  const prefixes = String(platform.prefix || '').split('|');
+  return {
+    ...platform,
+    apps: [app],
+    jobs: platform.jobs.length === platform.apps.length ? [platform.jobs[i]] : platform.jobs,
+    prefix: platform.prefix && prefixes.length === platform.apps.length ? prefixes[i] : platform.prefix,
+  };
+}
+
 const regexOf = (list) => list.map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 
 /**
- * The header's five figures for a platform, each a series over the last hour
- * (one point a minute) summed across its services: requests/s (and the same
- * hour a week ago), 5xx ratio, p95 latency, error logs a minute, queue backlog.
- * A figure the platform has no data for is null.
+ * Five figures for a platform, or one of its services (`app`, its Loki app),
+ * each a series over the last hour (one point a minute) summed across the
+ * services: requests/s (and the same hour a week ago), 5xx ratio, p95
+ * latency, error logs a minute, queue backlog. A figure without data is null.
  */
-async function getVitals(platformId) {
-  const p = PLATFORMS.find(x => x.id === platformId);
-  if (!p) throw new Error(`Unknown platform: ${platformId}`);
+async function getVitals(platformId, app = '') {
+  const platform = PLATFORMS.find(x => x.id === platformId);
+  if (!platform) throw new Error(`Unknown platform: ${platformId}`);
+  const p = serviceOf(platform, app);
   // On whole minutes, so Prometheus and Loki points share their timestamps.
   const end = Math.floor(Date.now() / 60000) * 60;
   const range = { start: end - 3600, end, step: 60 };
@@ -280,5 +297,5 @@ function asResult(promise) {
 module.exports = {
   PLATFORMS, DEFAULT_URL, URL_SERVICE, TOKEN_SERVICE, ACCOUNT,
   getConfig, saveConfig, getAlerts, getDashboards, getVitals, getLogs, getLogContext, getAlertSeries,
-  alertPlatform, alertApps, logQuery, sessionToolsNote, asResult,
+  alertPlatform, alertApps, logQuery, serviceOf, sessionToolsNote, asResult,
 };

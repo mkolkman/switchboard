@@ -1494,6 +1494,6 @@ module.exports = {
   humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
-  releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed,
+  releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed, graphql,
   reviewCandidates, getReviewCandidates, setReviewRequest,
 };

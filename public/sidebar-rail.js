@@ -4,8 +4,8 @@
 // form of that mode's list. Projects show their marks, Sessions (only the live
 // ones) their repo's short name with a status dot, the kind of session and its
 // track or branch, GitHub its PR numbers, Todo its section icons, Help Scout
-// its ticket numbers and Grafana Logs and its firing or pending alerts; each
-// one does what its full row does on a click.
+// its ticket numbers and Observability its products and firing or pending
+// alerts; each one does what its full row does on a click.
 // In Sessions a + under the mode button starts a new session, like the open
 // sidebar's.
 // The lists come from what the expanded sidebar holds, in its order and with
@@ -16,7 +16,8 @@
 // project-github-view.js (prSessionState, githubItemKey), github-view.js
 // (githubViewState, openGithubViewItem), todo-view.js (todoViewSections,
 // todoViewer), helpscout-view.js (helpscoutViewState, openHelpscoutConversation),
-// grafana-view.js (grafanaViewState, selectGrafana).
+// grafana-view.js (grafanaViewState, selectGrafana), observability-view.js
+// (observabilityState, observabilityStatus, observabilityProductAlerts).
 
 const sidebarRail = document.getElementById('sidebar-rail');
 const SIDEBAR_RAIL_LIMIT = 40;
@@ -147,11 +148,12 @@ function railHelpscoutItems() {
   return open.slice(0, SIDEBAR_RAIL_LIMIT).map(c => `<button type="button" class="rail-item rail-num rail-num--${c.group}${c.id === s.selectedId ? ' active' : ''}" data-conv="${c.id}" title="${railAttr(`#${c.number} ${c.subject}\n${c.customer.name || c.customer.email}${c.assignee ? `, ${c.assignee.name}` : ''}`)}">#${c.number}</button>`).join('');
 }
 
-/** Firing and pending alerts as dots, Logs first. */
+/** The products by their short name, each with its dot; then firing and pending alerts as dots. */
 function railGrafanaItems() {
   const s = grafanaViewState;
   const active = (s.alerts || []).filter(a => a.state === 'firing' || a.state === 'pending');
-  return `<button type="button" class="rail-item${s.selected.kind === 'logs' ? ' active' : ''}" data-gfv-logs="1" title="Logs">${PICONS.list(14)}</button>`
+  const products = observabilityState.overview?.products || [];
+  return products.map(p => `<button type="button" class="rail-item rail-num rail-obs${s.selected.kind === 'product' && s.selected.id === p.id ? ' active' : ''}" data-gfv-product="${railAttr(p.id)}" title="${railAttr(p.label)}"><span class="gfv-dot gfv-dot--${railAttr(observabilityStatus(observabilityProductAlerts(p)))}"></span>${escapeHtml(p.short || p.label)}</button>`).join('')
     + active.slice(0, SIDEBAR_RAIL_LIMIT).map(a => `<button type="button" class="rail-item${s.selected.kind === 'alert' && s.selected.id === a.uid ? ' active' : ''}" data-gfv-alert="${railAttr(a.uid)}" title="${railAttr(`${a.state}: ${a.title}`)}"><span class="gfv-dot gfv-dot--${railAttr(a.state)}"></span></button>`).join('');
 }
 
@@ -195,7 +197,7 @@ function renderSidebarRail() {
     b.onclick = () => todoViewer.querySelector(`.tdv-section[data-section="${CSS.escape(b.dataset.section)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   });
   sidebarRail.querySelectorAll('[data-gfv-alert]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'alert', id: b.dataset.gfvAlert }); });
-  sidebarRail.querySelectorAll('[data-gfv-logs]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'logs', id: null }); });
+  sidebarRail.querySelectorAll('[data-gfv-product]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'product', id: b.dataset.gfvProduct }); });
   sidebarRail.querySelectorAll('[data-conv]').forEach(b => { b.onclick = () => openHelpscoutConversation(Number(b.dataset.conv)); });
 }
 

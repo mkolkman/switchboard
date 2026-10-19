@@ -1,34 +1,37 @@
-// --- Grafana tab: the monitoring stack's alerts, dashboards and logs ---
-// The sidebar lists the alert rules (firing first, then pending, the rest
-// folded), the dashboards by folder, and Logs. Above the main area a header
-// switches platform (MLC, NOHRD, RP3) and shows five figures for it over the
-// last hour. An alert opens with its query's graph, a dashboard in a webview
-// (Grafana's kiosk mode, its own login kept in persist:grafana), Logs as a
-// search over Loki. "Ask Claude" on an alert or on log lines starts a session
-// in the platform's repo, beside the page, that may query Grafana itself with
-// the same read-only token. Production only; main does the API calls
-// (grafana.js). In the background the alerts are read every minute: the tab
-// icon gets a badge, and an alert that starts firing raises a notification.
+// --- Observability tab (data-tab "grafana"): the Grafana side ---
+// The tab shows MoveLab's products as one whole (observability-view.js: the
+// sidebar, product, component and Infra pages). This file holds what comes
+// from Grafana: the alerts (read every minute, also while another tab is
+// open: the tab icon gets a badge, an alert that starts firing raises a
+// notification), a backend's five figures over the last hour, an alert's
+// page with its query's graph, a dashboard in a webview (Grafana's kiosk
+// mode, its own login kept in persist:grafana) and Logs as a search over
+// Loki. "Ask Claude" on an alert or on log lines starts a session in the
+// platform's repo, beside the page, that may query Grafana itself with the
+// same read-only token. Production only; main does the API calls (grafana.js).
 // Depends on: utils.js (escapeHtml, formatDate), projects-view.js (PICONS,
 // mainEl), app.js (launchNewSession, encodeProjectPath, showSession,
 // openSessions), dialogs.js (resolveDefaultSessionOptions),
-// project-github-view.js (findLocalClone, githubMarkdown).
+// project-github-view.js (findLocalClone, githubMarkdown),
+// observability-view.js (renderObservabilityList, observabilityPageHtml,
+// bindObservabilityPage, observabilityComponent, loadObservabilityOverview).
 
 const grafanaViewContent = document.getElementById('grafana-content');
 const grafanaViewer = document.getElementById('grafana-viewer');
 const GRAFANA_POLL_MS = 60 * 1000;
 const GRAFANA_LIVE_MS = 5 * 1000;
-const GRAFANA_PLATFORM_KEY = 'grafanaPlatform';
+const GRAFANA_SELECTED_KEY = 'observabilitySelected';
 const GRAFANA_LEVELS = ['error', 'critical', 'warning', 'info', 'debug'];
 const GRAFANA_RANGES = [['15m', 900], ['1h', 3600], ['6h', 21600], ['24h', 86400], ['7d', 604800]];
 
 const grafanaViewState = {
   config: null, error: null,
   alerts: null, alertsError: null, dashboards: null,
-  platform: (() => { try { return localStorage.getItem(GRAFANA_PLATFORM_KEY) || 'mlc'; } catch { return 'mlc'; } })(),
-  vitals: new Map(), // platform → the header's figures
-  selected: { kind: 'logs', id: null }, // alert (uid), dashboard (uid) or logs
-  folded: new Set(['inactive']),
+  platform: 'mlc', // the logs' platform, set from the component they are opened on
+  vitals: new Map(), // "platform|app" → a backend's figures
+  // product, component or infra (observability-view.js); alert (uid), dashboard (uid) or logs (component id or null)
+  selected: (() => { try { return JSON.parse(localStorage.getItem(GRAFANA_SELECTED_KEY)) || { kind: 'product', id: 'mlc' }; } catch { return { kind: 'product', id: 'mlc' }; } })(),
+  back: null, // the page an alert, dashboard or logs was opened from
   firing: null, // alert uids firing at the last read, for notifications
   timer: null,
   logs: {
@@ -72,18 +75,28 @@ async function loadGrafanaAlerts() {
   paintGrafanaBadge();
 }
 
-async function loadGrafanaVitals(platform = grafanaViewState.platform) {
-  const result = await window.api.getGrafanaVitals(platform).catch(() => null);
-  if (result && !result.error) grafanaViewState.vitals.set(platform, result);
+/** The backend service the page is about ({ platform, app } of grafana.js), or null. */
+function grafanaService() {
+  const s = grafanaViewState;
+  if (s.selected.kind === 'component') return observabilityComponent(s.selected.id)?.grafana || null;
+  if (s.selected.kind === 'logs') return observabilityComponent(s.selected.id)?.grafana || { platform: s.platform, app: '' };
+  return null;
+}
+
+async function loadGrafanaVitals(service = grafanaService()) {
+  if (!service || !grafanaViewState.config?.hasToken) return;
+  const result = await window.api.getGrafanaVitals(service.platform, service.app).catch(() => null);
+  if (result && !result.error) grafanaViewState.vitals.set(`${service.platform}|${service.app}`, result);
 }
 
 /** Everything the tab shows; quiet keeps what is on screen while it loads. */
 async function loadGrafanaView() {
   const s = grafanaViewState;
   if (!s.config) await loadGrafanaConfig();
-  if (!s.config?.hasToken) { renderGrafanaView(); return; }
+  const overview = loadObservabilityOverview();
+  if (!s.config?.hasToken) { renderGrafanaView(); await overview; renderGrafanaView(); return; }
   const dash = window.api.getGrafanaDashboards().then(r => { if (!r?.error) s.dashboards = r.dashboards || []; }).catch(() => {});
-  await Promise.all([loadGrafanaAlerts(), loadGrafanaVitals(), dash]);
+  await Promise.all([loadGrafanaAlerts(), loadGrafanaVitals(), dash, overview]);
   renderGrafanaView();
   if (s.selected.kind === 'logs' && !s.logs.lines.length && !s.logs.loading) loadGrafanaLogs();
 }
@@ -97,7 +110,8 @@ function startGrafanaPolling() {
     if (activeTab === 'grafana') {
       await loadGrafanaVitals();
       renderGrafanaList();
-      paintGrafanaHeader();
+      if (['product', 'component', 'infra'].includes(grafanaViewState.selected.kind)) renderGrafanaMain();
+      else paintGrafanaHeader();
     }
     if (typeof renderSidebarRail === 'function') renderSidebarRail();
   }, GRAFANA_POLL_MS);
@@ -127,15 +141,16 @@ function notifyGrafanaAlert(alert) {
   n.onclick = () => openGrafanaAlert(alert.uid);
 }
 
-/** Show an alert in the Grafana tab, from anywhere. */
+/** Show an alert in the Observability tab, from anywhere. */
 function openGrafanaAlert(uid) {
   const tab = document.querySelector('.sidebar-tab[data-tab="grafana"]');
-  grafanaViewState.selected = { kind: 'alert', id: uid };
-  if (tab && activeTab !== 'grafana') tab.click();
-  else renderGrafanaView();
+  if (tab && activeTab !== 'grafana') {
+    grafanaViewState.selected = { kind: 'alert', id: uid };
+    tab.click();
+  } else selectGrafana({ kind: 'alert', id: uid });
 }
 
-// --- Sidebar ---
+// --- Alert rows (the sidebar and the pages are in observability-view.js) ---
 
 function grafanaAlertRow(a) {
   const s = grafanaViewState;
@@ -146,59 +161,39 @@ function grafanaAlertRow(a) {
       ${platform ? `<span class="gfv-plat">${escapeHtml(platform)}</span>` : ''}</button>`;
 }
 
-function grafanaSection(id, title, count, body, hint = '') {
-  const folded = grafanaViewState.folded.has(id);
-  return `<div class="ghv-section"><div class="ghv-section-h gfv-section-h" data-fold="${gfvAttr(id)}" title="${gfvAttr(hint)}"><span class="ghv-fold${folded ? ' shut' : ''}">${PICONS.chevronDown(9)}</span>${escapeHtml(title)}<span class="ghv-count">${count ?? ''}</span></div>
-    ${folded ? '' : body}</div>`;
-}
-
 function renderGrafanaList() {
-  if (!grafanaViewContent) return;
-  const s = grafanaViewState;
-  if (!s.config?.hasToken) {
-    grafanaViewContent.innerHTML = `<div class="ghv-head"><span class="ghv-title">Grafana</span></div><div class="ghv-empty">Connect Grafana on the right.</div>`;
-    return;
-  }
-  const alerts = s.alerts || [];
-  const firing = alerts.filter(a => a.state === 'firing');
-  const pending = alerts.filter(a => a.state === 'pending');
-  const quiet = alerts.filter(a => a.state !== 'firing' && a.state !== 'pending');
-  const folders = new Map();
-  for (const d of s.dashboards || []) folders.set(d.folder, [...(folders.get(d.folder) || []), d]);
-  const logsActive = s.selected.kind === 'logs';
-  grafanaViewContent.innerHTML = `
-    <div class="ghv-head"><span class="ghv-title">Grafana</span><span class="ws-flex"></span>
-      <button type="button" class="ws-ghost" id="gfv-refresh" title="Read Grafana again">${PICONS.refresh(12)}</button></div>
-    ${s.alertsError ? `<div class="ghv-empty gh-error">${escapeHtml(s.alertsError)}</div>` : ''}
-    <div class="ghv-list">
-      <button type="button" class="gfv-row gfv-row--logs${logsActive ? ' active' : ''}" data-logs="1">${PICONS.list(13)}<span class="gfv-row-title">Logs</span><span class="gfv-plat">${escapeHtml(grafanaPlatform()?.label || '')}</span></button>
-      ${grafanaSection('alerts', 'Alerts', firing.length + pending.length,
-        (firing.length || pending.length ? [...firing, ...pending].map(grafanaAlertRow).join('') : '<div class="ghv-empty">Nothing firing.</div>'),
-        'Firing and pending alert rules, all platforms')}
-      ${quiet.length ? grafanaSection('inactive', 'Quiet alert rules', quiet.length, quiet.map(grafanaAlertRow).join(''), 'Rules that are not firing') : ''}
-      ${[...folders].map(([folder, list]) => grafanaSection(`folder:${folder}`, folder, list.length, list.map(d => {
-        const active = s.selected.kind === 'dashboard' && s.selected.id === d.uid;
-        return `<button type="button" class="gfv-row${active ? ' active' : ''}" data-dash="${gfvAttr(d.uid)}" title="${gfvAttr(d.title)}">${PICONS.tree(12)}<span class="gfv-row-title">${escapeHtml(d.title)}</span></button>`;
-      }).join(''), 'Dashboards in this folder')).join('')}
-    </div>`;
-  grafanaViewContent.querySelector('#gfv-refresh').onclick = () => { grafanaViewState.config = null; loadGrafanaView(); };
-  grafanaViewContent.querySelectorAll('[data-fold]').forEach(h => {
-    h.onclick = () => { const id = h.dataset.fold; if (s.folded.has(id)) s.folded.delete(id); else s.folded.add(id); renderGrafanaList(); };
-  });
-  grafanaViewContent.querySelectorAll('[data-alert]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'alert', id: b.dataset.alert }); });
-  grafanaViewContent.querySelectorAll('[data-dash]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'dashboard', id: b.dataset.dash }); });
-  grafanaViewContent.querySelector('[data-logs]').onclick = () => selectGrafana({ kind: 'logs', id: null });
+  renderObservabilityList();
 }
 
+const GRAFANA_PAGES = ['product', 'component', 'infra'];
+
+/**
+ * Go to a page of the tab. An alert, dashboard or logs remember the page they
+ * were opened from (the header's back); logs take the component's service.
+ */
 function selectGrafana(sel) {
   const s = grafanaViewState;
+  if (!GRAFANA_PAGES.includes(sel.kind) && GRAFANA_PAGES.includes(s.selected.kind)) s.back = { ...s.selected };
+  if (GRAFANA_PAGES.includes(sel.kind)) s.back = null;
+  if (sel.kind === 'logs') {
+    const service = observabilityComponent(sel.id)?.grafana;
+    if (service && (service.platform !== s.platform || service.app !== s.logs.app)) {
+      s.platform = service.platform;
+      s.logs.app = service.app;
+      s.logs.lines = [];
+      s.logs.checked.clear();
+      s.logs.open = null;
+    }
+  }
   s.selected = sel;
+  try { localStorage.setItem(GRAFANA_SELECTED_KEY, JSON.stringify(GRAFANA_PAGES.includes(sel.kind) ? sel : s.back || sel)); } catch {}
   renderGrafanaView();
   if (sel.kind === 'logs' && !s.logs.lines.length) loadGrafanaLogs();
+  if (grafanaService() && !s.vitals.has(`${grafanaService().platform}|${grafanaService().app}`)) loadGrafanaVitals().then(paintGrafanaHeader);
   showGrafanaItemSession();
 }
 
-// --- Header: platform and its figures ---
+// --- Header: where you are, and a backend's figures ---
 
 const GRAFANA_VITALS = [
   { key: 'requests', label: 'Requests', unit: (v) => `${v < 10 ? v.toFixed(1) : Math.round(v)}/s`, warn: null, bad: null },
@@ -220,14 +215,15 @@ function grafanaSparkline(points, w = 56, h = 20) {
   return `<svg class="gfv-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="currentColor" stroke-width="1.4" points="${pts.map(([t, v]) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}"/></svg>`;
 }
 
-function grafanaHeaderHtml() {
+/** The five figures of a backend service, or nothing without Grafana. */
+function grafanaVitalsHtml(service) {
   const s = grafanaViewState;
-  const vit = s.vitals.get(s.platform);
-  const platforms = s.config?.platforms || [];
+  if (!service || !s.config?.hasToken) return '';
+  const vit = s.vitals.get(`${service.platform}|${service.app}`);
   const tiles = GRAFANA_VITALS.map(m => {
     const series = vit?.[m.key];
     const last = series?.length ? series[series.length - 1][1] : null;
-    if (last == null) return `<div class="gfv-vital gfv-vital--none" title="No ${m.label.toLowerCase()} for this platform"><span class="gfv-vital-l">${m.label}</span><span class="gfv-vital-v">–</span></div>`;
+    if (last == null) return `<div class="gfv-vital gfv-vital--none" title="No ${m.label.toLowerCase()} for this service"><span class="gfv-vital-l">${m.label}</span><span class="gfv-vital-v">–</span></div>`;
     const level = m.bad != null && last >= m.bad ? 'bad' : m.warn != null && last >= m.warn ? 'warn' : 'ok';
     let extra = '';
     if (m.key === 'requests' && vit.requestsWeekAgo?.length) {
@@ -236,34 +232,33 @@ function grafanaHeaderHtml() {
     }
     return `<button type="button" class="gfv-vital gfv-vital--${level}" data-vital="${m.key}" title="${gfvAttr(`${m.label}, last hour. Open Platform health`)}"><span class="gfv-vital-l">${m.label}</span><span class="gfv-vital-v">${m.unit(last)}</span>${extra}${grafanaSparkline(series)}</button>`;
   }).join('');
+  return `<div class="gfv-vitals">${vit ? tiles : '<span class="gh-muted">Loading…</span>'}</div>`;
+}
+
+/** Above an alert, a dashboard or logs: the way back to the page it was opened from, and the service's figures. */
+function grafanaHeaderHtml() {
+  const s = grafanaViewState;
+  const back = s.back ? observabilityPlaceLabel(s.back) : null;
+  const here = s.selected.kind === 'logs' ? ['Logs', observabilityPlaceLabel({ kind: 'component', id: s.selected.id }) || grafanaPlatform()?.label].filter(Boolean).join(' · ')
+    : s.selected.kind === 'alert' ? 'Alert' : 'Dashboard';
   return `<div class="gfv-head">
-      <div class="gfv-head-top"><div class="gfv-platforms">${platforms.map(p => `<button type="button" class="ws-ghost ws-ghost--sm${p.id === s.platform ? ' active' : ''}" data-platform="${p.id}">${escapeHtml(p.label)}</button>`).join('')}</div></div>
-      <div class="gfv-vitals">${vit ? tiles : '<span class="gh-muted">Loading…</span>'}</div>
+      <div class="gfv-head-top">${back ? `<button type="button" class="ws-ghost ws-ghost--sm" id="gfv-back" title="Back to ${gfvAttr(back)}">‹ ${escapeHtml(back)}</button>` : ''}<span class="gfv-here">${escapeHtml(here)}</span></div>
+      ${s.selected.kind === 'logs' ? grafanaVitalsHtml(grafanaService()) : ''}
     </div>`;
 }
 
 function paintGrafanaHeader() {
   const head = grafanaViewer?.querySelector('.gfv-head');
-  if (!head) return;
-  head.outerHTML = grafanaHeaderHtml();
-  bindGrafanaHeader();
+  if (head) { head.outerHTML = grafanaHeaderHtml(); bindGrafanaHeader(); return; }
+  // On a component page the figures sit in the page itself.
+  const vitals = grafanaViewer?.querySelector('.obs-page .gfv-vitals');
+  if (vitals) { vitals.outerHTML = grafanaVitalsHtml(grafanaService()); bindGrafanaHeader(); }
 }
 
 function bindGrafanaHeader() {
   const s = grafanaViewState;
-  grafanaViewer.querySelectorAll('[data-platform]').forEach(b => {
-    b.onclick = async () => {
-      s.platform = b.dataset.platform;
-      try { localStorage.setItem(GRAFANA_PLATFORM_KEY, s.platform); } catch {}
-      s.logs.app = '';
-      s.logs.lines = [];
-      s.logs.checked.clear();
-      s.logs.open = null;
-      renderGrafanaView();
-      if (s.selected.kind === 'logs') loadGrafanaLogs();
-      if (!s.vitals.has(s.platform)) { await loadGrafanaVitals(); paintGrafanaHeader(); }
-    };
-  });
+  const back = grafanaViewer.querySelector('#gfv-back');
+  if (back) back.onclick = () => selectGrafana(s.back);
   grafanaViewer.querySelectorAll('[data-vital]').forEach(b => {
     b.onclick = () => {
       const health = (s.dashboards || []).find(d => /platform health/i.test(d.title));
@@ -283,27 +278,35 @@ function renderGrafanaView() {
 function renderGrafanaMain() {
   if (!grafanaViewer || activeTab !== 'grafana') return;
   const s = grafanaViewState;
-  if (!s.config?.hasToken) { renderGrafanaSetup(); return; }
+  const page = GRAFANA_PAGES.includes(s.selected.kind);
+  if (s.selected.kind === 'setup' || (!page && !s.config?.hasToken)) { renderGrafanaSetup(); return; }
   // A dashboard's webview survives repaints of the rest: reloading it would lose its state.
   const keepWebview = s.selected.kind === 'dashboard' && grafanaViewer.querySelector(`webview[data-uid="${CSS.escape(s.selected.id || '')}"]`);
   if (keepWebview) { paintGrafanaHeader(); return; }
   let body = '';
-  if (s.selected.kind === 'alert') body = grafanaAlertHtml(s.alerts?.find(a => a.uid === s.selected.id));
+  if (page) body = observabilityPageHtml();
+  else if (s.selected.kind === 'alert') body = grafanaAlertHtml(s.alerts?.find(a => a.uid === s.selected.id));
   else if (s.selected.kind === 'dashboard') body = grafanaDashboardHtml((s.dashboards || []).find(d => d.uid === s.selected.id));
   else body = grafanaLogsHtml();
-  const scroll = grafanaViewer.querySelector('.gfv-body')?.scrollTop || 0;
-  grafanaViewer.innerHTML = `${grafanaHeaderHtml()}<div class="gfv-body${s.selected.kind === 'dashboard' ? ' gfv-body--dash' : ''}">${body}</div>`;
+  // The same page keeps its scroll; another one starts at the top.
+  const pageKey = `${s.selected.kind}:${s.selected.id || ''}`;
+  const scroll = grafanaViewer.dataset.page === pageKey ? grafanaViewer.querySelector('.gfv-body')?.scrollTop || 0 : 0;
+  grafanaViewer.dataset.page = pageKey;
+  grafanaViewer.innerHTML = `${page ? '' : grafanaHeaderHtml()}<div class="gfv-body${s.selected.kind === 'dashboard' ? ' gfv-body--dash' : ''}">${body}</div>`;
   const bodyEl = grafanaViewer.querySelector('.gfv-body');
   if (s.selected.kind !== 'dashboard') bodyEl.scrollTop = scroll;
   bindGrafanaHeader();
-  if (s.selected.kind === 'alert') bindGrafanaAlert();
+  if (page) bindObservabilityPage();
+  else if (s.selected.kind === 'alert') bindGrafanaAlert();
   else if (s.selected.kind === 'dashboard') bindGrafanaDashboard();
   else bindGrafanaLogs();
 }
 
+/** Grafana's connect form: on the alert, dashboard and logs pages until a token is set, and from a page's Connect button. */
 function renderGrafanaSetup() {
   const s = grafanaViewState;
-  grafanaViewer.innerHTML = `<div class="gfv-body"><div class="gfv-setup">
+  grafanaViewer.dataset.page = 'setup';
+  grafanaViewer.innerHTML = `<div class="gfv-body">${s.back ? `<button type="button" class="ws-ghost ws-ghost--sm" id="gfv-setup-back">‹ Back</button>` : ''}<div class="gfv-setup">
       <h3>Connect Grafana</h3>
       <p>Switchboard reads alerts, figures and logs with a read-only token. In Grafana: Administration, Users and access, Service accounts, Add service account with the <b>Viewer</b> role, then Add service account token. The token is kept in the keychain.</p>
       <label class="gfv-field">URL <input type="text" class="ws-input" id="gfv-url" value="${gfvAttr(s.config?.url || 'https://monitoring.mls-cdn.net')}" spellcheck="false"></label>
@@ -311,11 +314,14 @@ function renderGrafanaSetup() {
       ${s.error ? `<div class="gh-error">${escapeHtml(s.error)}</div>` : ''}
       <button type="button" class="ws-btn ws-btn--primary" id="gfv-save">Connect</button>
     </div></div>`;
+  const back = grafanaViewer.querySelector('#gfv-setup-back');
+  if (back) back.onclick = () => selectGrafana(s.back);
   grafanaViewer.querySelector('#gfv-save').onclick = async () => {
     const result = await window.api.saveGrafanaConfig({ url: grafanaViewer.querySelector('#gfv-url').value, token: grafanaViewer.querySelector('#gfv-token').value });
     if (result?.error) { s.error = result.error; renderGrafanaSetup(); return; }
     s.error = null;
     s.config = null;
+    if (s.selected.kind === 'setup' && s.back) s.selected = s.back;
     await loadGrafanaView();
     startGrafanaPolling();
   };
@@ -658,6 +664,7 @@ async function showGrafanaView() {
   terminalArea.style.display = 'none';
   grafanaViewer.style.display = 'flex';
   renderGrafanaView();
+  startObservabilityPolling();
   await loadGrafanaView();
   showGrafanaItemSession();
 }
