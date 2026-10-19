@@ -401,6 +401,31 @@ function classifyNotification(message) {
 
 // --- Launch ---
 
+/** Whether a process is alive (signal 0 only checks). */
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; }
+}
+
+/**
+ * The job a session runs as in the background right now (`claude --bg`): its
+ * id for `claude attach`, or null. Read from Claude Code's own register of live
+ * sessions, ~/.claude/sessions/<pid>.json; a register it cannot read, or one
+ * whose process is gone, leaves the session to a plain resume.
+ */
+function backgroundJobId(sessionId, { dir = path.join(os.homedir(), '.claude', 'sessions'), alive = pidAlive } = {}) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return null; }
+  for (const name of names) {
+    if (!/^\d+\.json$/.test(name)) continue;
+    let entry;
+    try { entry = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')); } catch { continue; }
+    if (entry?.sessionId !== sessionId || entry.kind !== 'bg' || !alive(Number(entry.pid))) continue;
+    return String(entry.jobId || entry.sessionId);
+  }
+  return null;
+}
+
 // The levels `claude --effort` accepts. Checked rather than passed blind: a
 // stored setting can outlive the claude version that understood it, and an
 // unknown level fails the launch.
@@ -411,6 +436,9 @@ const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
  * for the target shell rather than building a command string here.
  */
 function buildLaunchArgs({ sessionId, isNew, options }) {
+  // A session running in the background is opened where it runs; resuming it
+  // here is refused while it does. attach takes nothing else.
+  if (options?.attachTo) return ['attach', String(options.attachTo)];
   const args = [];
   // These options accept multiple values. Keep them before the required
   // session selector so it ends their lists before the positional prompt.
@@ -482,5 +510,5 @@ module.exports = {
   readSessionFile, toViewerEntries,
   needsIdDetection, readLaunchSignals, matchesLaunch,
   parseTitleState, classifyNotification,
-  buildLaunchArgs,
+  buildLaunchArgs, backgroundJobId,
 };

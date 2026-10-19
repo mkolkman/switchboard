@@ -1,5 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const claude = require('../harnesses/claude');
 const { getHarness, DEFAULT_HARNESS, availableHarnesses, withLaunchFlags } = require('../harnesses');
@@ -365,4 +368,29 @@ test('withLaunchFlags puts main\'s flags before the prompt separator', () => {
     ['--session-id', 'abc', '--ide', '--mcp-config', '{}', '--', 'hi']);
   assert.deepEqual(withLaunchFlags(['--session-id', 'abc'], ['--ide']), ['--session-id', 'abc', '--ide']);
   assert.deepEqual(withLaunchFlags(['--', '--'], ['--ide']), ['--ide', '--', '--']);
+});
+
+test('buildLaunchArgs: a session running in the background is attached to, with nothing else', () => {
+  assert.deepEqual(
+    claude.buildLaunchArgs({ sessionId: 'abc', isNew: false, options: { attachTo: '717bf013', model: 'opus' } }),
+    ['attach', '717bf013'],
+  );
+});
+
+test('backgroundJobId: a live background session in the register gives its job id', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-sessions-'));
+  try {
+    const write = (pid, entry) => fs.writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, ...entry }));
+    write(101, { sessionId: 'bg-live', kind: 'bg', jobId: '717bf013' });
+    write(102, { sessionId: 'bg-gone', kind: 'bg', jobId: 'aaaa1111' });
+    write(103, { sessionId: 'fg', kind: 'interactive' });
+    fs.writeFileSync(path.join(dir, '104.json'), '{not json');
+    fs.writeFileSync(path.join(dir, '101.abc.key'), 'x');
+    const alive = (pid) => pid === 101 || pid === 103;
+    assert.equal(claude.backgroundJobId('bg-live', { dir, alive }), '717bf013');
+    assert.equal(claude.backgroundJobId('bg-gone', { dir, alive }), null);
+    assert.equal(claude.backgroundJobId('fg', { dir, alive }), null);
+    assert.equal(claude.backgroundJobId('nope', { dir, alive }), null);
+    assert.equal(claude.backgroundJobId('bg-live', { dir: path.join(dir, 'missing'), alive }), null);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -2197,10 +2197,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         state: sessionState({ projectPath, projectFolder, knownJsonlFiles, sessionSlug, isPlainTerminal, sessionOptions, runtime: runtimeId }),
       });
     } else {
+      // A session running in the background (`claude --bg`) cannot be resumed
+      // while it runs: open it with `claude attach` instead, without our flags.
+      const attachTo = !startFresh && !sessionOptions?.forkFrom && harness.backgroundJobId ? harness.backgroundJobId(sessionId) : null;
+      if (attachTo) log.info(`[open-terminal] ${sessionId} runs in the background as ${attachTo}; attaching`);
       // Argv is built by the harness and quoted here, so a value can never be
       // spliced into the command line as shell syntax.
       const cliArgs = harness.buildLaunchArgs({
-        sessionId, isNew: startFresh, options: sessionOptions,
+        sessionId, isNew: startFresh, options: attachTo ? { attachTo } : sessionOptions,
       });
 
       // preLaunchCmd is raw shell by design (e.g. "aws-vault exec profile --") — block newlines only
@@ -2212,7 +2216,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       const launchFlags = [];
       // Start MCP server for this session so Claude CLI sends diffs/file opens to Switchboard
       // (skip if user disabled IDE emulation in global settings)
-      if (isClaudeSession && sessionOptions?.mcpEmulation !== false) {
+      if (isClaudeSession && !attachTo && sessionOptions?.mcpEmulation !== false) {
         try {
           mcpServer = await startMcpServer(sessionId, [projectPath], mainWindow, log);
           launchFlags.push('--ide');
@@ -2222,7 +2226,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       }
       // The open_preview tool, from a server of its own: an IDE server's tools
       // other than diagnostics never reach the model.
-      if (isClaudeSession) {
+      if (isClaudeSession && !attachTo) {
         try {
           launchFlags.push(...await previewMcp.launchArgs(sessionId));
         } catch (err) {
