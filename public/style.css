@@ -7766,6 +7766,8 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-group-h { user-select: none; }
 .gh-group-h .gh-phase-bar { max-width: 80px; margin-right: 4px; }
 .gh-group-h .gh-act { opacity: 0.7; }
+.gh-group-sorting { gap: 5px; color: #a0a6e8; }
+.gh-group-sorting--needs { color: #e0b04a; }
 .gh-groupby { white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .gh-panel-plan { border: 0; border-radius: 0; background: transparent; }
 .gh-panel-plan .gh-plan-md { overflow: visible; }

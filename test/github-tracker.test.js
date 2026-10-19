@@ -176,3 +176,39 @@ test('Project fields are keyed per Project and preferred when named Wave', () =>
   const phases = phasesFrom([{ status: 'todo', fields }], by, source.issueFields[0]);
   assert.deepEqual(phases.map(p => [p.title, p.items.length]), [['Wave 3', 0], ['Wave 4', 1]]);
 });
+
+test('phaseAssignmentsFrom reads the last <phases> list against the plan', () => {
+  const { phaseAssignmentsFrom } = require('../public/github-phases');
+  const issue = (number, status = 'todo') => ({ repo: 'o/app', number, title: `Issue ${number}`, status });
+  const unphased = [issue(1), issue(2), issue(3), issue(4), issue(5, 'done')];
+  const phased = { by: { kind: 'milestone' }, def: null, phases: [{ title: 'Phase 5: Hardware', items: [] }], unphased };
+  const text = 'Draft:\n<phases>\no/app#1 -> Old\n</phases>\nWhy: #2 is new work.\n<phases>\n'
+    + 'o/app#1 -> phase 5: hardware\n- `o/app#2` → Phase 6: Polish\no/app#3 -> none\no/app#5 -> Phase 5: Hardware\no/other#9 -> Phase 5: Hardware\nnot a line\n</phases>';
+  const { assignments, skipped } = phaseAssignmentsFrom(text, phased);
+  assert.deepEqual(assignments.map(a => [a.item.number, a.title, a.isNew]), [[1, 'Phase 5: Hardware', false], [2, 'Phase 6: Polish', true]]);
+  assert.deepEqual(skipped.map(s => [s.item.number, s.reason]), [[3, 'no phase fits']], 'done and unknown issues are left out');
+  assert.equal(phaseAssignmentsFrom('No list here.', phased), null);
+});
+
+test('phaseAssignmentsFrom takes no new phase for a single-select field', () => {
+  const { phaseAssignmentsFrom } = require('../public/github-phases');
+  const unphased = [{ repo: 'o/app', number: 1, title: 'A', status: 'todo' }, { repo: 'o/app', number: 2, title: 'B', status: 'todo' }];
+  const phased = { by: { kind: 'field', key: 'wave', name: 'Wave' }, def: { type: 'single_select', options: [] }, phases: [{ title: 'Wave 1', items: [] }], unphased };
+  const { assignments, skipped } = phaseAssignmentsFrom('<phases>\no/app#1 -> wave 1\no/app#2 -> Wave 9\n</phases>', phased);
+  assert.deepEqual(assignments.map(a => [a.item.number, a.title]), [[1, 'Wave 1']]);
+  assert.deepEqual(skipped.map(s => s.reason), ['"Wave 9" is not an option']);
+});
+
+test('phaseSortPrompt lists the phases and the open issues without one', () => {
+  const { phaseSortPrompt } = require('../public/github-phases');
+  const source = { kind: 'issue', title: 'Pilot', url: 'https://github.com/o/app/issues/7' };
+  const prompt = phaseSortPrompt(source, {
+    by: { kind: 'milestone' }, def: null,
+    phases: [{ title: 'Phase 1', complete: true, items: [{ repo: 'o/app', number: 3, title: 'Done thing' }] }],
+    unphased: [{ repo: 'o/app', number: 4, title: 'Open thing', status: 'todo' }, { repo: 'o/app', number: 5, title: 'Closed thing', status: 'done' }],
+  });
+  assert.match(prompt, /- Phase 1 \(done\)\n  - o\/app#3: Done thing/);
+  assert.match(prompt, /- o\/app#4: Open thing/);
+  assert.doesNotMatch(prompt, /Closed thing/);
+  assert.match(prompt, /<phases>\nowner\/repo#123 -> Phase title\n<\/phases>/);
+});

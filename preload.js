@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   search: (type, query, titleOnly) => ipcRenderer.invoke('search', type, query, titleOnly),
   searchSessionIds: (query, sessionIds) => ipcRenderer.invoke('search-session-ids', query, sessionIds),
   readSessionJsonl: (sessionId) => ipcRenderer.invoke('read-session-jsonl', sessionId),
-  getSessionLastMessage: (sessionId) => ipcRenderer.invoke('get-session-last-message', sessionId),
+  getSessionLastMessage: (sessionId, options) => ipcRenderer.invoke('get-session-last-message', sessionId, options),
   getSessionGlance: (sessionId) => ipcRenderer.invoke('get-session-glance', sessionId),
   getSessionLinks: () => ipcRenderer.invoke('session-links'),
   addSessionLink: (link) => ipcRenderer.invoke('add-session-link', link),
