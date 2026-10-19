@@ -546,8 +546,8 @@ async function grafanaRepoPath(name) {
  * A session in the platform's repo (or the chat folder) beside the page: read
  * only, to investigate. `apps` picks the NOHRD repo(s) when lines are given.
  */
-async function startGrafanaSession(key, { platform, apps = [], prompt, label }) {
-  const repos = platform ? grafanaReposFor(platform, apps) : [];
+async function startGrafanaSession(key, { platform, apps = [], repos: named = null, prompt, label }) {
+  const repos = named || (platform ? grafanaReposFor(platform, apps) : []);
   const paths = (await Promise.all(repos.map(grafanaRepoPath))).filter(Boolean);
   let projectPath = paths[0];
   if (!projectPath) {
@@ -569,7 +569,7 @@ async function startGrafanaSession(key, { platform, apps = [], prompt, label }) 
   grafanaViewState.sessions.set(key, sessionId);
   // Kept for good: the alert or the platform's logs, and the way back.
   const [kind, ref] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
-  linkSession(sessionId, kind, ref, kind === 'alert' ? label.replace(/^Alert: /, '') : label);
+  linkSession(sessionId, kind, ref, kind === 'alert' || kind === 'error' ? label.replace(/^(Alert|Error): /, '') : label);
   rememberSessionOrigin(sessionId, origin);
   refreshSessionContextViews(sessionId);
   prSessionLabels.set(sessionId, label);
@@ -647,10 +647,11 @@ function leaveGrafanaSplit() {
   grafanaViewState.splitSession = null;
 }
 
-/** The selected alert's (or the platform's logs') running session beside it, or the page alone. */
+/** The selected alert's (or the platform's logs', or a component's newest error's) running session beside it, or the page alone. */
 function showGrafanaItemSession() {
   const s = grafanaViewState;
-  const key = s.selected.kind === 'alert' ? `alert:${s.selected.id}` : s.selected.kind === 'logs' ? `logs:${s.platform}` : null;
+  let key = s.selected.kind === 'alert' ? `alert:${s.selected.id}` : s.selected.kind === 'logs' ? `logs:${s.platform}` : null;
+  if (s.selected.kind === 'component') key = [...s.sessions.keys()].reverse().find(k => k.startsWith(`error:${s.selected.id}|`)) || null;
   const id = key && s.sessions.get(key);
   if (id && openSessions.has(id) && !openSessions.get(id).closed) showSession(id);
   else leaveGrafanaSplit();

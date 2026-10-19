@@ -3,11 +3,13 @@
 // backend or an app, each a repo released with mls (release.toml). This module
 // knows the products and components, and reads per component what runs where
 // (GitHub Releases, their Targets and Promotions tables, the production
-// deployments) and what a version holds: the merged PRs between two tags,
-// grouped per linked issue. Grafana's alerts, figures and logs come from
+// deployments), what a version holds: the merged PRs between two tags,
+// grouped per linked issue, and how it fares: a backend's Bugsnag errors
+// while the version ran. Grafana's alerts, figures and logs come from
 // grafana.js; the renderer puts them on the same components. Read-only.
 
 const { graphql, parseReleaseTargets, releaseModel } = require('./github-tracker');
+const bugsnag = require('./bugsnag');
 
 const OWNER = 'MoveLab-Studio';
 const STAGES = ['internal', 'beta', 'production'];
@@ -26,26 +28,26 @@ const COMMERCIAL_ELSEWHERE = /^(rp3|nohrd|waterrower|dr_wolff)[-_]/;
  * targets of one in a repo shipping several apps): kind backend or app,
  * `targets` the mls targets it is made of (a list, or a pattern `only` or `not`
  * matching their names; none: all of the repo's), `files`
- * which changed files make a PR part of it, `grafana` its platform and Loki
- * app in grafana.js. The NOHRD backends serve both NOHRD and WaterRower: one
+ * which changed files (and errors) make a PR part of it, `grafana` its
+ * platform and Loki app in grafana.js, `bugsnag` its production projects. The NOHRD backends serve both NOHRD and WaterRower: one
  * component each, under both products, each seeing its own part of the code.
  */
 const PRODUCTS = [
   { id: 'mlc', label: 'MLC', short: 'MLC', components: [
-    { id: 'mlc-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' } },
+    { id: 'mlc-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' }, bugsnag: ['movelab-connect-production'] },
     { id: 'mlc-android', label: 'Android', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { not: COMMERCIAL_ELSEWHERE } },
   ] },
   { id: 'nohrd', label: 'NOHRD', short: 'NH', components: [
-    { id: 'nohrd-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, files: { not: WATERROWER_FILES } },
-    { id: 'nohrd-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, files: { not: WATERROWER_FILES } },
-    { id: 'nohrd-fixed', label: 'Fixed', kind: 'app', repo: 'NOHRD-Fixed' },
+    { id: 'nohrd-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, bugsnag: ['nohrd-account-production'], files: { not: WATERROWER_FILES } },
+    { id: 'nohrd-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, bugsnag: ['nohrd-data-production'], files: { not: WATERROWER_FILES } },
+    { id: 'nohrd-fixed', label: 'Fixed', kind: 'app', repo: 'NOHRD-Fixed', bugsnag: ['slimbeam-fixed', 'wall-fixed', 'watergrinder-fixed'] },
     { id: 'nohrd-connect', label: 'NOHRD Connect', kind: 'app', repo: 'WATERROWER-NOHRD-Connect', targets: ['nca', 'nci'] },
     { id: 'nohrd-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^nohrd[-_]/ } },
   ] },
   { id: 'waterrower', label: 'WaterRower', short: 'WR', components: [
     { id: 'waterrower-connect', label: 'WATERROWER Connect', kind: 'app', repo: 'WATERROWER-NOHRD-Connect', targets: ['wra', 'wri'] },
-    { id: 'waterrower-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
-    { id: 'waterrower-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
+    { id: 'waterrower-account', label: 'Account', kind: 'backend', repo: 'NOHRD-Account', grafana: { platform: 'nohrd', app: 'nohrd-account' }, bugsnag: ['nohrd-account-production'], files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
+    { id: 'waterrower-data', label: 'Data', kind: 'backend', repo: 'NOHRD-Data', grafana: { platform: 'nohrd', app: 'nohrd-data' }, bugsnag: ['nohrd-data-production'], files: { only: WATERROWER_FILES, shared: NOHRD_SHARED_FILES } },
     { id: 'waterrower-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^waterrower[-_]/ } },
   ] },
   { id: 'cityrow', label: 'CITYROW', short: 'CR', owner: 'nohrd', components: [
@@ -55,7 +57,7 @@ const PRODUCTS = [
     { id: 'drwolff-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^dr_wolff[-_]/ } },
   ] },
   { id: 'rp3', label: 'RP3', short: 'RP3', components: [
-    { id: 'rp3-web', label: 'Web', kind: 'backend', repo: 'RP3-Rowing-Web', grafana: { platform: 'rp3', app: 'rp3' } },
+    { id: 'rp3-web', label: 'Web', kind: 'backend', repo: 'RP3-Rowing-Web', grafana: { platform: 'rp3', app: 'rp3' }, bugsnag: ['rp3-analyze-production', 'rp3-analyze-front-end-production'] },
     { id: 'rp3-app', label: 'App', kind: 'app', repo: 'RP3-App' },
     { id: 'rp3-commercial', label: 'Commercial', kind: 'app', repo: 'MoveLab-Connect-Android', targets: { only: /^rp3[-_]/ } },
   ] },
@@ -231,7 +233,7 @@ async function getOverview({ force = false } = {}) {
     short: p.short,
     owner: p.owner || null,
     components: await Promise.all(p.components.map(async (c) => {
-      const base = { id: c.id, label: c.label, kind: c.kind, repo: c.repo, grafana: c.grafana || null, product: p.id, filtered: !!c.files };
+      const base = { id: c.id, label: c.label, kind: c.kind, repo: c.repo, grafana: c.grafana || null, bugsnag: c.bugsnag || [], product: p.id, filtered: !!c.files };
       try {
         return { ...base, ...componentState(c, await readRepo(c.repo, { force })) };
       } catch (err) {
@@ -374,6 +376,12 @@ function comparePrs(repo, base, head) {
  * component's part of the repo and grouped.
  */
 async function getFeatures({ component: id, tag = null, staging = false }) {
+  const { base, head, truncated, prs, first } = await versionPrs(id, tag, staging);
+  return { base, head, truncated, first, ...groupFeatures(prs) };
+}
+
+/** The PRs of a version (see getFeatures), filtered to the component, as a flat list. */
+async function versionPrs(id, tag, staging = false) {
   const component = findComponent(id);
   if (!component) throw new Error(`Unknown component: ${id}`);
   const info = await readRepo(component.repo);
@@ -391,13 +399,96 @@ async function getFeatures({ component: id, tag = null, staging = false }) {
     if (at < 0) throw new Error(`${tag} is not a tag of ${component.repo}.`);
     head = tag;
     base = names[at + 1];
-    if (!base) return { base: null, head, ...groupFeatures([]), first: true };
+    if (!base) return { base: null, head, prs: [], first: true };
   }
   const { prs, truncated } = await comparePrs(component.repo, base, head);
   const targets = component.targets ? state.targets.map(t => t.name) : null;
   const paths = targets ? riskProductPaths(await readToml(component.repo)) : null;
   const mine = prs.filter(pr => prMatchesFiles(pr, component.files) && prMatchesTargets(pr, targets, paths));
-  return { base, head, truncated, ...groupFeatures(mine) };
+  return { base, head, truncated, prs: mine };
+}
+
+// --- How a version fares ---
+
+/**
+ * When a version ran in production: from its deploy (the production
+ * deployment for the tag that runs now, else the Release's date) to the next
+ * version's, or now. `previous` is the stretch of the version before it.
+ * Tags newest first.
+ */
+function versionWindow(state, tag) {
+  const tags = state.tags;
+  const at = tags.findIndex(t => t.name === tag);
+  if (at < 0) return null;
+  const prodTag = state.targets.map(t => t.stages?.production).filter(Boolean).find(p => p.tag === tag);
+  const start = (i) => (i === at && prodTag ? prodTag.date : tags[i]?.date || null);
+  const since = start(at);
+  const until = at > 0 ? tags[at - 1].date : null;
+  const previous = tags[at + 1] ? { since: tags[at + 1].date, until: since } : null;
+  return { since, until, previous };
+}
+
+/** Whether an error is part of a component that sees only some of the code: its top file, or its route. */
+function errorMatchesFiles(error, files) {
+  if (!files) return true;
+  const where = [error.file, error.context].filter(Boolean);
+  if (!where.length) return true;
+  if (files.only) return where.some(w => files.only.test(w) || files.shared?.test(w));
+  if (files.not) return where.some(w => !files.not.test(w)) || !error.file;
+  return true;
+}
+
+/** The PRs of a version that changed the file an error comes from. */
+function prsForError(error, prs) {
+  if (!error.file) return [];
+  return prs.filter(pr => (pr.files || []).includes(error.file)).map(({ number, title, url }) => ({ number, title, url }));
+}
+
+/** Events an hour over a trend, or null without one. */
+function eventsPerHour(trend) {
+  if (!trend?.length) return null;
+  const hours = (new Date(trend[trend.length - 1].to) - new Date(trend[0].from)) / 3600000;
+  return hours > 0 ? trend.reduce((n, b) => n + b.events, 0) / hours : null;
+}
+
+/**
+ * How a version of a backend fares in Bugsnag: the errors with events while
+ * it ran (new ones, first seen after its deploy, first; each with the PRs of
+ * the version that changed its file), and with `rate` the events an hour
+ * against the version before it.
+ */
+async function getProblems({ component: id, tag, rate = false, force = false }) {
+  const component = findComponent(id);
+  if (!component) throw new Error(`Unknown component: ${id}`);
+  if (!component.bugsnag?.length) return { errors: [], projects: [] };
+  if (!(await bugsnag.getConfig()).hasToken) return { errors: [], projects: component.bugsnag, noToken: true };
+  const state = componentState(component, await readRepo(component.repo));
+  const window = versionWindow(state, tag);
+  if (!window?.since) throw new Error(`${tag} has no date to start from.`);
+  const [lists, prs] = await Promise.all([
+    Promise.all(component.bugsnag.map(slug => bugsnag.errorsBetween(slug, window.since, window.until, { force }))),
+    versionPrs(id, tag).then(r => r.prs).catch(() => []),
+  ]);
+  const since = new Date(window.since).getTime();
+  const errors = lists.flat()
+    .filter(e => errorMatchesFiles(e, component.files))
+    .map(e => ({ ...e, isNew: !!e.firstSeen && new Date(e.firstSeen).getTime() >= since, prs: prsForError(e, prs) }))
+    .sort((a, b) => (b.isNew - a.isNew) || b.events - a.events);
+  let rates = null;
+  if (rate && window.previous) {
+    // The same length of time on both sides of the deploy, at most a week.
+    const span = Math.min(7 * 86400000, (window.until ? new Date(window.until) : Date.now()) - since, since - new Date(window.previous.since).getTime());
+    if (span > 3600000) {
+      const iso = (t) => new Date(t).toISOString();
+      const [now, before] = await Promise.all([
+        Promise.all(component.bugsnag.map(slug => bugsnag.eventTrend(slug, iso(since), iso(since + span), 1, { force }))),
+        Promise.all(component.bugsnag.map(slug => bugsnag.eventTrend(slug, iso(since - span), iso(since), 1, { force }))),
+      ]);
+      const sum = (lists) => lists.reduce((n, t) => n + (eventsPerHour(t) || 0), 0);
+      rates = { now: sum(now), before: sum(before), hours: span / 3600000 };
+    }
+  }
+  return { since: window.since, until: window.until, projects: component.bugsnag, errors, rates };
 }
 
 const tomlCache = new Map();
@@ -416,6 +507,7 @@ function asResult(promise) {
 }
 
 module.exports = {
-  PRODUCTS, findComponent, getOverview, getFeatures, asResult,
+  PRODUCTS, findComponent, getOverview, getFeatures, getProblems, asResult,
+  versionWindow, errorMatchesFiles, prsForError, eventsPerHour,
   markdownTable, parsePromotions, releaseSummary, componentState, currentTargets, isChore, prMatchesFiles, prMatchesTargets, riskProductPaths, groupFeatures,
 };

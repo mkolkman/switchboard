@@ -58,6 +58,7 @@ const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
 const grafana = require('./grafana');
 const observability = require('./observability');
+const bugsnag = require('./bugsnag');
 const sleepControl = require('./sleep-control');
 
 
@@ -892,6 +893,9 @@ ipcMain.handle('grafana-session-note', () => grafana.sessionToolsNote());
 
 ipcMain.handle('observability-overview', (_e, opts) => observability.asResult(observability.getOverview({ force: !!opts?.force })));
 ipcMain.handle('observability-features', (_e, spec) => observability.asResult(observability.getFeatures(spec || {})));
+ipcMain.handle('observability-problems', (_e, spec) => observability.asResult(observability.getProblems(spec || {})));
+ipcMain.handle('bugsnag-config', () => observability.asResult(bugsnag.getConfig()));
+ipcMain.handle('bugsnag-session-note', () => bugsnag.sessionToolsNote());
 
 // --- IPC: Help Scout (helpscout.js) ---
 // Each write is a click in the Help Scout tab. A reply is always a draft:

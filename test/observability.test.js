@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   PRODUCTS, findComponent, parsePromotions, releaseSummary, componentState, currentTargets,
   isChore, prMatchesFiles, prMatchesTargets, riskProductPaths, groupFeatures,
+  versionWindow, errorMatchesFiles, prsForError, eventsPerHour,
 } = require('../observability');
 
 const BODY = `2.41.8
@@ -145,4 +146,49 @@ test('the registry: unique component ids, NOHRD backends under both products', (
   assert.equal(findComponent('waterrower-account').repo, 'NOHRD-Account');
   assert.equal(findComponent('waterrower-account').product, 'waterrower');
   assert.equal(findComponent('nope'), null);
+});
+
+test('versionWindow: from the deploy to the next version, and the stretch before it', () => {
+  const state = {
+    targets: [{ name: null, stages: { production: { tag: '1.41.10', date: '2026-10-19T12:02:44Z' } } }],
+    tags: [
+      { name: '1.41.11', date: '2026-10-20T09:00:00Z' },
+      { name: '1.41.10', date: '2026-10-19T12:00:00Z' },
+      { name: '1.41.9', date: '2026-10-15T08:00:00Z' },
+    ],
+  };
+  assert.deepEqual(versionWindow(state, '1.41.10'), {
+    since: '2026-10-19T12:02:44Z', until: '2026-10-20T09:00:00Z',
+    previous: { since: '2026-10-15T08:00:00Z', until: '2026-10-19T12:02:44Z' },
+  });
+  assert.deepEqual(versionWindow(state, '1.41.9'), { since: '2026-10-15T08:00:00Z', until: '2026-10-19T12:00:00Z', previous: null });
+  assert.equal(versionWindow(state, 'nope'), null);
+});
+
+test('errorMatchesFiles: an error belongs to WaterRower by its file or its route', () => {
+  const only = { only: /(^|\/)water_?rower/i, shared: /^app\/Models\// };
+  const not = { not: /(^|\/)water_?rower/i };
+  const wrRoute = { file: 'app/Http/Middleware/AcceptLanguage.php', context: 'GET /api/waterrower/community' };
+  const wrFile = { file: 'app/WaterRower/Leaderboard.php', context: 'GET /api/waterrower/leaderboard' };
+  const nohrd = { file: 'app/Training/Plan.php', context: 'GET /api/training/enrollments' };
+  assert.ok(errorMatchesFiles(wrRoute, only) && errorMatchesFiles(wrRoute, not));
+  assert.ok(errorMatchesFiles(wrFile, only) && !errorMatchesFiles(wrFile, not));
+  assert.ok(!errorMatchesFiles(nohrd, only) && errorMatchesFiles(nohrd, not));
+  assert.ok(errorMatchesFiles({ file: 'app/Models/User.php', context: 'POST /oauth/token' }, only));
+  assert.ok(errorMatchesFiles({ file: '', context: '' }, only));
+  assert.ok(errorMatchesFiles(nohrd, undefined));
+});
+
+test('prsForError: the version\'s PRs that changed the error\'s file', () => {
+  const prs = [
+    { number: 1, title: 'A', url: 'a', files: ['app/Auth/Token.php', 'x'] },
+    { number: 2, title: 'B', url: 'b', files: ['y'] },
+  ];
+  assert.deepEqual(prsForError({ file: 'app/Auth/Token.php' }, prs), [{ number: 1, title: 'A', url: 'a' }]);
+  assert.deepEqual(prsForError({ file: '' }, prs), []);
+});
+
+test('eventsPerHour: the events over the span of a trend', () => {
+  assert.equal(eventsPerHour([{ from: '2026-10-19T00:00:00Z', to: '2026-10-19T02:00:00Z', events: 10 }, { from: '2026-10-19T02:00:00Z', to: '2026-10-19T04:00:00Z', events: 30 }]), 10);
+  assert.equal(eventsPerHour([]), null);
 });

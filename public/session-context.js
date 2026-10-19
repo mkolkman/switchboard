@@ -1,10 +1,10 @@
 // --- What a session works on, and the way back to where it was opened ---
 // A session's context is everything it belongs to or works on: its project and
 // track, plan items and the issues and PRs among them (plan links), a PR or
-// issue it was started from elsewhere, a Help Scout ticket, a Grafana alert or
-// log search (session_links), and the PR of the branch it works on (found from
-// its transcript). The terminal header shows it as a breadcrumb anyone can
-// click through, the sidebar and rail as a short label.
+// issue it was started from elsewhere, a Help Scout ticket, a Grafana alert, a
+// Bugsnag error or log search (session_links), and the PR of the branch it
+// works on (found from its transcript). The terminal header shows it as a
+// breadcrumb anyone can click through, the sidebar and rail as a short label.
 // A session also has an origin, the place it was opened from in this run of
 // the app: the header's back button returns there, and closing the session
 // returns there too while you are still in that tab.
@@ -16,7 +16,8 @@
 // planState, loadProjectPlan, mainEl), project-github-view.js
 // (githubLinkForSession, githubTabState, githubRepoName), github-view.js
 // (openGithubViewPullRequest), helpscout-view.js (helpscoutLinkFor,
-// openHelpscoutTicket), grafana-view.js (openGrafanaAlert, selectGrafana).
+// openHelpscoutTicket), grafana-view.js (openGrafanaAlert, selectGrafana),
+// observability-view.js (openObservabilityError, observabilityPlaceLabel).
 
 const sessionLinkRows = new Map(); // sessionId → [{ kind, ref, label }]
 const sessionBranchPrs = new Map(); // sessionId → { pr, at } from its branch
@@ -124,6 +125,8 @@ function sessionContexts(sessionId) {
       push({ kind: l.kind, key: String(l.ref).toLowerCase(), ref: l.ref, label: `${l.kind === 'pr' ? 'PR' : 'Issue'} #${n}`, title: `${l.ref}${l.label ? `: ${l.label}` : ''}`, open: () => openGithubContext(l.ref) });
     } else if (l.kind === 'alert') {
       push({ kind: 'alert', key: `alert:${l.ref}`, label: l.label ? `Alert: ${l.label}` : 'Alert', title: `Grafana alert ${l.label || l.ref}`, open: () => openGrafanaAlert(l.ref) });
+    } else if (l.kind === 'error') {
+      push({ kind: 'error', key: `error:${l.ref}`, label: l.label ? `Error: ${l.label}` : 'Error', title: `Bugsnag error ${l.label || ''} in ${String(l.ref).split('|').slice(0, 2).join(' ')}`, open: () => openObservabilityError(l.ref) });
     } else if (l.kind === 'logs') {
       push({ kind: 'logs', key: `logs:${l.ref}`, label: l.label || 'Logs', title: 'Grafana log search', open: () => openGrafanaLogs(l.ref) });
     }
@@ -159,7 +162,7 @@ function openGrafanaLogs(platform) {
   else selectGrafana({ kind: 'logs', id: null });
 }
 
-const SESSION_CONTEXT_RANK = ['ticket', 'pr', 'issue', 'alert', 'logs', 'plan'];
+const SESSION_CONTEXT_RANK = ['ticket', 'pr', 'issue', 'alert', 'error', 'logs', 'plan'];
 
 /** The one context a session row shows: ticket, PR, issue, alert, log search or plan item; null for none. */
 function sessionContextLabel(sessionId) {
@@ -205,7 +208,13 @@ function sessionPlaceHere() {
   if (tab === 'grafana') {
     const sel = { ...grafanaViewState.selected };
     const alert = sel.kind === 'alert' ? grafanaViewState.alerts?.find(a => a.uid === sel.id) : null;
-    return { tab, label: alert ? `Alert: ${alert.title}` : sel.kind === 'logs' ? 'Logs' : 'Observability', restore: () => (sel.kind === 'alert' ? openGrafanaAlert(sel.id) : openGrafanaLogs(grafanaViewState.platform)) };
+    const restore = () => {
+      if (sel.kind === 'alert') { openGrafanaAlert(sel.id); return; }
+      if (sel.kind === 'logs') { openGrafanaLogs(grafanaViewState.platform); return; }
+      const grafanaTab = document.querySelector('.sidebar-tab[data-tab="grafana"]');
+      if (grafanaTab && activeTab !== 'grafana') { grafanaViewState.selected = sel; grafanaTab.click(); } else selectGrafana(sel);
+    };
+    return { tab, label: alert ? `Alert: ${alert.title}` : sel.kind === 'logs' ? 'Logs' : observabilityPlaceLabel(sel) || 'Observability', restore };
   }
   return null;
 }
