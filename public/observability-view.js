@@ -17,10 +17,10 @@
 // Usage: the business figures each backend exports as business_* gauges
 // (users, workouts, training, subscriptions), a row on the product's page and
 // a Usage page with the rest.
-// Depends on: utils.js (escapeHtml), projects-view.js (PICONS),
-// grafana-view.js (grafanaViewState, selectGrafana, grafanaAlertRow,
-// grafanaVitalsHtml, grafanaService, renderGrafanaMain, renderGrafanaList,
-// loadGrafanaVitals, paintGrafanaHeader).
+// Depends on: utils.js (escapeHtml), projects-view.js (PICONS), github-view.js
+// (openGithubViewPullRequest), grafana-view.js (grafanaViewState,
+// selectGrafana, grafanaAlertRow, grafanaVitalsHtml, grafanaService,
+// renderGrafanaMain, renderGrafanaList, loadGrafanaVitals, paintGrafanaHeader).
 
 const OBSERVABILITY_POLL_MS = 5 * 60 * 1000;
 
@@ -892,6 +892,16 @@ function observabilityInfraHtml() {
     </div>`;
 }
 
+/** A PR opens in the GitHub tab (github-view.js); anything else in the browser. */
+function openObservabilityLink(url, title = '') {
+  const pr = String(url).match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (pr && typeof openGithubViewPullRequest === 'function') {
+    openGithubViewPullRequest(`${pr[1]}/${pr[2]}#${pr[3]}`, { url, title: title.replace(/^Added in: /, '') });
+    return;
+  }
+  window.api.openExternal(url);
+}
+
 /** Wire the page just drawn, and start reading what it shows and does not have yet. */
 function bindObservabilityPage() {
   const s = observabilityState;
@@ -922,7 +932,7 @@ function bindObservabilityPage() {
     if (version && version !== 'staging' && c.bugsnag?.length) loadObservabilityProblems(c.id, version, true);
     if (c?.flags) loadObservabilityFlags(c.id);
   }
-  root.querySelectorAll('[data-obs-url]').forEach(b => { b.onclick = (e) => { e.stopPropagation(); window.api.openExternal(b.dataset.obsUrl); }; });
+  root.querySelectorAll('[data-obs-url]').forEach(b => { b.onclick = (e) => { e.stopPropagation(); openObservabilityLink(b.dataset.obsUrl, b.title); }; });
   root.querySelectorAll('[data-obs-component]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'component', id: b.dataset.obsComponent }); });
   root.querySelectorAll('[data-obs-product]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'product', id: b.dataset.obsProduct }); });
   root.querySelectorAll('[data-obs-version]').forEach(b => {
