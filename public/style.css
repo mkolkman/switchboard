@@ -7188,7 +7188,6 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-closed { font-size: 10px; color: #a07ad8; border: 1px solid rgba(160,122,216,0.4); border-radius: 8px; padding: 0 6px; }
 .gh-meta { padding-top: 0; }
 .gh-error { color: #e08a8a; }
-.gh-remove { padding: 4px; }
 
 .gh-counts { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 14px 8px; }
 .gh-count { font-size: 10.5px; color: #9a9ab0; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 1px 7px; }
@@ -7356,10 +7355,6 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-ci--fail { background: #e05a5a; }
 .gh-ci--pending { background: #e0b04a; }
 
-.gh-add { display: flex; gap: 8px; }
-.gh-add .ws-input { flex: 1; }
-.gh-add-error { color: #e08a8a; font-size: 11.5px; min-height: 0; }
-.gh-add-error:empty { display: none; }
 
 /* ---- GitHub tab: list beside the review panel ---- */
 .gh-tab-body { padding-bottom: 20px; display: flex; flex-direction: column; overflow: hidden; }
@@ -7549,9 +7544,6 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-panel-plan { border: 0; border-radius: 0; background: transparent; }
 .gh-panel-plan .gh-plan-md { overflow: visible; }
 .gh-panel-plan.gh-plan-doc { position: static; max-height: none; }
-.gh-link-card { margin-top: 18px; max-width: 760px; }
-.gh-link-card .gh-link-form { padding: 0 14px 6px; }
-.gh-link-card .gh-add-error { padding: 0 14px 8px; }
 
 /* ---- Claude sessions on a PR, with the terminal in the panel ---- */
 .gh-sessions { padding-top: 8px; padding-bottom: 8px; background: rgba(120,130,255,0.03); }

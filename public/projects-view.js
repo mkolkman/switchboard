@@ -1570,10 +1570,6 @@ function planSignature(state) {
 
 function renderPlanTab(project, body) {
   if (typeof isGithubBacked === 'function' && isGithubBacked(project)) { renderProjectGithubTab(project, body); return; }
-  // A file-based plan, with a way to make a GitHub issue or Project the plan instead.
-  body.innerHTML = '<div id="ws-file-plan"></div><div id="ws-plan-github-link"></div>';
-  renderGithubLinkForm(project, body.querySelector('#ws-plan-github-link'));
-  body = body.querySelector('#ws-file-plan');
   const state = planState(project);
   // Only the first look at a project has nothing to show. A refresh keeps what
   // is on screen — a running session writes constantly, and blanking the tab

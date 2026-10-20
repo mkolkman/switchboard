@@ -289,15 +289,14 @@ function githubGroupsFor(result) {
 function githubTrackerCard(project, refText, state) {
   const result = state.results.get(refText);
   const loading = state.loading.has(refText);
-  const removeBtn = `<button type="button" class="ws-ghost gh-remove" data-ref="${escapeHtml(refText)}" title="Stop tracking ${escapeHtml(refText)} in this project (nothing on GitHub changes)">${PICONS.x(12)}</button>`;
   const refreshBtn = `<button type="button" class="ws-ghost gh-refresh" data-ref="${escapeHtml(refText)}" title="Fetch the latest from GitHub"${loading ? ' disabled' : ''}>${PICONS.refresh(12)}<span>${loading ? 'Loading…' : 'Refresh'}</span></button>`;
 
   if (!result) {
-    return `<div class="ws-card gh-card"><div class="ws-card-h"><span class="ws-card-title">${escapeHtml(refText)}</span><span class="ws-flex"></span>${refreshBtn}${removeBtn}</div>`
+    return `<div class="ws-card gh-card"><div class="ws-card-h"><span class="ws-card-title">${escapeHtml(refText)}</span><span class="ws-flex"></span>${refreshBtn}</div>`
       + `<div class="git-loading"><span class="git-loading-dot"></span>Reading GitHub…</div></div>`;
   }
   if (result.error) {
-    return `<div class="ws-card gh-card"><div class="ws-card-h"><span class="ws-card-title">${escapeHtml(refText)}</span><span class="ws-flex"></span>${refreshBtn}${removeBtn}</div>`
+    return `<div class="ws-card gh-card"><div class="ws-card-h"><span class="ws-card-title">${escapeHtml(refText)}</span><span class="ws-flex"></span>${refreshBtn}</div>`
       + `<div class="ws-card-text gh-error">${escapeHtml(result.error)}</div></div>`;
   }
 
@@ -318,7 +317,7 @@ function githubTrackerCard(project, refText, state) {
     + (typeof githubPlanHidden === 'function' && githubPrimaryRef(project) === refText && githubPlanHidden(project) && result.plan
       ? `<button type="button" class="ws-ghost gh-show-plan" title="Show the plan beside the list">Plan</button>` : '')
     + (result.wayfinder && result.state === 'OPEN' && typeof wayfinderNextButton === 'function' ? wayfinderNextButton(refText) : '')
-    + `${refreshBtn}${removeBtn}</div>`
+    + `${refreshBtn}</div>`
     + `<div class="ws-card-row gh-meta"><span class="ws-card-meta mono">${escapeHtml(result.ref)}</span><span class="ws-flex"></span><span class="ws-card-meta" title="${escapeHtml(fetched)}">${escapeHtml(fetched)}</span></div>`
     + `<div class="ws-card-row"><div class="ws-progress ws-progress--sm"><div class="ws-progress-fill" style="width:${pct}%"></div></div><span class="ws-card-meta">${summary.done}/${summary.total} done</span></div>`
     + `<div class="gh-counts">${counts}</div>`;
@@ -493,27 +492,17 @@ function paintGithubList(project) {
   const list = githubRoot(project)?.querySelector('#gh-list');
   if (!list) return;
   const state = githubTabState(project.id);
+  // The references are set by the code that makes projects from GitHub, not here.
   const refs = project.githubRefs || [];
-  // Keep a half-typed reference and the list's scroll across repaints.
-  const typed = list.querySelector('#gh-add-input')?.value || '';
-  const hadFocus = document.activeElement?.id === 'gh-add-input';
+  // Keep the list's scroll across repaints.
   const scroll = list.scrollTop;
 
-  list.innerHTML = `
-    ${refs.length ? refs.map(r => githubTrackerCard(project, r, state)).join('') : `
+  list.innerHTML = refs.length ? refs.map(r => githubTrackerCard(project, r, state)).join('') : `
       <div class="git-empty-state">
-        <div class="git-empty-title">Track work on GitHub</div>
-        <div>Add a tracking issue or a GitHub Project. Its issues, pull requests, reviews and checks are read live from GitHub; nothing is copied into the project.</div>
-      </div>`}
-    <form class="gh-add" id="gh-add">
-      <input type="text" class="ws-input mono" id="gh-add-input" spellcheck="false" placeholder="https://github.com/owner/repo/issues/123, owner/repo#123 or a Project URL">
-      <button type="submit" class="ws-btn">${PICONS.plus(12)}<span>Track</span></button>
-    </form>
-    <div class="gh-add-error" id="gh-add-error"></div>`;
+        <div class="git-empty-title">No plan on GitHub yet</div>
+        <div>A project made from a wayfinder map is linked to it on its own. Its issues, pull requests, reviews and checks are read live from GitHub; nothing is copied into the project.</div>
+      </div>`;
   list.scrollTop = scroll;
-  const input = list.querySelector('#gh-add-input');
-  if (typed) input.value = typed;
-  if (hadFocus) input.focus();
 
   list.querySelectorAll('.gh-title[data-url]').forEach(el => {
     el.onclick = (e) => { e.stopPropagation(); window.api.openExternal(el.dataset.url); };
@@ -549,21 +538,6 @@ function paintGithubList(project) {
   list.querySelectorAll('.gh-refresh').forEach(btn => {
     btn.onclick = () => loadGithubTracker(project, btn.dataset.ref, { force: true });
   });
-  list.querySelectorAll('.gh-remove').forEach(btn => {
-    btn.onclick = async () => {
-      const ref = btn.dataset.ref;
-      if (!confirm(`Stop tracking ${ref} in ${project.name}?\n\nNothing changes on GitHub.`)) return;
-      state.results.delete(ref);
-      await saveGithubRefs(project, refs.filter(r => r !== ref));
-    };
-  });
-  list.querySelector('#gh-add').onsubmit = async (e) => {
-    e.preventDefault();
-    const value = input.value.trim();
-    if (!value) return;
-    const saved = await saveGithubRefs(project, [...refs, value]);
-    if (saved?.error) list.querySelector('#gh-add-error').textContent = saved.error;
-  };
 }
 
 /** The tracker result and item behind a row key. */
@@ -644,14 +618,6 @@ function bindGithubPlanActions(project, list, state) {
       if (badge && slot) { badge.onclick = ((orig) => (e) => { e.stopPropagation(); orig(e); })(badge.onclick); slot.appendChild(badge); }
     });
   }
-}
-
-async function saveGithubRefs(project, refs) {
-  const result = await window.api.updateProject(project.id, { githubRefs: refs });
-  if (result?.error) return result;
-  if (result?.project) project.githubRefs = result.project.githubRefs;
-  if (selectedProject()?.id === project.id && projectTab(project) === 'plan') renderOverview();
-  return result;
 }
 
 function githubTabShown(project) {
@@ -1815,24 +1781,3 @@ function bindGithubPanelComments(project, panel, detail) {
   });
 }
 
-/** On a file-based Plan tab: make a GitHub tracking issue or Project the plan. */
-function renderGithubLinkForm(project, container) {
-  container.innerHTML = `
-    <div class="ws-card gh-link-card">
-      <div class="ws-card-h"><span class="ws-card-title">Plan on GitHub</span><span class="ws-card-meta">optional</span></div>
-      <div class="ws-card-text muted">Use a tracking issue or a GitHub Project as this project's plan. Its issues become the todos, read live; nothing is copied into the project.</div>
-      <form class="gh-add gh-link-form">
-        <input type="text" class="ws-input mono" spellcheck="false" placeholder="https://github.com/owner/repo/issues/123, owner/repo#123 or a Project URL">
-        <button type="submit" class="ws-btn">${PICONS.plus(12)}<span>Use as plan</span></button>
-      </form>
-      <div class="gh-add-error"></div>
-    </div>`;
-  const form = container.querySelector('form');
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const value = form.querySelector('input').value.trim();
-    if (!value) return;
-    const saved = await saveGithubRefs(project, [...(project.githubRefs || []), value]);
-    if (saved?.error) container.querySelector('.gh-add-error').textContent = saved.error;
-  };
-}
