@@ -578,7 +578,14 @@ function observabilityKeyFiguresHtml(components) {
   const pending = alerts.filter(a => a.state === 'pending').length;
   const newErrors = components.reduce((n, c) => n + observabilityNewErrors(c), 0);
   const rollouts = observabilityRollouts(components);
-  const status = firing ? ['bad', `${firing} firing`] : pending || newErrors ? ['warn', [pending && `${pending} pending`, newErrors && `${newErrors} new error${newErrors === 1 ? '' : 's'}`].filter(Boolean).join(', ')] : ['ok', 'All clear'];
+  // A component whose errors jumped (twice the version before, and more than a few an hour) counts too.
+  const jumps = components.filter(c => {
+    const r = observabilityState.problems.get(`${c.id}|${observabilityProductionTag(c)?.tag}|1`)?.rates;
+    return r && r.before > 0 && r.now / r.before >= 2 && r.now >= 5;
+  }).length;
+  const status = firing ? ['bad', `${firing} firing`]
+    : pending || newErrors || jumps ? ['warn', [pending && `${pending} pending`, newErrors && `${newErrors} new error${newErrors === 1 ? '' : 's'}`, jumps && 'errors up'].filter(Boolean).join(', ')]
+    : ['ok', 'All clear'];
   const figures = [obsFigure('Status', escapeHtml(status[1]), alerts.length ? `${alerts.length} alert rule${alerts.length === 1 ? '' : 's'}` : '', status[0])];
 
   // The newest release of any component.
