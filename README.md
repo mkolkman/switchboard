@@ -181,7 +181,7 @@ The project's **Settings** tab is a list of rows: the name, the start folder, fo
 
 ![Project View new session menu](build/project-view-new-session-menu.png)
 
-- **New project** — Name it, pick a template, and attach the folders it works in. The dialog shows what Create will make: the project folder and its files, and each worktree on its branch. Sessions started from the overview are filed under the project and still show under their folder in the Sessions tab.
+- **Projects come from wayfinder maps.** There is no New project button. Every wayfinder map on GitHub you are involved in gets a project, named after the map and linked to it. Sessions started from a project are filed under it and still show under their folder in the Sessions tab.
 - **Move to project** — Any session row has a move action. Nothing is filed until you launch it from a project or move it there.
 - **Mark as done** — Done projects drop to the bottom, collapsed. Removing a project only forgets it. The folder and the sessions stay on disk.
 - **Snooze** — Right-click a project and choose **Snooze**: in 1 hour, in 3 hours, this evening, tomorrow, next week, or a time you pick. It moves to a collapsed **Snoozed** section below Active, and its sessions keep running. It comes back at that time, or sooner if a session needs your input, marked with a violet dot until you open it. **Wake now** brings it back early. A project waiting on your input can't be snoozed.
