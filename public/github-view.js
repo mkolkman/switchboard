@@ -78,10 +78,12 @@ async function loadGithubView({ quiet = false } = {}) {
   githubViewState.loading = false;
   if (result?.error) githubViewState.error = result.error;
   else {
-    githubViewState.error = null;
-    githubViewState.mine = result.mine || [];
-    githubViewState.review = result.review || [];
-    githubViewState.closed = result.closed || [];
+    // A list GitHub could not give this time keeps what it had, and says so.
+    const missing = result.missing || [];
+    githubViewState.error = missing.length ? `GitHub did not answer for ${missing.join(' and ')}; showing the last list.` : null;
+    if (!missing.includes('My pull requests') || !githubViewState.mine) githubViewState.mine = result.mine || [];
+    if (!missing.includes('Review requested') || !githubViewState.review) githubViewState.review = result.review || [];
+    if (!missing.includes('Merged or closed') || !githubViewState.closed) githubViewState.closed = result.closed || [];
     githubViewState.fetchedAt = result.fetchedAt;
     syncGithubViewResults();
   }

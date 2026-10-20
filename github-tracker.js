@@ -1474,24 +1474,43 @@ async function addListDetails(items) {
   }));
 }
 
+// The GitHub tab's lists, one search each. Asked in one query they ran into
+// GitHub's ten-second limit (502/504); apart, each is a fifth of the work.
+const MY_PR_SEARCHES = {
+  mine: ['is:pr is:open author:@me archived:false sort:updated-desc', 50],
+  review: ['is:pr is:open review-requested:@me archived:false sort:updated-desc', 50],
+  closedMine: ['is:pr is:closed author:@me archived:false sort:updated-desc', CLOSED_PRS],
+  closedRequested: ['is:pr is:closed review-requested:@me archived:false sort:updated-desc', CLOSED_PRS],
+  closedReviewed: ['is:pr is:closed reviewed-by:@me -author:@me archived:false sort:updated-desc', CLOSED_PRS],
+};
+
+/** A GraphQL call that tries once more when GitHub times out (502, 503, 504). */
+async function graphqlRetrying(query, variables) {
+  try {
+    return await graphql(query, variables);
+  } catch (err) {
+    if (!/GitHub answered 50[234]/.test(err.message || '')) throw err;
+    await new Promise(r => setTimeout(r, 1500));
+    return graphql(query, variables);
+  }
+}
+
 async function getMyPullRequests() {
-  const data = await graphql(`query($me: String) {
-    mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
-      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
+  const me = await ghLogin();
+  const failed = [];
+  const data = {};
+  await Promise.all(Object.entries(MY_PR_SEARCHES).map(async ([name, [q, first]]) => {
+    try {
+      const result = await graphqlRetrying(`query($me: String, $q: String!) {
+        list: search(query: $q, type: ISSUE, first: ${first}) { nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } } }
+      }`, { me, q });
+      data[name] = result?.list;
+    } catch (err) {
+      failed.push({ name, error: err.message || String(err) });
     }
-    review: search(query: "is:pr is:open review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
-      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
-    }
-    closedMine: search(query: "is:pr is:closed author:@me archived:false sort:updated-desc", type: ISSUE, first: ${CLOSED_PRS}) {
-      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
-    }
-    closedRequested: search(query: "is:pr is:closed review-requested:@me archived:false sort:updated-desc", type: ISSUE, first: ${CLOSED_PRS}) {
-      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
-    }
-    closedReviewed: search(query: "is:pr is:closed reviewed-by:@me -author:@me archived:false sort:updated-desc", type: ISSUE, first: ${CLOSED_PRS}) {
-      nodes { ... on PullRequest { ${PR_FIELDS} createdAt author { login } } }
-    }
-  }`, { me: await ghLogin() });
+  }));
+  // Nothing at all is an error; a list missing is said beside the others.
+  if (failed.length === Object.keys(MY_PR_SEARCHES).length) throw new Error(failed[0].error);
   const toItem = (node) => {
     if (!node?.number) return null;
     const pr = shapePr(node, 'linked');
@@ -1520,7 +1539,9 @@ async function getMyPullRequests() {
     addReviewChanges([...lists.mine, ...lists.review].flatMap(i => i.pullRequests)),
     addListDetails([...lists.mine, ...lists.review, ...lists.closed]),
   ]);
-  return { ...lists, fetchedAt: new Date().toISOString() };
+  const names = { mine: 'My pull requests', review: 'Review requested', closedMine: 'Merged or closed', closedRequested: 'Merged or closed', closedReviewed: 'Merged or closed' };
+  const missing = [...new Set(failed.map(f => names[f.name]))];
+  return { ...lists, missing, fetchedAt: new Date().toISOString() };
 }
 
 /** Run a GitHub call for the renderer; errors become { error } like the rest of IPC. */
