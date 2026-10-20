@@ -68,8 +68,8 @@ function sessionBranchPr(sessionId) {
 
 // --- Going to a context ---
 
-/** The Projects tab on a project, on one of its tabs (overview, plan, …). */
-function openProjectAt(project, tab = 'overview') {
+/** The Projects tab on a project, on one of its tabs (plan, sessions, …). */
+function openProjectAt(project, tab = PROJECT_DEFAULT_TAB) {
   const projectsTab = document.querySelector('.sidebar-tab[data-tab="projects"]');
   if (projectsTab && activeTab !== 'projects') projectsTab.click();
   selectProject(project.id, { tab });
@@ -99,7 +99,7 @@ function sessionContexts(sessionId) {
   const owner = session && typeof projectForSession === 'function' ? projectForSession(session) : null;
   const project = owner?.project || null;
   if (project) {
-    push({ kind: 'project', key: `project:${project.id}`, label: project.name, title: `Project ${project.name}`, open: () => openProjectAt(project, 'overview') });
+    push({ kind: 'project', key: `project:${project.id}`, label: project.name, title: `Project ${project.name}`, open: () => openProjectAt(project, 'sessions') });
     // The plan's links: the issue or PR an item is (githubLinkForSession), else the item itself.
     const state = planState(project);
     if (!state.data && !state.loading) {
@@ -195,7 +195,7 @@ function sessionPlaceHere() {
       const key = sel.view !== 'issue' ? sel.view : sel.itemKey;
       return { tab, label: `${sel.view !== 'issue' ? 'PR' : 'Issue'} #${String(key).split('#')[1]}`, restore: () => { githubTabState(project.id).selection = { ...sel }; openProjectAt(project, 'plan'); } };
     }
-    const navTab = projectNavigation(project).tab || 'overview';
+    const navTab = projectNavigation(project).tab || PROJECT_DEFAULT_TAB;
     return { tab, label: project.name, restore: () => openProjectAt(project, navTab) };
   }
   if (tab === 'helpscout' && helpscoutViewState.selectedId) {

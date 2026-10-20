@@ -138,7 +138,7 @@ function repaintGithubSourceViews(project) {
     return;
   }
   const tab = projectTab(project);
-  if (tab === 'overview') {
+  if (tab === 'sessions') {
     const side = projectViewer.querySelector('#ws-side');
     if (side) renderSideCards(project, side);
   } else if (tab === 'plan') {
@@ -304,7 +304,7 @@ async function seedGithubPhases(project) {
   refreshGithubSource(project);
 }
 
-// --- Overview: Plan, Todos and Attached Folders from GitHub ---
+// --- Sessions tab: Plan, Todos and Attached Folders from GitHub ---
 
 function githubStatusLine(source) {
   if (!source) return '<div class="git-loading gh-mini-loading"><span class="git-loading-dot"></span>Reading GitHub…</div>';

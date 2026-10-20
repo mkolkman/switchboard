@@ -3,8 +3,9 @@
 // The Projects tab is not another session tree. The sidebar lists projects,
 // nothing else. Selecting one opens its workspace in the main area:
 //
-//   Overview  — header, then the sessions as a card beside the plan, todos
-//               and folders. Settings is a second tab of the same page.
+//   Page      shows a header, then tabs: Plan (the default), Sessions (the sessions
+//               as a card beside the plan, todos and folders), Files, Git and
+//               Settings.
 //   Working   — opening one of its sessions keeps you in the project: a slim
 //               strip on top, then sessions | terminal side by side.
 //
@@ -32,7 +33,7 @@ let openCtxMenu = null;
 const projectsUi = {
   selectedProjectId: sessionStorage.getItem('projects.selected') || null,
   // Each project owns its runtime-only navigation state. Nothing here is
-  // persisted: projects start on their Overview tab after an app restart.
+  // persisted: projects start on their Plan tab after an app restart.
   navigationByProject: new Map(), // projectId → { tab, mode, sessionId }
   groupBy: (() => { try { return JSON.parse(sessionStorage.getItem('projects.groupBy') || '{}'); } catch { return {}; } })(),
   expandedLists: {},
@@ -167,7 +168,9 @@ function saveProjectsUi() {
   sessionStorage.setItem('projects.archivedOpen', JSON.stringify(projectsUi.archivedOpen));
 }
 
-const PROJECT_WORKSPACE_TABS = new Set(['overview', 'plan', 'files', 'git', 'github', 'settings']);
+// A project opens on its Plan tab and then keeps whichever tab it was left on.
+const PROJECT_DEFAULT_TAB = 'plan';
+const PROJECT_WORKSPACE_TABS = new Set(['plan', 'sessions', 'files', 'git', 'github', 'settings']);
 
 function projectTab(projectOrId = projectsUi.selectedProjectId) {
   const projectId = typeof projectOrId === 'string' ? projectOrId : projectOrId?.id;
@@ -183,9 +186,9 @@ function setProjectTab(projectOrId, tab) {
 
 function projectNavigation(projectOrId = projectsUi.selectedProjectId) {
   const projectId = typeof projectOrId === 'string' ? projectOrId : projectOrId?.id;
-  if (!projectId) return { tab: 'overview', mode: 'overview', sessionId: null };
+  if (!projectId) return { tab: PROJECT_DEFAULT_TAB, mode: 'overview', sessionId: null };
   if (!projectsUi.navigationByProject.has(projectId)) {
-    projectsUi.navigationByProject.set(projectId, { tab: 'overview', mode: 'overview', sessionId: null });
+    projectsUi.navigationByProject.set(projectId, { tab: PROJECT_DEFAULT_TAB, mode: 'overview', sessionId: null });
   }
   return projectsUi.navigationByProject.get(projectId);
 }
@@ -1015,8 +1018,8 @@ function applySessionStatus(project) {
     badge.style.display = running ? '' : 'none';
   }
 
-  // Only the Overview tab shows sessions; the others do not care.
-  if (projectTab(project) !== 'overview') return;
+  // Only the Sessions tab shows sessions; the others do not care.
+  if (projectTab(project) !== 'sessions') return;
   const card = projectViewer.querySelector('.tcard[data-project-id]');
   if (card && cardSessionKey(liveProjectSessions(project)) !== card.dataset.sessionKey) {
     card.replaceWith(buildSessionsCard(project));
@@ -1240,8 +1243,8 @@ function renderOverview() {
         </div>
       </div>
       <div class="ws-tabs">
-        <button type="button" class="ws-tab ${tabName === 'overview' ? 'active' : ''}" data-tab="overview">Overview</button>
         <button type="button" class="ws-tab ${tabName === 'plan' ? 'active' : ''}" data-tab="plan" title="${typeof isGithubBacked === 'function' && isGithubBacked(project) ? 'The plan on GitHub: its issues by phase or PR status, reviewed side by side' : 'Phases from plan-tracker.md and the todos, with the sessions that worked on them'}">Plan <span class="ws-tab-meta" id="ws-tab-plan-meta"></span></button>
+        <button type="button" class="ws-tab ${tabName === 'sessions' ? 'active' : ''}" data-tab="sessions" title="The project's sessions, beside its plan, todos and folders">Sessions</button>
         <button type="button" class="ws-tab ${tabName === 'files' ? 'active' : ''}" data-tab="files" title="The project folder: brief, plan, todos and anything else the project keeps">Files</button>
         <button type="button" class="ws-tab ${tabName === 'git' ? 'active' : ''}" data-tab="git" title="Branches, working changes and recent commits in attached repositories">Git</button>
         <button type="button" class="ws-tab ${tabName === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
@@ -1255,9 +1258,9 @@ function renderOverview() {
   try {
     if (tabName === 'settings') renderSettings(project, body);
     else if (tabName === 'files') renderFilesTab(project, body);
-    else if (tabName === 'plan') renderPlanTab(project, body);
     else if (tabName === 'git') renderProjectGitTab(project, body);
-      else renderOverviewBody(project, body);
+    else if (tabName === 'sessions') renderSessionsTab(project, body);
+    else renderPlanTab(project, body);
   } catch (err) {
     console.error('[projects] could not draw the tab', err);
     body.innerHTML = `<div class="git-empty-state"><div class="git-empty-title">This tab could not be drawn</div><div>${escapeHtml(err?.message || String(err))}</div></div>`;
@@ -1283,7 +1286,7 @@ function renderPlanMeta(project) {
   if (meta) meta.textContent = plan.phases.length ? `${plan.done}/${plan.phases.length}` : '';
 }
 
-function renderOverviewBody(project, body) {
+function renderSessionsTab(project, body) {
   body.innerHTML = `
     <div class="ws-grid">
       <div class="ws-main">
@@ -1294,7 +1297,7 @@ function renderOverviewBody(project, body) {
   body.querySelector('#ws-cards').appendChild(buildSessionsCard(project));
   renderSideCards(project, body.querySelector('#ws-side'));
   loadProjectFiles(project).then(() => {
-    if (selectedProject()?.id !== project.id || projectTab(project) !== 'overview') return;
+    if (selectedProject()?.id !== project.id || projectTab(project) !== 'sessions') return;
     if (editingInPage()) return;
     const side = projectViewer.querySelector('#ws-side');
     if (side) renderSideCards(project, side);
@@ -2177,7 +2180,7 @@ function bindAddedFilesCard(project, side) {
   };
 }
 
-// Recent Files on the Overview. The side cards redraw several times while a
+// Recent Files on the Sessions tab. The side cards redraw several times while a
 // page loads, so one listing is reused for a few seconds.
 const recentFilesByProject = new Map(); // projectId → { at, files, error, pending }
 
@@ -2477,7 +2480,7 @@ function renderStrip(project) {
   const running = runningTasksFor(project);
   const branch = (project.folders || []).find(f => f.mode === 'worktree')?.branch;
   projectStrip.innerHTML = `
-    <button type="button" class="ws-btn ws-btn--sm" id="strip-back">${PICONS.back(13)}<span>Overview</span></button>
+    <button type="button" class="ws-btn ws-btn--sm" id="strip-back">${PICONS.back(13)}<span>Sessions</span></button>
     ${markHtml(project, 22, 'proj-mark--sm')}
     <span class="strip-name">${escapeHtml(project.name)}</span>
     ${branch ? `<span class="strip-branch mono">${PICONS.branch(11)}<span>${escapeHtml(branch)}</span></span>` : ''}
@@ -2487,7 +2490,7 @@ function renderStrip(project) {
     <button type="button" class="ws-btn ws-btn--sm ws-btn--primary" id="strip-new">${PICONS.plus(11)}<span>New session</span>${PICONS.chevronDown(10)}</button>
     <button type="button" class="ws-btn ws-btn--sm ws-btn--icon" id="strip-more" title="More">${PICONS.dots(13)}</button>`;
   projectStrip.querySelector('#strip-back').onclick = () => {
-    setProjectTab(project, 'overview');
+    setProjectTab(project, 'sessions');
     showProjectOverview();
   };
   projectStrip.querySelector('#strip-tasks').onclick = (e) => showTaskPopover(taskPseudoProject(project), e.currentTarget);
@@ -2971,7 +2974,7 @@ function stopAllMenuItems(project) {
 function projectMenuItems(project, { fromPage = false } = {}) {
   const isDone = project.status === 'done';
   return [
-    !fromPage && { label: 'Open overview', icon: PICONS.open(14), onClick: () => selectProject(project.id, { tab: 'overview' }) },
+    !fromPage && { label: 'Open project', icon: PICONS.open(14), onClick: () => selectProject(project.id, { tab: projectTab(project) }) },
     { label: 'New session', icon: PICONS.plus(14), submenu: newSessionItems(project) },
     { sep: true },
     { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameProjectFlow(project) },
@@ -3807,7 +3810,7 @@ async function showNewProjectDialog({ name: initialName = '', folders: initialFo
     if (!result || result.error) { showError(result?.error || 'Could not create the project.'); return; }
     close();
     projectsUi.selectedProjectId = result.project?.id || null;
-    setProjectTab(projectsUi.selectedProjectId, 'overview');
+    setProjectTab(projectsUi.selectedProjectId, PROJECT_DEFAULT_TAB);
     saveProjectsUi();
     await loadProjects();
     const tab = document.querySelector('.sidebar-tab[data-tab="projects"]');

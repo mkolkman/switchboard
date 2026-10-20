@@ -162,9 +162,9 @@ The two CLIs handle this differently:
 - **Claude** loads the `CLAUDE.md` from each of those directories.
 - **Codex** only reads `AGENTS.md` from the folder it starts in, so a Codex session that starts in an attached folder does not see the project brief. Codex also refuses extra directories unless its sandbox is `workspace-write` or `danger-full-access`, so Switchboard's global default for Codex is `workspace-write`. Choose "Default" in Settings to hand the choice back to Codex's own config. Under `read-only` the extra directories are left off, since read-only can read every path anyway.
 
-### Overview and working mode
+### Sessions tab and working mode
 
-The Projects tab lists projects only. Selecting one opens its **Overview**: the plan's progress, open todos, the newest files in the project folder, attached folders, files you've dropped in, and a card with its latest sessions. A file opens in the **Files** tab, which browses the whole project folder in the same viewer.
+The Projects tab lists projects only. Selecting one opens it on its **Plan** tab, the first tab; after that it keeps whichever tab you left it on. The **Sessions** tab, second, shows the plan's progress, open todos, the newest files in the project folder, attached folders, files you've dropped in, and a card with its latest sessions. A file opens in the **Files** tab, which browses the whole project folder in the same viewer.
 
 Opening a session from there switches to working mode: a slim project strip on top, a session list beside the terminal, and the plan and todo counts at the foot of the list.
 
