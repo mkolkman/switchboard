@@ -1439,6 +1439,41 @@ async function pullRequestForBranch(owner, repo, branch) {
  * your review. Shaped like a tracker's items (one PR each), so the PR panel
  * and its chips work on them unchanged.
  */
+// What the GitHub tab's search and filters need beyond PR_FIELDS
+// (public/github-pr-filter.js), asked separately in batches: in the list
+// searches themselves it makes GitHub time out.
+const PR_LIST_FIELDS = `
+  headRefName labels(first: 10) { nodes { name } }
+  closingIssuesReferences(first: 5) { nodes {
+    number title url issueType { name } labels(first: 10) { nodes { name } }
+    parent { number title url }
+  } }`;
+const PR_DETAIL_BATCH = 25;
+
+/** Add branch, labels and linked issues (with their type, labels and parent) to list items; left out where GitHub fails. */
+async function addListDetails(items) {
+  const batches = [];
+  for (let i = 0; i < items.length; i += PR_DETAIL_BATCH) batches.push(items.slice(i, i + PR_DETAIL_BATCH));
+  await Promise.all(batches.map(async (batch) => {
+    const query = `query {\n${batch.map((item, j) => {
+      const [owner, repo] = item.repo.split('/');
+      return `  p${j}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(repo)}) { pullRequest(number: ${item.number}) { ${PR_LIST_FIELDS} } }`;
+    }).join('\n')}\n}`;
+    const data = await graphql(query).catch(() => null);
+    batch.forEach((item, j) => {
+      const node = data?.[`p${j}`]?.pullRequest;
+      if (!node) return;
+      item.branch = node.headRefName || '';
+      item.labels = (node.labels?.nodes || []).map(l => l.name);
+      item.issues = (node.closingIssuesReferences?.nodes || []).filter(Boolean).map(i => ({
+        number: i.number, title: i.title, url: i.url, type: i.issueType?.name || null,
+        labels: (i.labels?.nodes || []).map(l => l.name),
+        parent: i.parent ? { number: i.parent.number, title: i.parent.title, url: i.parent.url, repo: String(i.parent.url || '').match(/github\.com\/([^/]+\/[^/]+)\//)?.[1] || null } : null,
+      }));
+    });
+  }));
+}
+
 async function getMyPullRequests() {
   const data = await graphql(`query($me: String) {
     mine: search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
@@ -1464,6 +1499,7 @@ async function getMyPullRequests() {
       repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, state: pr.state === 'OPEN' ? 'OPEN' : 'CLOSED', stateReason: null,
       updatedAt: pr.updatedAt, author: node.author?.login || 'ghost', assignees: [],
       pullRequests: [pr], isPullRequest: true,
+      branch: '', labels: [], issues: [], // addListDetails
     };
     item.status = itemStatus(item);
     return item;
@@ -1480,7 +1516,10 @@ async function getMyPullRequests() {
     review: (data?.review?.nodes || []).map(toItem).filter(Boolean),
     closed: [...closed.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, CLOSED_PRS),
   };
-  await addReviewChanges([...lists.mine, ...lists.review].flatMap(i => i.pullRequests));
+  await Promise.all([
+    addReviewChanges([...lists.mine, ...lists.review].flatMap(i => i.pullRequests)),
+    addListDetails([...lists.mine, ...lists.review, ...lists.closed]),
+  ]);
   return { ...lists, fetchedAt: new Date().toISOString() };
 }
 

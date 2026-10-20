@@ -4,16 +4,38 @@
 // shows the same PR panel the projects' Plan tab has (merge, checks, reviews, Claude
 // sessions, Files changed). It runs as the pseudo-project GITHUB_VIEW_PROJECT
 // in its own viewer (#github-viewer), so that code needs no second copy.
+// Above the lists a search box and filters (product, repo, plan, type)
+// narrow all three; each row shows its type (github-pr-filter.js).
 // Depends on: project-github-view.js (GITHUB_VIEW_PROJECT, githubTabState,
 // githubPrChip, githubItemKey, selectGithubItem, paintGithubPanel,
-// renderProjectGithubTab), utils.js (escapeHtml, formatDate), PICONS.
+// renderProjectGithubTab), utils.js (escapeHtml, formatDate), PICONS,
+// github-pr-filter.js (prType, prProducts, prPlans, prMatches, filterActive).
 
 const githubViewContent = document.getElementById('github-content');
 const githubViewer = document.getElementById('github-viewer');
 const GITHUB_VIEW_REFRESH_MS = 2 * 60 * 1000;
 
-const githubViewState = { mine: null, review: null, closed: null, error: null, loading: false, fetchedAt: null, timer: null };
+const githubViewState = { mine: null, review: null, closed: null, error: null, loading: false, fetchedAt: null, timer: null, filter: null };
 const GITHUB_VIEW_FOLDS_KEY = 'githubViewFolds';
+const GITHUB_VIEW_FILTER_KEY = 'githubViewFilter';
+
+/** The search and filters: the text lives only while the app runs, the rest is remembered. */
+function githubViewFilter() {
+  if (!githubViewState.filter) {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(GITHUB_VIEW_FILTER_KEY) || '{}') || {}; } catch {}
+    githubViewState.filter = { q: '', product: saved.product || '', repo: saved.repo || '', plan: saved.plan || '', types: Array.isArray(saved.types) ? saved.types : [] };
+  }
+  return githubViewState.filter;
+}
+
+function setGithubViewFilter(change) {
+  const f = Object.assign(githubViewFilter(), change);
+  // A repo that is not the product's goes when the product changes.
+  if ('product' in change && f.repo && f.product && !githubViewItems().some(i => i.repo === f.repo && prProducts(i).includes(f.product))) f.repo = '';
+  try { localStorage.setItem(GITHUB_VIEW_FILTER_KEY, JSON.stringify({ product: f.product, repo: f.repo, plan: f.plan, types: f.types })); } catch {}
+  renderGithubViewList();
+}
 
 function githubViewItems() {
   return [...(githubViewState.mine || []), ...(githubViewState.review || []), ...(githubViewState.closed || [])];
@@ -71,15 +93,23 @@ async function loadGithubView({ quiet = false } = {}) {
 function githubViewRow(item, selectedKey) {
   const key = githubItemKey(item);
   const pr = item.pullRequests[0];
+  const type = prType(item);
   return `<div class="ghv-row${key === selectedKey ? ' selected' : ''}" data-item="${escapeHtml(key)}" title="${escapeHtml(`${item.repo}#${item.number}: ${item.title}`)}">
       <div class="ghv-row-title">${escapeHtml(item.title)}</div>
-      <div class="ghv-row-meta"><span class="ghv-row-ref">${escapeHtml(githubRepoName(item.repo))}#${item.number}</span>
+      <div class="ghv-row-meta"><span class="ghv-type ghv-type--${type.type}" title="${escapeHtml(`${PR_TYPE_LABELS[type.type]}: ${type.reason}`)}">${escapeHtml(PR_TYPE_LABELS[type.type])}</span><span class="ghv-row-ref">${escapeHtml(githubRepoName(item.repo))}#${item.number}</span>
         ${item.author && item.author !== 'ghost' ? `<span class="ghv-row-author">${escapeHtml(item.author)}</span>` : ''}
         <span class="ws-flex"></span>${githubPrChip(pr, key)}</div>
     </div>`;
 }
 
 function githubViewSection(title, hint, items, selectedKey, empty, { foldKey = null, open = true } = {}) {
+  // While filtering, a section shows only what passes, and opens when something does.
+  const filter = githubViewFilter();
+  if (items && filterActive(filter)) {
+    items = items.filter(i => prMatches(i, filter));
+    open = open || items.length > 0;
+    empty = 'Nothing matches.';
+  }
   const fold = foldKey ? ` ghv-section-h--fold" data-fold="${foldKey}` : '';
   return `<div class="ghv-section"><div class="ghv-section-h${fold}" title="${escapeHtml(hint)}">${foldKey ? `<span class="ghv-fold${open ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>` : ''}${escapeHtml(title)}<span class="ghv-count">${items ? items.length : ''}</span></div>
     ${items === null || !open ? '' : items.length ? items.map(i => githubViewRow(i, selectedKey)).join('') : `<div class="ghv-empty">${escapeHtml(empty)}</div>`}</div>`;
@@ -107,16 +137,19 @@ function renderGithubViewList() {
   const s = githubViewState;
   const selectedKey = githubTabState(GITHUB_VIEW_PROJECT.id).selection?.itemKey || null;
   const scroll = githubViewContent.scrollTop;
+  const typing = document.activeElement?.id === 'ghv-search' ? document.activeElement.selectionStart : null;
   githubViewContent.innerHTML = `
     <div class="ghv-head"><span class="ghv-head-title">Pull requests</span><span class="ws-flex"></span>
       <span class="gh-muted">${s.loading ? 'Loading…' : s.fetchedAt ? `Updated ${escapeHtml(formatDate(new Date(s.fetchedAt)))}` : ''}</span>
       <button type="button" class="ws-ghost ws-ghost--sm" id="ghv-refresh" title="Fetch the lists again">${PICONS.refresh(12)}</button></div>
+    ${githubViewFilterHtml()}
     ${s.error ? `<div class="ghv-empty gh-error">${escapeHtml(s.error)}</div>` : ''}
     ${githubViewSection('Review requested', 'Open pull requests that ask for your review', s.review, selectedKey, 'Nothing waiting for your review.', { foldKey: 'review', open: githubViewFoldOpen('review') })}
     ${githubViewSection('My pull requests', 'Open pull requests you opened', s.mine, selectedKey, 'You have no open pull requests.', { foldKey: 'mine', open: githubViewFoldOpen('mine') })}
     ${githubViewSection('Merged or closed', 'The latest pull requests you opened, or whose review was asked of you or done by you, that are merged or closed', s.closed, selectedKey, 'Nothing merged or closed yet.', { foldKey: 'closed', open: githubViewFoldOpen('closed') })}`;
   githubViewContent.scrollTop = scroll;
   githubViewContent.querySelector('#ghv-refresh').onclick = () => loadGithubView();
+  bindGithubViewFilter(typing);
   githubViewContent.querySelectorAll('[data-fold]').forEach(h => {
     h.onclick = () => { toggleGithubViewFold(h.dataset.fold); renderGithubViewList(); };
   });
@@ -127,6 +160,47 @@ function renderGithubViewList() {
     chip.onclick = (e) => { e.stopPropagation(); openGithubViewItem(chip.dataset.item, chip.dataset.pr); };
   });
   if (typeof renderSidebarRail === 'function') renderSidebarRail();
+}
+
+/** The search box and the filters above the lists, offering only what the lists hold. */
+function githubViewFilterHtml() {
+  const f = githubViewFilter();
+  const items = githubViewItems();
+  const option = (value, label, current) => `<option value="${escapeHtml(value)}"${value === current ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  const products = [...new Set(items.flatMap(prProducts))].sort((a, b) => (PRODUCT_LABELS[a] || a).localeCompare(PRODUCT_LABELS[b] || b));
+  const repos = [...new Set(items.filter(i => !f.product || prProducts(i).includes(f.product)).map(i => i.repo))].sort();
+  const plans = new Map();
+  for (const i of items) for (const p of prPlans(i)) plans.set(p.key, p);
+  const planList = [...plans.values()].sort((a, b) => a.title.localeCompare(b.title));
+  return `<div class="ghv-filter">
+      <div class="ghv-search"><input type="search" id="ghv-search" class="ws-input" placeholder="Search title, #, repo, author, plan…" value="${escapeHtml(f.q)}" spellcheck="false">
+        ${filterActive(f) ? '<button type="button" class="ws-ghost ws-ghost--sm" id="ghv-filter-clear" title="Clear the search and filters">×</button>' : ''}</div>
+      <div class="ghv-selects">
+        <select id="ghv-product" class="gfv-select" title="Product">${option('', 'All products', f.product)}${products.map(p => option(p, PRODUCT_LABELS[p] || p, f.product)).join('')}</select>
+        <select id="ghv-repo" class="gfv-select" title="Repository">${option('', 'All repos', f.repo)}${repos.map(r => option(r, githubRepoName(r), f.repo)).join('')}</select>
+        <select id="ghv-plan" class="gfv-select" title="Plan: the pitch or wayfinder map the PR's issue belongs to">${option('', 'All plans', f.plan)}${planList.map(p => option(p.key, p.title, f.plan)).join('')}</select>
+      </div>
+      <div class="ghv-types">${PR_TYPES.map(t => `<button type="button" class="ghv-type-btn ghv-type--${t}${f.types.includes(t) ? ' on' : ''}" data-type="${t}">${escapeHtml(PR_TYPE_LABELS[t])}</button>`).join('')}</div>
+    </div>`;
+}
+
+function bindGithubViewFilter(caret) {
+  const search = githubViewContent.querySelector('#ghv-search');
+  if (!search) return;
+  if (caret != null) { search.focus(); search.setSelectionRange(caret, caret); }
+  search.oninput = () => setGithubViewFilter({ q: search.value });
+  search.onkeydown = (e) => { if (e.key === 'Escape') { e.preventDefault(); setGithubViewFilter({ q: '' }); } };
+  githubViewContent.querySelector('#ghv-product').onchange = (e) => setGithubViewFilter({ product: e.target.value });
+  githubViewContent.querySelector('#ghv-repo').onchange = (e) => setGithubViewFilter({ repo: e.target.value });
+  githubViewContent.querySelector('#ghv-plan').onchange = (e) => setGithubViewFilter({ plan: e.target.value });
+  githubViewContent.querySelectorAll('[data-type]').forEach(b => {
+    b.onclick = () => {
+      const types = githubViewFilter().types;
+      setGithubViewFilter({ types: types.includes(b.dataset.type) ? types.filter(t => t !== b.dataset.type) : [...types, b.dataset.type] });
+    };
+  });
+  const clear = githubViewContent.querySelector('#ghv-filter-clear');
+  if (clear) clear.onclick = () => setGithubViewFilter({ q: '', product: '', repo: '', plan: '', types: [] });
 }
 
 function openGithubViewItem(itemKey, prKey) {
