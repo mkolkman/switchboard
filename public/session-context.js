@@ -214,7 +214,7 @@ function sessionPlaceHere() {
       const grafanaTab = document.querySelector('.sidebar-tab[data-tab="grafana"]');
       if (grafanaTab && activeTab !== 'grafana') { grafanaViewState.selected = sel; grafanaTab.click(); } else selectGrafana(sel);
     };
-    return { tab, label: alert ? `Alert: ${alert.title}` : sel.kind === 'logs' ? 'Logs' : observabilityPlaceLabel(sel) || 'Observability', restore };
+    return { tab, label: alert ? `Alert: ${alert.title}` : sel.kind === 'logs' ? 'Logs' : observabilityPlaceLabel(sel) || 'Production', restore };
   }
   return null;
 }

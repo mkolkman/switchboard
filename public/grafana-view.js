@@ -1,4 +1,4 @@
-// --- Observability tab (data-tab "grafana"): the Grafana side ---
+// --- Production tab (data-tab "grafana"): the Grafana side ---
 // The tab shows MoveLab's products as one whole (observability-view.js: the
 // sidebar, product, component and Infra pages). This file holds what comes
 // from Grafana: the alerts (read every minute, also while another tab is
@@ -108,9 +108,9 @@ function startGrafanaPolling() {
     if (!grafanaViewState.config?.hasToken) return;
     await loadGrafanaAlerts();
     if (activeTab === 'grafana') {
-      await loadGrafanaVitals();
+      await Promise.all([loadGrafanaVitals(), ...observabilityPageServices().map(service => loadGrafanaVitals(service))]);
       renderGrafanaList();
-      if (['product', 'component', 'infra'].includes(grafanaViewState.selected.kind)) renderGrafanaMain();
+      if (GRAFANA_PAGES.includes(grafanaViewState.selected.kind)) renderGrafanaMain();
       else paintGrafanaHeader();
     }
     if (typeof renderSidebarRail === 'function') renderSidebarRail();
@@ -141,7 +141,7 @@ function notifyGrafanaAlert(alert) {
   n.onclick = () => openGrafanaAlert(alert.uid);
 }
 
-/** Show an alert in the Observability tab, from anywhere. */
+/** Show an alert in the Production tab, from anywhere. */
 function openGrafanaAlert(uid) {
   const tab = document.querySelector('.sidebar-tab[data-tab="grafana"]');
   if (tab && activeTab !== 'grafana') {
@@ -165,7 +165,7 @@ function renderGrafanaList() {
   renderObservabilityList();
 }
 
-const GRAFANA_PAGES = ['product', 'component', 'infra'];
+const GRAFANA_PAGES = ['product', 'component', 'infra', 'changes'];
 
 /**
  * Go to a page of the tab. An alert, dashboard or logs remember the page they

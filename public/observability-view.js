@@ -1,4 +1,4 @@
-// --- Observability tab: the products as one whole ---
+// --- Production tab (Observability): the products as one whole ---
 // The sidebar lists the products (MLC, NOHRD, WaterRower, CITYROW, Dr. Wolff,
 // RP3), each with one dot for its worst signal, unfolding to its components
 // with the version in production; Infra at the bottom holds the alerts no
@@ -145,6 +145,11 @@ function observabilityPlaceLabel(sel) {
     const c = observabilityComponent(sel.id);
     return c ? `${observabilityProduct(c.product)?.label} · ${c.label}` : null;
   }
+  if (sel.kind === 'changes') {
+    const [id, tag] = String(sel.id).split('|');
+    const c = observabilityComponent(id);
+    return c ? `${c.label} ${tag} changes` : null;
+  }
   return null;
 }
 
@@ -224,7 +229,7 @@ function renderObservabilityList() {
     return head + comps;
   }).join('');
   grafanaViewContent.innerHTML = `
-    <div class="ghv-head"><span class="ghv-title">Observability</span><span class="ws-flex"></span>
+    <div class="ghv-head"><span class="ghv-title">Production</span><span class="ws-flex"></span>
       <button type="button" class="ws-ghost" id="obs-refresh" title="Read the releases and Grafana again">${PICONS.refresh(12)}</button></div>
     ${s.error ? `<div class="ghv-empty gh-error">${escapeHtml(s.error)}</div>` : ''}
     ${g.alertsError ? `<div class="ghv-empty gh-error">${escapeHtml(g.alertsError)}</div>` : ''}
@@ -338,13 +343,13 @@ function observabilityFeaturesHtml(componentId, tag) {
     </div>`;
 }
 
-/** Alert rows (active ones, the quiet ones folded), or a calm line. */
-function observabilityAlertsHtml(alerts, foldId) {
+/** Alert rows (active ones, the quiet ones folded), or a calm line; `quietOnly` where the active ones show above. */
+function observabilityAlertsHtml(alerts, foldId, { quietOnly = false } = {}) {
   const active = alerts.filter(OBS_ACTIVE);
   const quiet = alerts.filter(a => !OBS_ACTIVE(a));
   if (!grafanaViewState.config?.hasToken) return '<div class="gh-muted">Grafana is not connected. <button type="button" class="obs-link" data-obs-connect="1">Connect</button></div>';
   const open = observabilityState.unfolded.has(foldId);
-  return `${active.length ? active.map(grafanaAlertRow).join('') : '<div class="gh-muted">Nothing firing.</div>'}
+  return `${quietOnly ? '' : active.length ? active.map(grafanaAlertRow).join('') : '<div class="gh-muted">Nothing firing.</div>'}
     ${quiet.length ? `<button type="button" class="obs-chores" data-obs-unfold="${obsAttr(foldId)}"><span class="ghv-fold${open ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>Quiet alert rules (${quiet.length})</button>${open ? quiet.map(grafanaAlertRow).join('') : ''}` : ''}`;
 }
 
@@ -425,7 +430,7 @@ function observabilityFlagsHtml(c, { compact = false } = {}) {
   const features = r.flags.filter(f => f.kind === 'feature');
   const technical = r.flags.filter(f => f.kind === 'technical');
   const techKey = `tech:${c.id}`;
-  const techOpen = !compact || observabilityState.unfolded.has(techKey);
+  const techOpen = observabilityState.unfolded.has(techKey);
   const remoteOnlyKey = `rconly:${c.id}`;
   const notes = [];
   if (r.env) notes.push(`<span>Values from 1Password "${escapeHtml(r.env.title)}", last changed ${escapeHtml(obsDay(r.env.updated))}</span>`);
@@ -434,12 +439,255 @@ function observabilityFlagsHtml(c, { compact = false } = {}) {
   if (r.envError) notes.push(`<span class="gh-error">${escapeHtml(r.envError)}</span>`);
   if (r.remote) notes.push(`<span>Remote Config of ${escapeHtml(r.remote.project)}${r.remote.updated ? `, last changed ${escapeHtml(obsDay(r.remote.updated))}` : ''}</span>`);
   if (r.remoteError) notes.push(`<span class="gh-error">${escapeHtml(r.remoteError)}</span>`);
-  return `${!compact && notes.length ? `<div class="obs-flag-notes gh-muted">${notes.join(' · ')}</div>` : ''}
+  if (compact) {
+    // On a product's page: the switchable features that are on for anyone; the rest only counted.
+    const entries = (f) => (f.platforms ? Object.values(f.platforms) : [f]);
+    const fixed = features.filter(f => entries(f).every(e => e.how === 'fixed' || e.how === 'debug'));
+    const live = (f) => entries(f).some(e => e.value !== 'off' || (e.conditions || []).some(x => x.value !== 'off'));
+    const on = features.filter(f => !fixed.includes(f) && live(f));
+    const off = features.length - fixed.length - on.length;
+    const counts = [off && `${off} feature flag${off === 1 ? '' : 's'} off`, fixed.length && `${fixed.length} fixed in code`, technical.length && `${technical.length} technical`].filter(Boolean).join(', ');
+    return `${late ? `<div class="obs-flag-notes">${late}</div>` : ''}
+      ${on.map(observabilityFlagRow).join('')}
+      <div class="obs-feat-more gh-muted">${on.length ? '' : 'No switchable feature on. '}${escapeHtml(counts)}
+        <button type="button" class="obs-link" data-obs-component="${obsAttr(c.id)}">All flags ›</button></div>`;
+  }
+  return `${notes.length ? `<div class="obs-flag-notes gh-muted">${notes.join(' · ')}</div>` : ''}
     ${compact && late ? `<div class="obs-flag-notes">${late}</div>` : ''}
     ${features.length ? features.map(observabilityFlagRow).join('') : '<div class="gh-muted">No feature flags.</div>'}
-    ${technical.length ? (compact ? `<button type="button" class="obs-chores" data-obs-unfold="${obsAttr(techKey)}"><span class="ghv-fold${techOpen ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>Technical (${technical.length})</button>` : '<div class="obs-sub">Technical</div>') + (techOpen ? technical.map(observabilityFlagRow).join('') : '') : ''}
+    ${technical.length ? `<button type="button" class="obs-chores" data-obs-unfold="${obsAttr(techKey)}"><span class="ghv-fold${techOpen ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>Technical (${technical.length})</button>${techOpen ? technical.map(observabilityFlagRow).join('') : ''}` : ''}
     ${r.remoteOnly?.length ? `<button type="button" class="obs-chores" data-obs-unfold="${obsAttr(remoteOnlyKey)}"><span class="ghv-fold${observabilityState.unfolded.has(remoteOnlyKey) ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>Only in Remote Config (${r.remoteOnly.length})</button>
       ${observabilityState.unfolded.has(remoteOnlyKey) ? r.remoteOnly.map(x => `<div class="obs-flag-row"><span class="obs-flag-name">${escapeHtml(x.key)}</span><div class="obs-flag-states"><div class="obs-flag-state">${observabilityFlagState({ how: 'remote', ...x })}</div></div></div>`).join('') : ''}` : ''}`;
+}
+
+// --- At a glance ---
+
+/** "just now", "3 h ago", "2 days ago". */
+function obsAgo(date) {
+  if (!date) return '';
+  const hours = (Date.now() - new Date(date).getTime()) / 3600000;
+  if (hours < 1) return 'just now';
+  if (hours < 24) return `${Math.round(hours)} h ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+/** The backend services of some components, each once (MLC Web and CITYROW's part of it are one). */
+function observabilityServices(components) {
+  const seen = new Map();
+  for (const c of components) if (c.kind === 'backend' && c.grafana) seen.set(`${c.grafana.platform}|${c.grafana.app}`, c.grafana);
+  return [...seen.values()];
+}
+
+/** The services of the page on screen, whose figures the poll keeps fresh. */
+function observabilityPageServices() {
+  const sel = grafanaViewState.selected;
+  if (sel.kind === 'product') return observabilityServices(observabilityProduct(sel.id)?.components || []);
+  if (sel.kind === 'component') return observabilityServices([observabilityComponent(sel.id)].filter(Boolean));
+  return [];
+}
+
+/** A service's latest value of one of the figures (grafana-view.js GRAFANA_VITALS), or null. */
+function observabilityVital(service, key) {
+  const series = grafanaViewState.vitals.get(`${service.platform}|${service.app}`)?.[key];
+  return series?.length ? series[series.length - 1][1] : null;
+}
+
+/** Errors an hour now and on the version before, over the production versions of some components; null before Bugsnag answered. */
+function observabilityErrorRates(components) {
+  let now = 0;
+  let before = 0;
+  let any = false;
+  const seen = new Set();
+  for (const c of components) {
+    const prod = c.bugsnag?.length && !c.error ? observabilityProductionTag(c) : null;
+    const r = prod && observabilityState.problems.get(`${c.id}|${prod.tag}|1`);
+    // Two components on one Bugsnag project (MLC Web and CITYROW's part) count once.
+    if (!r?.rates || seen.has(c.bugsnag.join())) continue;
+    seen.add(c.bugsnag.join());
+    now += r.rates.now;
+    before += r.rates.before;
+    any = true;
+  }
+  return any ? { now, before } : null;
+}
+
+/** Targets rolling out (under 100%) in production: [{ component, target, tag, rollout, date }]. */
+function observabilityRollouts(components) {
+  const out = [];
+  for (const c of components) {
+    for (const t of c.error ? [] : c.targets || []) {
+      const prod = t.stages?.production;
+      if (prod && prod.rollout < 100) out.push({ component: c, target: t.name, tag: prod.tag, rollout: prod.rollout, date: prod.date });
+    }
+  }
+  return out;
+}
+
+/** What waits to go to production: changes on staging, and versions on internal or beta newer than production. */
+function observabilityWaiting(components) {
+  let changes = 0;
+  let versions = 0;
+  for (const c of components) {
+    if (c.error) continue;
+    if (c.model === 'tagged') {
+      const f = observabilityState.features.get(`${c.id}|staging`);
+      if (f && !f.loading && !f.error) changes += f.groups.reduce((n, g) => n + g.issues.length, 0) + f.other.length;
+      continue;
+    }
+    const order = (c.tags || []).map(t => t.name);
+    const waiting = new Set();
+    for (const t of c.targets) {
+      const prod = t.stages?.production?.tag;
+      for (const stage of ['beta', 'internal']) {
+        const at = t.stages?.[stage]?.tag;
+        if (at && (!prod || order.indexOf(at) < order.indexOf(prod))) waiting.add(at);
+      }
+    }
+    versions += waiting.size;
+  }
+  return { changes, versions };
+}
+
+const obsFmt = (v) => (v < 10 ? v.toFixed(1) : String(Math.round(v)));
+
+/** One figure: a label, the value, a line under it, and how worried to be. */
+function obsFigure(label, value, sub = '', level = 'ok', title = '') {
+  return `<div class="obs-kpi obs-kpi--${level}"${title ? ` title="${obsAttr(title)}"` : ''}><span class="obs-kpi-l">${escapeHtml(label)}</span><span class="obs-kpi-v">${value}</span><span class="obs-kpi-s">${sub}</span></div>`;
+}
+
+/** The figures at the top of a product's (or a component's) page. */
+function observabilityKeyFiguresHtml(components) {
+  const alerts = [...new Map(components.flatMap(observabilityAlerts).map(a => [a.uid, a])).values()];
+  const firing = alerts.filter(a => a.state === 'firing').length;
+  const pending = alerts.filter(a => a.state === 'pending').length;
+  const newErrors = components.reduce((n, c) => n + observabilityNewErrors(c), 0);
+  const rollouts = observabilityRollouts(components);
+  const status = firing ? ['bad', `${firing} firing`] : pending || newErrors ? ['warn', [pending && `${pending} pending`, newErrors && `${newErrors} new error${newErrors === 1 ? '' : 's'}`].filter(Boolean).join(', ')] : ['ok', 'All clear'];
+  const figures = [obsFigure('Status', escapeHtml(status[1]), alerts.length ? `${alerts.length} alert rule${alerts.length === 1 ? '' : 's'}` : '', status[0])];
+
+  // The newest release of any component.
+  const latest = components.map(c => ({ c, prod: c.error ? null : observabilityProductionTag(c) })).filter(x => x.prod).sort((a, b) => new Date(b.prod.date) - new Date(a.prod.date))[0];
+  if (latest) figures.push(obsFigure('Latest release', escapeHtml(obsAgo(latest.prod.date)), `${escapeHtml(components.length > 1 ? `${latest.c.label} ` : '')}${escapeHtml(latest.prod.tag)}`, 'ok', obsDay(latest.prod.date)));
+
+  if (components.some(c => c.bugsnag?.length)) {
+    const rates = observabilityErrorRates(components);
+    const ratio = rates && rates.before > 0 ? rates.now / rates.before : null;
+    const level = ratio != null && ratio >= 2 && rates.now >= 5 ? 'bad' : ratio != null && ratio >= 1.3 && rates.now >= 2 ? 'warn' : 'ok';
+    figures.push(obsFigure('Errors', rates ? `${obsFmt(rates.now)}/h` : '…', rates ? `${obsFmt(rates.before)}/h before${ratio != null && Math.abs(ratio - 1) >= 0.1 ? ` · ×${ratio.toFixed(1)}` : ''}` : 'reading Bugsnag', level, 'Bugsnag events an hour since the production version came out, against the version before'));
+    figures.push(obsFigure('New errors', String(newErrors), 'since the release', newErrors ? 'warn' : 'ok'));
+  }
+
+  // Grafana's figures over the backends: requests added up, the worst 5xx and p95.
+  const services = observabilityServices(components);
+  if (services.length && grafanaViewState.config?.hasToken) {
+    const values = (key) => services.map(sv => observabilityVital(sv, key)).filter(v => v != null);
+    const req = values('requests');
+    const err = values('errors5xx');
+    const p95 = values('p95');
+    const unit = (key) => GRAFANA_VITALS.find(m => m.key === key);
+    const lvl = (key, v) => { const m = unit(key); return m.bad != null && v >= m.bad ? 'bad' : m.warn != null && v >= m.warn ? 'warn' : 'ok'; };
+    if (req.length) figures.push(obsFigure('Requests', unit('requests').unit(req.reduce((a, b) => a + b, 0)), 'last minute'));
+    if (err.length) figures.push(obsFigure('5xx', unit('errors5xx').unit(Math.max(...err)), 'worst service', lvl('errors5xx', Math.max(...err))));
+    if (p95.length) figures.push(obsFigure('p95', unit('p95').unit(Math.max(...p95)), 'slowest service', lvl('p95', Math.max(...p95))));
+  }
+
+  if (rollouts.length) figures.push(obsFigure('Rolling out', String(rollouts.length), rollouts.slice(0, 2).map(r => `${r.target} ${r.rollout}%`).join(', '), 'info'));
+  const waiting = observabilityWaiting(components);
+  if (waiting.changes || waiting.versions) {
+    figures.push(obsFigure('Waiting', String(waiting.changes + waiting.versions), [waiting.changes && `${waiting.changes} change${waiting.changes === 1 ? '' : 's'} on staging`, waiting.versions && `${waiting.versions} version${waiting.versions === 1 ? '' : 's'} in testing`].filter(Boolean).join(', '), 'info'));
+  }
+  return `<div class="obs-kpis">${figures.join('')}</div>`;
+}
+
+/** What wants a look now: firing alerts, new errors, a jump in errors, rollouts under way, an .env changed after its deploy. */
+function observabilityAttentionHtml(components) {
+  const rows = [];
+  const alerts = [...new Map(components.flatMap(observabilityAlerts).filter(OBS_ACTIVE).map(a => [a.uid, a])).values()];
+  rows.push(...alerts.map(grafanaAlertRow));
+  const seenErrors = new Set();
+  for (const c of components) {
+    const prod = observabilityProductionTag(c);
+    const problems = observabilityProductionProblems(c);
+    for (const e of (problems?.errors || []).filter(x => x.isNew)) {
+      if (seenErrors.has(e.id)) continue;
+      seenErrors.add(e.id);
+      rows.push(observabilityErrorRow(e, c, prod.tag));
+    }
+  }
+  for (const c of components) {
+    const r = observabilityState.problems.get(`${c.id}|${observabilityProductionTag(c)?.tag}|1`);
+    const ratio = r?.rates?.before > 0 ? r.rates.now / r.rates.before : null;
+    if (ratio != null && ratio >= 2 && r.rates.now >= 5) {
+      rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--firing"></span><span class="obs-att-t">${escapeHtml(c.label)}: ${obsFmt(r.rates.now)} errors/h since ${escapeHtml(observabilityProductionTag(c).tag)}, ×${ratio.toFixed(1)} the version before</span><button type="button" class="obs-link" data-obs-component="${obsAttr(c.id)}">Errors</button></div>`);
+    }
+  }
+  for (const r of observabilityRollouts(components)) {
+    rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--info"></span><span class="obs-att-t">${escapeHtml(r.component.label)} ${escapeHtml(r.target)}: ${escapeHtml(r.tag)} rolled out to ${r.rollout}%, started ${escapeHtml(obsAgo(r.date))}</span><button type="button" class="obs-link" data-obs-component="${obsAttr(r.component.id)}">Where it runs</button></div>`);
+  }
+  for (const c of components) {
+    const f = observabilityState.flags.get(c.id);
+    if (f?.env?.changedAfterDeploy) rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--pending"></span><span class="obs-att-t">${escapeHtml(c.label)}: the production .env changed ${escapeHtml(obsAgo(f.env.updated))}, after the deploy; the server may still run the values before it</span><button type="button" class="obs-link" data-obs-component="${obsAttr(c.id)}">Flags</button></div>`);
+  }
+  if (!grafanaViewState.config?.hasToken && components.some(c => c.grafana)) rows.push('<div class="gh-muted">Grafana is not connected. <button type="button" class="obs-link" data-obs-connect="1">Connect</button></div>');
+  return rows.length ? rows.join('') : '<div class="obs-clear">All clear: no alerts firing, no new errors.</div>';
+}
+
+/** One row per component: its version in production, since when, its health, its errors and a summary of what the version holds. */
+function observabilityProductTableHtml(p) {
+  const head = `<div class="obs-tr obs-tr--h"><span></span><span>Component</span><span>Version</span><span>Since</span><span>Errors</span><span>What it holds</span></div>`;
+  const rows = p.components.map(c => {
+    if (c.error) return `<div class="obs-tr"><span class="gfv-dot gfv-dot--none"></span><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button><span class="gh-error obs-err" style="grid-column: span 4">${escapeHtml(c.error)}</span></div>`;
+    const prod = observabilityProductionTag(c);
+    const lines = observabilityRollouts([c]);
+    const others = c.model === 'staged' ? new Set(c.targets.map(t => t.stages?.production?.tag).filter(x => x && x !== prod?.tag)).size : 0;
+    const r = prod && observabilityState.problems.get(`${c.id}|${prod.tag}|1`);
+    const errors = !c.bugsnag?.length ? '<span class="gh-muted">–</span>'
+      : r?.rates ? `${obsFmt(r.rates.now)}/h${r.rates.before > 0 && Math.abs(r.rates.now / r.rates.before - 1) >= 0.1 ? ` <span class="obs-ratio obs-ratio--${r.rates.now / r.rates.before >= 2 && r.rates.now >= 5 ? 'bad' : r.rates.now / r.rates.before >= 1.3 ? 'warn' : 'ok'}">×${(r.rates.now / r.rates.before).toFixed(1)}</span>` : ''}${observabilityNewErrors(c) ? ` · <span class="obs-new">${observabilityNewErrors(c)} new</span>` : ''}`
+      : r && !r.loading && !r.error ? `<span class="gh-muted" title="Under an hour in production: too early to compare">too new</span>${observabilityNewErrors(c) ? ` · <span class="obs-new">${observabilityNewErrors(c)} new</span>` : ''}`
+      : '<span class="gh-muted">…</span>';
+    return `<div class="obs-tr"><span class="gfv-dot gfv-dot--${obsAttr(observabilityComponentStatus(c))}"></span>
+        <button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}" title="${obsAttr(`${c.repo}${c.filtered ? ', its part of the code' : ''}`)}">${escapeHtml(c.label)}</button>
+        <span class="obs-tr-v">${prod ? `<b>${escapeHtml(prod.tag)}</b>${lines.length ? ` <span class="obs-rollout">${lines.map(l => `${l.rollout}%`).join(', ')}</span>` : ''}${others ? ` <span class="gh-muted" title="Targets on older versions">+${others} older</span>` : ''}` : '<span class="gh-muted">not in production</span>'}</span>
+        <span class="gh-muted">${prod ? escapeHtml(obsAgo(prod.date)) : ''}</span>
+        <span>${prod ? errors : ''}</span>
+        <span class="obs-tr-sum">${prod ? observabilityChangesLineHtml(c, prod.tag) : ''}</span></div>`;
+  }).join('');
+  return `<div class="obs-table">${head}${rows}</div>`;
+}
+
+/** A version's changes in one line: how many, the first pitch or issue, and the way to all of them. */
+function observabilityChangesLineHtml(c, tag) {
+  const f = observabilityState.features.get(`${c.id}|${tag}`);
+  if (!f || f.loading) return '<span class="gh-muted">…</span>';
+  if (f.error) return `<span class="gh-error" title="${obsAttr(f.error)}">could not read</span>`;
+  const issues = f.groups.reduce((n, g) => n + g.issues.length, 0);
+  const count = issues + f.other.length;
+  if (!count) return `<span class="gh-muted">${f.chores.length ? `upkeep only (${f.chores.length})` : 'no changes'}</span>`;
+  const first = f.groups[0]?.parent?.title || f.groups[0]?.issues[0]?.issue.title || f.other[0]?.title || '';
+  return `<button type="button" class="obs-sum-link" data-obs-changes="${obsAttr(`${c.id}|${tag}`)}" title="All changes in ${obsAttr(tag)}"><b>${count}</b> change${count === 1 ? '' : 's'}<span class="obs-sum-first">${escapeHtml(first)}</span></button>`;
+}
+
+/** A version's changes as a short summary: the pitches and issues by title, counts for the rest, and "All changes". */
+function observabilityChangesSummaryHtml(c, tag) {
+  const f = observabilityState.features.get(`${c.id}|${tag}`);
+  if (!f || f.loading) return '<div class="gh-muted">Loading…</div>';
+  if (f.error) return `<div class="gh-error obs-err">${escapeHtml(f.error)}</div>`;
+  if (f.first) return '<div class="gh-muted">The first tag: nothing to compare it with.</div>';
+  const items = [];
+  for (const g of f.groups) {
+    if (g.parent) items.push({ title: g.parent.title, url: g.parent.url, number: g.parent.number, n: g.issues.length });
+    else for (const i of g.issues) items.push({ title: i.issue.title, url: i.issue.url, number: i.issue.number, n: 0 });
+  }
+  const shown = items.slice(0, 5);
+  const rest = items.length - shown.length;
+  const counts = [rest > 0 && `${rest} more issue${rest === 1 ? '' : 's'}`, f.other.length && `${f.other.length} other change${f.other.length === 1 ? '' : 's'}`, f.chores.length && `${f.chores.length} upkeep`].filter(Boolean);
+  return `<div class="obs-feats">
+      ${shown.map(i => `<div class="obs-feat">${obsLink(i.url, `#${i.number}`)}<span class="obs-feat-t">${escapeHtml(i.title)}</span>${i.n ? `<span class="gh-muted">${i.n} issue${i.n === 1 ? '' : 's'}</span>` : ''}</div>`).join('')}
+      ${!shown.length && !f.other.length ? '<div class="gh-muted">No changes a user would notice.</div>' : ''}
+      <div class="obs-feat-more">${counts.length ? `<span class="gh-muted">${escapeHtml(counts.join(', '))}</span>` : ''}
+        <button type="button" class="obs-link" data-obs-changes="${obsAttr(`${c.id}|${tag}`)}">All changes ›</button></div>
+    </div>`;
 }
 
 // --- The pages ---
@@ -449,6 +697,7 @@ function observabilityPageHtml() {
   const sel = grafanaViewState.selected;
   if (!s.overview) return `<div class="ghv-empty">${s.error ? escapeHtml(s.error) : 'Loading…'}</div>`;
   if (sel.kind === 'infra') return observabilityInfraHtml();
+  if (sel.kind === 'changes') return observabilityChangesHtml(sel.id);
   if (sel.kind === 'component') {
     const c = observabilityComponent(sel.id);
     return c ? observabilityComponentHtml(c) : '<div class="ghv-empty">This component is gone.</div>';
@@ -458,37 +707,21 @@ function observabilityPageHtml() {
 }
 
 function observabilityProductHtml(p) {
-  const alerts = observabilityProductAlerts(p);
   const coming = p.components.map(c => {
     const html = observabilityComingHtml(c);
     return html ? `<div class="obs-coming-row"><span class="obs-comp-l">${escapeHtml(c.label)}</span><div class="obs-coming-list">${html}</div></div>` : '';
   }).join('');
-  const features = p.components.map(c => {
-    const prod = c.error ? null : observabilityProductionTag(c);
-    if (!prod) return '';
-    return `<div class="obs-block"><div class="obs-block-h"><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button>
-        <b>${escapeHtml(prod.tag)}</b><span class="gh-muted">since ${escapeHtml(obsDay(prod.date))}</span></div>${observabilityFeaturesHtml(c.id, prod.tag)}</div>`;
-  }).join('');
+  const flagged = p.components.filter(c => c.flags && !c.error);
   return `<div class="gfv-page obs-page">
       <div class="gfv-title"><span class="gfv-dot gfv-dot--${obsAttr(observabilityProductStatus(p))}"></span> ${escapeHtml(p.label)}</div>
       ${p.owner ? `<div class="gfv-meta"><span>Part of <button type="button" class="obs-comp-link" data-obs-product="${obsAttr(p.owner)}">${escapeHtml(observabilityProduct(p.owner)?.label || p.owner)}</button></span></div>` : ''}
-      <div class="gfv-sec"><div class="gh-sec-h">In production</div>
-        ${p.components.map(c => `<div class="obs-block"><div class="obs-block-h"><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button>
-          <span class="gh-muted">${escapeHtml(c.repo)}${c.filtered ? ', its part of the code' : ''}</span>
-          ${observabilityAlerts(c).filter(OBS_ACTIVE).length ? `<span class="gfv-pill gfv-pill--${obsAttr(observabilityStatus(observabilityAlerts(c)))}">${observabilityAlerts(c).filter(OBS_ACTIVE).length} alert${observabilityAlerts(c).filter(OBS_ACTIVE).length === 1 ? '' : 's'}</span>` : ''}</div>
-          ${observabilityProductionHtml(c)}</div>`).join('')}
-      </div>
+      ${observabilityKeyFiguresHtml(p.components)}
+      <div class="gfv-sec"><div class="gh-sec-h">Needs attention</div>${observabilityAttentionHtml(p.components)}</div>
+      <div class="gfv-sec"><div class="gh-sec-h">In production</div>${observabilityProductTableHtml(p)}</div>
       ${coming ? `<div class="gfv-sec"><div class="gh-sec-h">On its way</div>${coming}</div>` : ''}
-      <div class="gfv-sec"><div class="gh-sec-h">Problems</div>${observabilityAlertsHtml(alerts, `quiet:${p.id}`)}
-        ${p.components.filter(c => c.bugsnag?.length && !c.error && observabilityProductionTag(c)).map(c => {
-          const prod = observabilityProductionTag(c);
-          return `<div class="obs-block"><div class="obs-block-h"><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button><b>${escapeHtml(prod.tag)}</b><span class="gh-muted">Bugsnag, since it came out</span></div>
-            ${observabilityErrorsHtml(c, prod.tag, { limit: 5 })}</div>`;
-        }).join('')}</div>
-      ${p.components.some(c => c.flags && !c.error) ? `<div class="gfv-sec"><div class="gh-sec-h">Flags in production</div>
-        ${p.components.filter(c => c.flags && !c.error).map(c => `<div class="obs-block"><div class="obs-block-h"><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button>
+      ${flagged.length ? `<div class="gfv-sec"><div class="gh-sec-h">Flags in production</div>
+        ${flagged.map(c => `<div class="obs-block"><div class="obs-block-h"><button type="button" class="obs-comp-link" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button>
           <b>${escapeHtml(observabilityProductionTag(c)?.tag || c.tags?.[0]?.name || '')}</b></div>${observabilityFlagsHtml(c, { compact: true })}</div>`).join('')}</div>` : ''}
-      <div class="gfv-sec"><div class="gh-sec-h">In the production versions</div>${features || '<div class="gh-muted">Nothing in production.</div>'}</div>
     </div>`;
 }
 
@@ -508,22 +741,40 @@ function observabilityComponentHtml(c) {
   for (const d of grafanaViewState.dashboards || []) folders.set(d.folder, [...(folders.get(d.folder) || []), d]);
   const dashOpen = observabilityState.unfolded.has(`dash:${c.id}`);
   return `<div class="gfv-page obs-page">
-      <div class="gfv-title"><button type="button" class="obs-comp-link obs-comp-link--up" data-obs-product="${obsAttr(c.product)}">${escapeHtml(product?.label || '')}</button> · ${escapeHtml(c.label)}</div>
+      <div class="gfv-title"><span class="gfv-dot gfv-dot--${obsAttr(observabilityComponentStatus(c))}"></span> <button type="button" class="obs-comp-link obs-comp-link--up" data-obs-product="${obsAttr(c.product)}">${escapeHtml(product?.label || '')}</button> · ${escapeHtml(c.label)}</div>
       <div class="gfv-meta"><span>${escapeHtml(c.repo)}${c.filtered ? ', only its part of the code' : ''}</span><span class="ws-flex"></span>
         ${backend && grafanaViewState.config?.hasToken ? `<button type="button" class="ws-ghost" data-obs-logs="${obsAttr(c.id)}">${PICONS.list(12)}<span>Logs</span></button>` : ''}
         ${c.url ? `<button type="button" class="ws-ghost" data-obs-url="${obsAttr(`${c.url}/releases`)}">${PICONS.open(12)}<span>Releases</span></button>` : ''}</div>
-      ${backend ? grafanaVitalsHtml(c.grafana) : ''}
+      ${observabilityKeyFiguresHtml([c])}
+      <div class="gfv-sec"><div class="gh-sec-h">Needs attention</div>${observabilityAttentionHtml([c])}</div>
       <div class="gfv-sec"><div class="gh-sec-h">Where it runs</div>${observabilityRunsHtml(c)}</div>
-      ${c.flags ? `<div class="gfv-sec"><div class="gh-sec-h">Flags in production <span class="obs-h-tag">${escapeHtml(observabilityProductionTag(c)?.tag || c.tags?.[0]?.name || '')}</span></div>${observabilityFlagsHtml(c)}</div>` : ''}
-      ${backend ? `<div class="gfv-sec"><div class="gh-sec-h">Alerts</div>${observabilityAlertsHtml(observabilityAlerts(c), `quiet:${c.id}`)}</div>` : ''}
       <div class="gfv-sec"><div class="gh-sec-h obs-ver-h">Version <select class="gfv-select" id="obs-version">${options}</select>
           ${tag?.url ? obsLink(tag.url, 'Release on GitHub') : ''}</div>
         ${tag?.summary ? `<div class="obs-summary">${escapeHtml(tag.summary)}</div>` : ''}
         ${c.bugsnag?.length ? `<div class="obs-sub">Errors while it ran</div>${version === 'staging' ? '<div class="gh-muted">Only production is followed; pick a tag.</div>' : version ? observabilityErrorsHtml(c, version, { rate: true }) : ''}` : ''}
         <div class="obs-sub">What it holds</div>
-        ${version ? observabilityFeaturesHtml(c.id, version) : '<div class="gh-muted">No tags yet.</div>'}</div>
+        ${version ? observabilityChangesSummaryHtml(c, version) : '<div class="gh-muted">No tags yet.</div>'}</div>
+      ${c.flags ? `<div class="gfv-sec"><div class="gh-sec-h">Flags in production <span class="obs-h-tag">${escapeHtml(observabilityProductionTag(c)?.tag || c.tags?.[0]?.name || '')}</span></div>${observabilityFlagsHtml(c)}</div>` : ''}
+      ${backend && observabilityAlerts(c).some(a => !OBS_ACTIVE(a)) ? `<div class="gfv-sec">${observabilityAlertsHtml(observabilityAlerts(c), `quiet:${c.id}`, { quietOnly: true })}</div>` : ''}
+      ${backend ? `<div class="gfv-sec"><div class="gh-sec-h">Now</div>${grafanaVitalsHtml(c.grafana)}</div>` : ''}
       ${backend && folders.size ? `<div class="gfv-sec"><button type="button" class="obs-chores" data-obs-unfold="dash:${obsAttr(c.id)}"><span class="ghv-fold${dashOpen ? '' : ' shut'}">${PICONS.chevronDown(9)}</span>Dashboards (${(grafanaViewState.dashboards || []).length})</button>
         ${dashOpen ? [...folders].map(([folder, list]) => `<div class="obs-parent obs-parent--plain">${escapeHtml(folder)}</div>${list.map(d => `<button type="button" class="gfv-row" data-obs-dashboard="${obsAttr(d.uid)}">${PICONS.tree(12)}<span class="gfv-row-title">${escapeHtml(d.title)}</span></button>`).join('')}`).join('') : ''}</div>` : ''}
+    </div>`;
+}
+
+/** A version's whole list of changes, the page "All changes" leads to. */
+function observabilityChangesHtml(ref) {
+  const [id, tag] = String(ref).split('|');
+  const c = observabilityComponent(id);
+  if (!c) return '<div class="ghv-empty">This component is gone.</div>';
+  const product = observabilityProduct(c.product);
+  const t = (c.tags || []).find(x => x.name === tag);
+  return `<div class="gfv-page obs-page">
+      <div class="gfv-title"><button type="button" class="obs-comp-link obs-comp-link--up" data-obs-product="${obsAttr(c.product)}">${escapeHtml(product?.label || '')}</button> ·
+        <button type="button" class="obs-comp-link obs-comp-link--up" data-obs-component="${obsAttr(c.id)}">${escapeHtml(c.label)}</button> · ${escapeHtml(tag === 'staging' ? `staging (${c.branch})` : tag)}</div>
+      <div class="gfv-meta"><span>All changes${tag === 'staging' ? ' not in production yet' : ''}${t?.date ? `, released ${escapeHtml(obsDay(t.date))}` : ''}</span><span class="ws-flex"></span>${t?.url ? obsLink(t.url, 'Release on GitHub') : ''}</div>
+      ${t?.summary ? `<div class="obs-summary">${escapeHtml(t.summary)}</div>` : ''}
+      <div class="gfv-sec">${observabilityFeaturesHtml(c.id, tag)}</div>
     </div>`;
 }
 
@@ -550,13 +801,20 @@ function bindObservabilityPage() {
       if (c.error) continue;
       const prod = observabilityProductionTag(c);
       if (prod) loadObservabilityFeatures(c.id, prod.tag);
-      if (prod && c.bugsnag?.length) loadObservabilityProblems(c.id, prod.tag);
+      if (prod && c.bugsnag?.length) loadObservabilityProblems(c.id, prod.tag, true);
       if (c.flags) loadObservabilityFlags(c.id);
       if (c.model === 'tagged' && c.staging) loadObservabilityFeatures(c.id, 'staging');
     }
   }
+  for (const service of observabilityPageServices()) {
+    if (!g.vitals.has(`${service.platform}|${service.app}`)) loadGrafanaVitals(service).then(() => { if (activeTab === 'grafana' && g.vitals.has(`${service.platform}|${service.app}`)) renderGrafanaMain(); });
+  }
+  if (sel.kind === 'changes') loadObservabilityFeatures(...String(sel.id).split('|'));
   if (sel.kind === 'component') {
     const c = observabilityComponent(sel.id);
+    const prod = c && !c.error && observabilityProductionTag(c);
+    if (prod && c.bugsnag?.length) loadObservabilityProblems(c.id, prod.tag, true);
+    if (c?.model === 'tagged' && c.staging) loadObservabilityFeatures(c.id, 'staging');
     const version = c && observabilityVersion(c);
     if (version) loadObservabilityFeatures(c.id, version);
     if (version && version !== 'staging' && c.bugsnag?.length) loadObservabilityProblems(c.id, version, true);
@@ -579,6 +837,7 @@ function bindObservabilityPage() {
   root.querySelectorAll('[data-obs-dashboard]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'dashboard', id: b.dataset.obsDashboard }); });
   root.querySelectorAll('[data-obs-logs]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'logs', id: b.dataset.obsLogs }); });
   root.querySelectorAll('[data-obs-connect]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'setup', id: null }); });
+  root.querySelectorAll('[data-obs-changes]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'changes', id: b.dataset.obsChanges }); });
   root.querySelectorAll('[data-obs-ask]').forEach(b => { b.onclick = () => askClaudeAboutObservabilityError(...b.dataset.obsAsk.split('|')); });
   const picker = root.querySelector('#obs-version');
   if (picker) picker.onchange = () => { s.versions.set(sel.id, picker.value); renderGrafanaMain(); };
