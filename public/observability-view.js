@@ -746,6 +746,9 @@ const obsMinutes = (sec) => (sec == null ? '–' : sec < 3600 ? `${Math.round(se
 const obsMeters = (m) => (m == null ? '–' : m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m)} m`);
 const obsEuros = (v) => (v == null ? '–' : `€${Math.round(v).toLocaleString('en-US')}`);
 
+/** A window as shown: the metrics say "1d", which is the last 24 hours. */
+const obsWindow = (window) => (window === '1d' ? '24h' : window);
+
 /** "▲ 8%" against one window back; nothing without history. */
 function obsTrend(pair) {
   if (!pair || pair.before == null || !pair.before) return '';
@@ -761,11 +764,11 @@ function observabilityUsageRowHtml(p) {
     return `<div class="gh-muted">${observabilityState.business ? 'No usage figures for this product yet: they come once its backends export the business metrics.' : grafanaViewState.config?.hasToken ? 'Reading the usage figures…' : 'Usage figures come from Grafana, which is not connected.'}</div>`;
   }
   const w = (pair) => (pair ? obsCount(pair.now) : '–');
-  const sub = (kind) => `1d ${w(b.users[kind]?.['1d'])} · 30d ${w(b.users[kind]?.['30d'])}`;
+  const sub = (kind) => `24h ${w(b.users[kind]?.['1d'])} · 30d ${w(b.users[kind]?.['30d'])}`;
   const figures = [];
   if (b.users.active) figures.push(obsFigure('Active users · 7d', `${w(b.users.active['7d'])} ${obsTrend(b.users.active['7d'])}`, sub('active')));
   if (b.users.training) figures.push(obsFigure('Training users · 7d', `${w(b.users.training['7d'])} ${obsTrend(b.users.training['7d'])}`, sub('training')));
-  if (b.workouts.all['7d']) figures.push(obsFigure('Workouts · 7d', `${w(b.workouts.all['7d'])} ${obsTrend(b.workouts.all['7d'])}`, `1d ${w(b.workouts.all['1d'])} · 30d ${w(b.workouts.all['30d'])}`));
+  if (b.workouts.all['7d']) figures.push(obsFigure('Workouts · 7d', `${w(b.workouts.all['7d'])} ${obsTrend(b.workouts.all['7d'])}`, `24h ${w(b.workouts.all['1d'])} · 30d ${w(b.workouts.all['30d'])}`));
   if (b.mrr != null) figures.push(obsFigure('MRR', escapeHtml(obsEuros(b.mrr)), b.subscriptions != null ? `${obsCount(b.subscriptions)} subscriptions` : ''));
   else if (b.subscriptions != null) figures.push(obsFigure('Subscriptions', obsCount(b.subscriptions), '', 'ok'));
   return figures.length ? `<div class="obs-kpis obs-kpis--usage">${figures.join('')}</div>` : '<div class="gh-muted">No usage figures yet.</div>';
@@ -779,7 +782,7 @@ function observabilityUsageHtml(p) {
   if (!b) return `<div class="gfv-page obs-page">${head}<div class="gfv-sec">${observabilityUsageRowHtml(p)}</div></div>`;
   const windows = ['1d', '7d', '30d'];
   const cell = (pair) => `<span>${pair ? `${escapeHtml(obsCount(pair.now))} ${obsTrend(pair)}` : '–'}</span>`;
-  const table = (rows) => `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${x}</span>`).join('')}</div>${rows.join('')}</div>`;
+  const table = (rows) => `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${obsWindow(x)}</span>`).join('')}</div>${rows.join('')}</div>`;
   const userRows = [['active', 'Active users'], ['training', 'Training users'], ['new', 'New accounts']]
     .filter(([k]) => b.users[k]).map(([k, label]) => `<div class="obs-utr"><span title="${obsAttr((OBS_FIGURE_HELP[label] || '').replace(/ in the last 7 days.*$/, ' in the window. Each user counts once.'))}">${label}</span>${windows.map(x => cell(b.users[k][x])).join('')}</div>`);
   const types = Object.entries(b.workouts.types).sort((a, c) => (c[1]['7d']?.now || 0) - (a[1]['7d']?.now || 0));
@@ -787,14 +790,14 @@ function observabilityUsageHtml(p) {
   const channels = Object.entries(b.workouts.channels);
   const medians = (field, fmt) => {
     const rows = Object.entries(b[field]).sort(([a], [c]) => (a === 'all' ? -1 : c === 'all' ? 1 : a.localeCompare(c)));
-    return rows.length ? `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${x}</span>`).join('')}</div>
+    return rows.length ? `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${obsWindow(x)}</span>`).join('')}</div>
       ${rows.map(([type, v]) => `<div class="obs-utr"><span>${escapeHtml(type === 'all' ? 'All workouts' : type)}</span>${windows.map(x => `<span>${escapeHtml(fmt(v[x]))}</span>`).join('')}</div>`).join('')}</div>` : '<div class="gh-muted">–</div>';
   };
   const training = Object.entries(b.training);
   const extras = Object.entries(b.extra);
   const share = b.strava != null && b.accounts ? ` (${Math.round((b.strava / b.accounts) * 100)}% of accounts)` : '';
   const kv = (label, value) => `<div class="obs-kv"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`;
-  const windowed = (v) => Object.entries(v).map(([x, n]) => `${x === 'all' ? '' : `${x} `}${obsCount(n)}`).join(' · ');
+  const windowed = (v) => Object.entries(v).map(([x, n]) => `${x === 'all' ? '' : `${obsWindow(x)} `}${obsCount(n)}`).join(' · ');
   return `<div class="gfv-page obs-page">${head}
       <div class="gfv-meta"><span>From the backends' business metrics, refreshed every 15 minutes. Trends compare with one window earlier.</span></div>
       <div class="gfv-sec">${observabilityUsageRowHtml(p)}</div>
