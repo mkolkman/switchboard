@@ -36,7 +36,8 @@ test('businessQueries: one window back by offset, for the counts', () => {
   const { businessQueries } = require('../grafana');
   const q = businessQueries();
   assert.equal(q['users@7d'], 'sum by (product, kind, window) (business_users{window="7d"} offset 7d)');
-  assert.equal(q['workoutsByType@30d'], 'sum by (product, type, window) (business_workouts{window="30d"} offset 30d)');
+  // 30 days back is the edge of Prometheus' retention: the 30-day trend looks 29 days back.
+  assert.equal(q['workoutsByType@30d'], 'sum by (product, type, window) (business_workouts{window="30d"} offset 29d)');
   assert.equal(q['strava@7d'], undefined);
 });
 

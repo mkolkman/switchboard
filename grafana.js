@@ -285,10 +285,14 @@ async function promInstant(expr) {
 }
 
 const BUSINESS_WINDOWS = ['1d', '7d', '30d'];
+// How far back a window's trend looks: one window, except 30 days, which is
+// Prometheus' whole retention; 29 days back is still there.
+const BUSINESS_TREND_OFFSET = { '1d': '1d', '7d': '7d', '30d': '29d' };
 
 /**
  * The business_* gauges as one model per product, each figure with its value
- * now and one window back (`before`, via offset; null without history):
+ * now and one window back (`before`, via offset, 29 days for the 30-day
+ * window; null without history):
  * { users: { kind: { window: { now, before } } }, workouts: { all, channels, types } (each
  * { window: { now, before } }), duration / distance: { type: { window: median } }, strava,
  * accounts, training: { kind: { window: value } }, subscriptions, mrr, extra: { name: { window: value } } }.
@@ -342,7 +346,7 @@ function shapeBusiness(queries) {
   return products;
 }
 
-/** The PromQL behind shapeBusiness, by name; `name@w` is the same one window back. */
+/** The PromQL behind shapeBusiness, by name; `name@w` is the same one window back (BUSINESS_TREND_OFFSET). */
 function businessQueries() {
   const q = {
     users: 'sum by (product, kind, window) (business_users)',
@@ -358,7 +362,7 @@ function businessQueries() {
     extra: 'sum by (product, name, window) (business_extra)',
   };
   for (const name of ['users', 'workouts', 'workoutsByChannel', 'workoutsByType']) {
-    for (const w of BUSINESS_WINDOWS) q[`${name}@${w}`] = q[name].replace(/\((business_\w+)\)$/, `($1{window="${w}"} offset ${w})`);
+    for (const w of BUSINESS_WINDOWS) q[`${name}@${w}`] = q[name].replace(/\((business_\w+)\)$/, `($1{window="${w}"} offset ${BUSINESS_TREND_OFFSET[w]})`);
   }
   return q;
 }

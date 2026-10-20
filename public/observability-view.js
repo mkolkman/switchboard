@@ -799,7 +799,7 @@ function observabilityUsageHtml(p) {
   const kv = (label, value) => `<div class="obs-kv"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`;
   const windowed = (v) => Object.entries(v).map(([x, n]) => `${x === 'all' ? '' : `${obsWindow(x)} `}${obsCount(n)}`).join(' · ');
   return `<div class="gfv-page obs-page">${head}
-      <div class="gfv-meta"><span>From the backends' business metrics, refreshed every 15 minutes. Trends compare with one window earlier.</span></div>
+      <div class="gfv-meta"><span>From the backends' business metrics, refreshed every 15 minutes. Trends compare with one window earlier (the 30-day figures with 29 days earlier, the furthest Prometheus keeps).</span></div>
       <div class="gfv-sec">${observabilityUsageRowHtml(p)}</div>
       ${userRows.length ? `<div class="gfv-sec"><div class="gh-sec-h">Users</div>${table(userRows)}${b.accounts != null ? `<div class="obs-feat-more gh-muted">${escapeHtml(obsCount(b.accounts))} accounts in all</div>` : ''}</div>` : ''}
       ${types.length ? `<div class="gfv-sec"><div class="gh-sec-h">Workouts by type, last 7 days</div>
