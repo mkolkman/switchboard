@@ -8287,6 +8287,23 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .obs-sum-link:hover b { text-decoration: underline; }
 .obs-sum-first { min-width: 0; color: #8a8aa0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obs-feat-more { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; font-size: 12px; }
+/* Usage: the business figures. */
+.obs-kpis--usage { margin-top: 0; }
+.obs-kpis--usage .obs-kpi { box-shadow: inset 3px 0 0 rgba(120,130,255,0.55); }
+.obs-trend { font-size: 11px; font-weight: 600; color: #8a8aa0; }
+.obs-trend--up { color: #7ee2a0; }
+.obs-trend--down { color: #ff9a9a; }
+.obs-side-users { flex: none; font-size: 10.5px; color: #7a7a92; font-variant-numeric: tabular-nums; }
+.obs-utable { display: flex; flex-direction: column; font-size: 12.5px; max-width: 640px; }
+.obs-utr { display: grid; grid-template-columns: minmax(140px, 1fr) repeat(3, 110px); gap: 10px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-variant-numeric: tabular-nums; }
+.obs-utr--h { font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #6a6a80; }
+.obs-bar { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 120px; gap: 10px; align-items: center; padding: 3px 0; font-size: 12.5px; max-width: 760px; }
+.obs-bar-l { color: #c8c8dc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obs-bar-t { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.05); overflow: hidden; }
+.obs-bar-f { display: block; height: 100%; border-radius: 4px; background: rgba(120,130,255,0.6); }
+.obs-bar-n { font-variant-numeric: tabular-nums; color: #d0d0e0; }
+.obs-kv { display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 10px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12.5px; max-width: 640px; font-variant-numeric: tabular-nums; }
+.obs-kv span:first-child { color: #a8aec8; }
 .rail-obs { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
 
 /* A PR walkthrough (session-context.js): the session on the left, under a brief

@@ -165,7 +165,7 @@ function renderGrafanaList() {
   renderObservabilityList();
 }
 
-const GRAFANA_PAGES = ['product', 'component', 'infra', 'changes'];
+const GRAFANA_PAGES = ['product', 'component', 'infra', 'changes', 'usage'];
 
 /**
  * Go to a page of the tab. An alert, dashboard or logs remember the page they

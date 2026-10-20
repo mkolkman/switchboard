@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('api', {
   getGrafanaLogs: (spec) => ipcRenderer.invoke('grafana-logs', spec),
   getGrafanaLogContext: (spec) => ipcRenderer.invoke('grafana-log-context', spec),
   getGrafanaAlertSeries: (spec) => ipcRenderer.invoke('grafana-alert-series', spec),
+  getGrafanaBusiness: () => ipcRenderer.invoke('grafana-business'),
   getGrafanaSessionNote: () => ipcRenderer.invoke('grafana-session-note'),
   getObservabilityOverview: (opts) => ipcRenderer.invoke('observability-overview', opts),
   getObservabilityFeatures: (spec) => ipcRenderer.invoke('observability-features', spec),

@@ -887,6 +887,7 @@ ipcMain.handle('grafana-vitals', (_e, platform, app) => grafana.asResult(grafana
 ipcMain.handle('grafana-logs', (_e, spec) => grafana.asResult(grafana.getLogs(spec || {})));
 ipcMain.handle('grafana-log-context', (_e, spec) => grafana.asResult(grafana.getLogContext(spec || {})));
 ipcMain.handle('grafana-alert-series', (_e, spec) => grafana.asResult(grafana.getAlertSeries(spec || {})));
+ipcMain.handle('grafana-business', () => grafana.asResult(grafana.getBusiness()));
 ipcMain.handle('grafana-session-note', () => grafana.sessionToolsNote());
 
 // --- IPC: Observability (observability.js), read-only ---

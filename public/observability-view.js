@@ -14,6 +14,9 @@
 // pages and calls in here for the rest. Flags: what the production version
 // switches on or off, from its code and the live values (1Password .env for
 // a backend, Remote Config for an app), features apart from technical ones.
+// Usage: the business figures each backend exports as business_* gauges
+// (users, workouts, training, subscriptions), a row on the product's page and
+// a Usage page with the rest.
 // Depends on: utils.js (escapeHtml), projects-view.js (PICONS),
 // grafana-view.js (grafanaViewState, selectGrafana, grafanaAlertRow,
 // grafanaVitalsHtml, grafanaService, renderGrafanaMain, renderGrafanaList,
@@ -27,6 +30,7 @@ const observabilityState = {
   features: new Map(), // "component|tag" or "component|staging" → { loading } | result | { error }
   problems: new Map(), // "component|tag|rate" → { loading } | Bugsnag errors | { error }
   flags: new Map(), // component id → { loading } | its production version's flags | { error }
+  business: null, // product id → its business figures (grafana.js getBusiness), once read
   versions: new Map(), // component id → the tag picked on its page ("staging" for main)
   unfolded: new Set(), // folded-by-default parts opened: "chores:<feature key>", "quiet:<page>", "dash:<component>"
   timer: null,
@@ -44,6 +48,7 @@ function loadObservabilityOverview({ force = false } = {}) {
   s.loading = window.api.getObservabilityOverview({ force }).then(result => {
     if (result?.error) s.error = result.error;
     else { s.error = null; s.overview = result; loadObservabilityHealth(); }
+    return loadObservabilityBusiness();
   }).catch(err => { s.error = err?.message || String(err); }).finally(() => { s.loading = null; });
   return s.loading;
 }
@@ -75,6 +80,13 @@ function loadObservabilityProblems(componentId, tag, rate = false) {
     renderGrafanaList();
     if (['product', 'component'].includes(grafanaViewState.selected.kind)) renderGrafanaMain();
   });
+}
+
+/** Every product's business figures from Prometheus; again on each poll. */
+async function loadObservabilityBusiness() {
+  if (!grafanaViewState.config?.hasToken) return;
+  const result = await window.api.getGrafanaBusiness().catch(() => null);
+  if (result && !result.error) observabilityState.business = result.products || {};
 }
 
 /** A component's production flags, read once (1Password may ask to unlock). */
@@ -116,6 +128,7 @@ function startObservabilityPolling() {
     await loadObservabilityOverview();
     // Errors come in over time: read them again, paced.
     for (const [key, value] of observabilityState.problems) if (!value.loading) observabilityState.problems.delete(key);
+    await loadObservabilityBusiness();
     loadObservabilityHealth();
     renderGrafanaList();
     if (['product', 'component', 'infra'].includes(grafanaViewState.selected.kind)) renderGrafanaMain();
@@ -145,6 +158,7 @@ function observabilityPlaceLabel(sel) {
     const c = observabilityComponent(sel.id);
     return c ? `${observabilityProduct(c.product)?.label} · ${c.label}` : null;
   }
+  if (sel.kind === 'usage') return `${observabilityProduct(sel.id)?.label || ''} usage`;
   if (sel.kind === 'changes') {
     const [id, tag] = String(sel.id).split('|');
     const c = observabilityComponent(id);
@@ -219,8 +233,9 @@ function renderObservabilityList() {
   const list = products.map(p => {
     const open = s.expanded.has(p.id) || (sel.kind === 'component' && observabilityComponent(sel.id)?.product === p.id);
     const firing = observabilityProductAlerts(p).filter(OBS_ACTIVE).length + p.components.reduce((n, c) => n + observabilityNewErrors(c), 0);
+    const active = s.business?.[p.id]?.users?.active?.['7d']?.now;
     const head = `<div class="obs-prod-row"><button type="button" class="obs-fold" data-obs-fold="${obsAttr(p.id)}" title="${open ? 'Fold' : 'Show the components'}"><span class="ghv-fold${open ? '' : ' shut'}">${PICONS.chevronDown(9)}</span></button>
-      ${row(`data-obs-product="${obsAttr(p.id)}"`, sel.kind === 'product' && sel.id === p.id, observabilityProductStatus(p), p.label, firing ? `<span class="ghv-count" title="Active alerts and new errors">${firing}</span>` : '')}</div>`;
+      ${row(`data-obs-product="${obsAttr(p.id)}"`, sel.kind === 'product' && sel.id === p.id, observabilityProductStatus(p), p.label, `${active != null ? `<span class="obs-side-users" title="Active users, last 7 days">${escapeHtml(obsCount(active))}</span>` : ''}${firing ? `<span class="ghv-count" title="Active alerts and new errors">${firing}</span>` : ''}`)}</div>`;
     const comps = open ? p.components.map(c => {
       const prod = c.error ? null : observabilityProductionTag(c);
       const extra = `<span class="obs-ver" title="${obsAttr(c.error || (prod ? `In production since ${obsDay(prod.date)}` : 'Nothing in production'))}">${escapeHtml(c.error ? '!' : prod?.tag || '–')}</span>`;
@@ -690,6 +705,84 @@ function observabilityChangesSummaryHtml(c, tag) {
     </div>`;
 }
 
+// --- Usage: the business figures ---
+
+/** 1234 → "1,234"; 12345 → "12.3k". */
+function obsCount(v) {
+  if (v == null || !Number.isFinite(v)) return '–';
+  if (Math.abs(v) >= 10000) return `${(v / 1000).toFixed(Math.abs(v) >= 100000 ? 0 : 1)}k`;
+  return Math.round(v).toLocaleString('en-US');
+}
+
+const obsMinutes = (sec) => (sec == null ? '–' : sec < 3600 ? `${Math.round(sec / 60)} min` : `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min`);
+const obsMeters = (m) => (m == null ? '–' : m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m)} m`);
+const obsEuros = (v) => (v == null ? '–' : `€${Math.round(v).toLocaleString('en-US')}`);
+
+/** "▲ 8%" against one window back; nothing without history. */
+function obsTrend(pair) {
+  if (!pair || pair.before == null || !pair.before) return '';
+  const pct = Math.round(((pair.now - pair.before) / pair.before) * 100);
+  if (!pct) return '<span class="obs-trend">±0%</span>';
+  return `<span class="obs-trend obs-trend--${pct > 0 ? 'up' : 'down'}">${pct > 0 ? '▲' : '▼'} ${Math.abs(pct)}%</span>`;
+}
+
+/** The core figures at the top of a product's page: who uses it, how much they train, and what it earns. */
+function observabilityUsageRowHtml(p) {
+  const b = observabilityState.business?.[p.id];
+  if (!b) {
+    return `<div class="gh-muted">${observabilityState.business ? 'No usage figures for this product yet: they come once its backends export the business metrics.' : grafanaViewState.config?.hasToken ? 'Reading the usage figures…' : 'Usage figures come from Grafana, which is not connected.'}</div>`;
+  }
+  const w = (pair) => (pair ? obsCount(pair.now) : '–');
+  const sub = (kind) => `1d ${w(b.users[kind]?.['1d'])} · 30d ${w(b.users[kind]?.['30d'])}`;
+  const figures = [];
+  if (b.users.active) figures.push(obsFigure('Active users · 7d', `${w(b.users.active['7d'])} ${obsTrend(b.users.active['7d'])}`, sub('active'), 'ok', 'Users with an authenticated request in the last 7 days'));
+  if (b.users.training) figures.push(obsFigure('Training users · 7d', `${w(b.users.training['7d'])} ${obsTrend(b.users.training['7d'])}`, sub('training'), 'ok', 'Users who logged a workout in the last 7 days'));
+  if (b.workouts.all['7d']) figures.push(obsFigure('Workouts · 7d', `${w(b.workouts.all['7d'])} ${obsTrend(b.workouts.all['7d'])}`, `1d ${w(b.workouts.all['1d'])} · 30d ${w(b.workouts.all['30d'])}`, 'ok', 'Workouts in the last 7 days'));
+  if (b.mrr != null) figures.push(obsFigure('MRR', escapeHtml(obsEuros(b.mrr)), b.subscriptions != null ? `${obsCount(b.subscriptions)} subscriptions` : '', 'ok', 'Monthly recurring revenue (RevenueCat)'));
+  else if (b.subscriptions != null) figures.push(obsFigure('Subscriptions', obsCount(b.subscriptions), '', 'ok'));
+  return figures.length ? `<div class="obs-kpis obs-kpis--usage">${figures.join('')}</div>` : '<div class="gh-muted">No usage figures yet.</div>';
+}
+
+/** A product's Usage page: every business figure, by window, with its trend. */
+function observabilityUsageHtml(p) {
+  if (!p) return '<div class="ghv-empty">This product is gone.</div>';
+  const b = observabilityState.business?.[p.id];
+  const head = `<div class="gfv-title"><button type="button" class="obs-comp-link obs-comp-link--up" data-obs-product="${obsAttr(p.id)}">${escapeHtml(p.label)}</button> · Usage</div>`;
+  if (!b) return `<div class="gfv-page obs-page">${head}<div class="gfv-sec">${observabilityUsageRowHtml(p)}</div></div>`;
+  const windows = ['1d', '7d', '30d'];
+  const cell = (pair) => `<span>${pair ? `${escapeHtml(obsCount(pair.now))} ${obsTrend(pair)}` : '–'}</span>`;
+  const table = (rows) => `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${x}</span>`).join('')}</div>${rows.join('')}</div>`;
+  const userRows = [['active', 'Active users'], ['training', 'Training users'], ['new', 'New accounts']]
+    .filter(([k]) => b.users[k]).map(([k, label]) => `<div class="obs-utr"><span>${label}</span>${windows.map(x => cell(b.users[k][x])).join('')}</div>`);
+  const types = Object.entries(b.workouts.types).sort((a, c) => (c[1]['7d']?.now || 0) - (a[1]['7d']?.now || 0));
+  const max = Math.max(1, ...types.map(([, v]) => v['7d']?.now || 0));
+  const channels = Object.entries(b.workouts.channels);
+  const medians = (field, fmt) => {
+    const rows = Object.entries(b[field]).sort(([a], [c]) => (a === 'all' ? -1 : c === 'all' ? 1 : a.localeCompare(c)));
+    return rows.length ? `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${x}</span>`).join('')}</div>
+      ${rows.map(([type, v]) => `<div class="obs-utr"><span>${escapeHtml(type === 'all' ? 'All workouts' : type)}</span>${windows.map(x => `<span>${escapeHtml(fmt(v[x]))}</span>`).join('')}</div>`).join('')}</div>` : '<div class="gh-muted">–</div>';
+  };
+  const training = Object.entries(b.training);
+  const extras = Object.entries(b.extra);
+  const share = b.strava != null && b.accounts ? ` (${Math.round((b.strava / b.accounts) * 100)}% of accounts)` : '';
+  const kv = (label, value) => `<div class="obs-kv"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`;
+  const windowed = (v) => Object.entries(v).map(([x, n]) => `${x === 'all' ? '' : `${x} `}${obsCount(n)}`).join(' · ');
+  return `<div class="gfv-page obs-page">${head}
+      <div class="gfv-meta"><span>From the backends' business metrics, refreshed every 15 minutes. Trends compare with one window earlier.</span></div>
+      <div class="gfv-sec">${observabilityUsageRowHtml(p)}</div>
+      ${userRows.length ? `<div class="gfv-sec"><div class="gh-sec-h">Users</div>${table(userRows)}${b.accounts != null ? `<div class="obs-feat-more gh-muted">${escapeHtml(obsCount(b.accounts))} accounts in all</div>` : ''}</div>` : ''}
+      ${types.length ? `<div class="gfv-sec"><div class="gh-sec-h">Workouts by type, last 7 days</div>
+        ${types.map(([type, v]) => `<div class="obs-bar"><span class="obs-bar-l">${escapeHtml(type)}</span><span class="obs-bar-t"><span class="obs-bar-f" style="width:${Math.round(((v['7d']?.now || 0) / max) * 100)}%"></span></span><span class="obs-bar-n">${escapeHtml(obsCount(v['7d']?.now))} ${obsTrend(v['7d'])}</span></div>`).join('')}
+        ${channels.length > 1 ? `<div class="obs-feat-more gh-muted">${channels.map(([ch, v]) => `${escapeHtml(ch)} ${escapeHtml(obsCount(v['7d']?.now))}`).join(' · ')}</div>` : ''}</div>` : ''}
+      <div class="gfv-sec"><div class="gh-sec-h">Median duration</div>${medians('duration', obsMinutes)}</div>
+      ${Object.keys(b.distance).length ? `<div class="gfv-sec"><div class="gh-sec-h">Median distance</div>${medians('distance', obsMeters)}</div>` : ''}
+      ${b.strava != null ? `<div class="gfv-sec"><div class="gh-sec-h">Connections</div>${kv('Strava', `${obsCount(b.strava)} accounts${share}`)}</div>` : ''}
+      ${training.length ? `<div class="gfv-sec"><div class="gh-sec-h">Training</div>${training.map(([kind, v]) => kv(kind.replace(/_/g, ' '), windowed(v))).join('')}</div>` : ''}
+      ${b.subscriptions != null || b.mrr != null ? `<div class="gfv-sec"><div class="gh-sec-h">Subscriptions</div>${kv('Active', obsCount(b.subscriptions))}${b.mrr != null ? kv('Monthly recurring revenue', obsEuros(b.mrr)) : ''}</div>` : ''}
+      ${extras.length ? `<div class="gfv-sec"><div class="gh-sec-h">More</div>${extras.map(([name, v]) => kv(name.replace(/_/g, ' '), windowed(v))).join('')}</div>` : ''}
+    </div>`;
+}
+
 // --- The pages ---
 
 function observabilityPageHtml() {
@@ -698,6 +791,7 @@ function observabilityPageHtml() {
   if (!s.overview) return `<div class="ghv-empty">${s.error ? escapeHtml(s.error) : 'Loading…'}</div>`;
   if (sel.kind === 'infra') return observabilityInfraHtml();
   if (sel.kind === 'changes') return observabilityChangesHtml(sel.id);
+  if (sel.kind === 'usage') return observabilityUsageHtml(observabilityProduct(sel.id));
   if (sel.kind === 'component') {
     const c = observabilityComponent(sel.id);
     return c ? observabilityComponentHtml(c) : '<div class="ghv-empty">This component is gone.</div>';
@@ -715,7 +809,8 @@ function observabilityProductHtml(p) {
   return `<div class="gfv-page obs-page">
       <div class="gfv-title"><span class="gfv-dot gfv-dot--${obsAttr(observabilityProductStatus(p))}"></span> ${escapeHtml(p.label)}</div>
       ${p.owner ? `<div class="gfv-meta"><span>Part of <button type="button" class="obs-comp-link" data-obs-product="${obsAttr(p.owner)}">${escapeHtml(observabilityProduct(p.owner)?.label || p.owner)}</button></span></div>` : ''}
-      ${observabilityKeyFiguresHtml(p.components)}
+      <div class="gfv-sec"><div class="gh-sec-h obs-ver-h">Usage <button type="button" class="obs-link" data-obs-usage="${obsAttr(p.id)}">All usage ›</button></div>${observabilityUsageRowHtml(p)}</div>
+      <div class="gfv-sec"><div class="gh-sec-h">Health</div>${observabilityKeyFiguresHtml(p.components)}</div>
       <div class="gfv-sec"><div class="gh-sec-h">Needs attention</div>${observabilityAttentionHtml(p.components)}</div>
       <div class="gfv-sec"><div class="gh-sec-h">In production</div>${observabilityProductTableHtml(p)}</div>
       ${coming ? `<div class="gfv-sec"><div class="gh-sec-h">On its way</div>${coming}</div>` : ''}
@@ -837,6 +932,7 @@ function bindObservabilityPage() {
   root.querySelectorAll('[data-obs-dashboard]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'dashboard', id: b.dataset.obsDashboard }); });
   root.querySelectorAll('[data-obs-logs]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'logs', id: b.dataset.obsLogs }); });
   root.querySelectorAll('[data-obs-connect]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'setup', id: null }); });
+  root.querySelectorAll('[data-obs-usage]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'usage', id: b.dataset.obsUsage }); });
   root.querySelectorAll('[data-obs-changes]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'changes', id: b.dataset.obsChanges }); });
   root.querySelectorAll('[data-obs-ask]').forEach(b => { b.onclick = () => askClaudeAboutObservabilityError(...b.dataset.obsAsk.split('|')); });
   const picker = root.querySelector('#obs-version');

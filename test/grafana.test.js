@@ -31,3 +31,37 @@ test('serviceOf: one service of a platform keeps its own job, app and metric pre
   assert.equal(serviceOf(nohrd, ''), nohrd);
   assert.equal(serviceOf(nohrd, 'MoveLabConnect'), nohrd);
 });
+
+test('businessQueries: one window back by offset, for the counts', () => {
+  const { businessQueries } = require('../grafana');
+  const q = businessQueries();
+  assert.equal(q['users@7d'], 'sum by (product, kind, window) (business_users{window="7d"} offset 7d)');
+  assert.equal(q['workoutsByType@30d'], 'sum by (product, type, window) (business_workouts{window="30d"} offset 30d)');
+  assert.equal(q['strava@7d'], undefined);
+});
+
+test('shapeBusiness: per product, now and one window back, app medians only', () => {
+  const { shapeBusiness } = require('../grafana');
+  const s = (labels, value) => ({ labels, value });
+  const products = shapeBusiness({
+    users: [s({ product: 'waterrower', kind: 'active', window: '7d' }, 1200), s({ product: 'waterrower', kind: 'accounts', window: 'all' }, 50000)],
+    'users@7d': [s({ product: 'waterrower', kind: 'active', window: '7d' }, 1000)],
+    workouts: [s({ product: 'waterrower', window: '7d' }, 3000)],
+    workoutsByType: [s({ product: 'waterrower', type: 'interval', window: '7d' }, 800)],
+    workoutsByChannel: [s({ product: 'nohrd', channel: 'commercial', window: '7d' }, 40)],
+    duration: [s({ product: 'waterrower', channel: 'app', type: 'all', window: '7d' }, 1500), s({ product: 'waterrower', channel: 'commercial', type: 'all', window: '7d' }, 600)],
+    strava: [s({ product: 'waterrower' }, 4000)],
+    training: [s({ product: 'waterrower', kind: 'new_enrollments', window: '7d' }, 30)],
+    mrr: [s({ product: 'waterrower' }, 12345)], // business_mrr_euros
+  });
+  const wr = products.waterrower;
+  assert.deepEqual(wr.users.active['7d'], { now: 1200, before: 1000 });
+  assert.equal(wr.accounts, 50000);
+  assert.deepEqual(wr.workouts.all['7d'], { now: 3000, before: null });
+  assert.deepEqual(wr.workouts.types.interval['7d'], { now: 800, before: null });
+  assert.equal(wr.duration.all['7d'], 1500);
+  assert.equal(wr.strava, 4000);
+  assert.equal(wr.training.new_enrollments['7d'], 30);
+  assert.equal(wr.mrr, 12345);
+  assert.deepEqual(products.nohrd.workouts.channels.commercial['7d'], { now: 40, before: null });
+});

@@ -276,6 +276,101 @@ async function getAlertSeries({ query, activeAt }) {
   return { series: series.slice(0, 8) };
 }
 
+// --- Business figures (the backends' business_* gauges) ---
+
+/** A Prometheus instant query: [{ labels, value }]. */
+async function promInstant(expr) {
+  const data = await api(`${PROM}/query?${new URLSearchParams({ query: expr })}`);
+  return (data?.data?.result || []).map(s => ({ labels: s.metric || {}, value: Number(s.value?.[1]) })).filter(s => Number.isFinite(s.value));
+}
+
+const BUSINESS_WINDOWS = ['1d', '7d', '30d'];
+
+/**
+ * The business_* gauges as one model per product, each figure with its value
+ * now and one window back (`before`, via offset; null without history):
+ * { users: { kind: { window: { now, before } } }, workouts: { all, channels, types } (each
+ * { window: { now, before } }), duration / distance: { type: { window: median } }, strava,
+ * accounts, training: { kind: { window: value } }, subscriptions, mrr, extra: { name: { window: value } } }.
+ * `queries` holds the answers keyed as businessQueries() names them.
+ */
+function shapeBusiness(queries) {
+  const products = {};
+  const of = (id) => (products[id] = products[id] || { users: {}, workouts: { all: {}, channels: {}, types: {} }, duration: {}, distance: {}, training: {}, extra: {}, strava: null, accounts: null, subscriptions: null, mrr: null });
+  const put = (obj, path, value) => {
+    let o = obj;
+    for (const k of path.slice(0, -1)) o = o[k] = o[k] || {};
+    o[path[path.length - 1]] = value;
+  };
+  // Values now, and the same window one window back.
+  const pair = (name, keyOf) => {
+    const out = new Map();
+    for (const s of queries[name] || []) out.set(keyOf(s.labels), { labels: s.labels, now: s.value, before: null });
+    for (const w of BUSINESS_WINDOWS) {
+      for (const s of queries[`${name}@${w}`] || []) {
+        if (s.labels.window !== w) continue;
+        const hit = out.get(keyOf(s.labels));
+        if (hit) hit.before = s.value;
+      }
+    }
+    return [...out.values()];
+  };
+  for (const r of pair('users', l => `${l.product}|${l.kind}|${l.window}`)) {
+    const { product, kind, window } = r.labels;
+    if (kind === 'accounts') of(product).accounts = r.now;
+    else put(of(product).users, [kind, window], { now: r.now, before: r.before });
+  }
+  for (const [name, field] of [['workouts', 'all'], ['workoutsByChannel', 'channels'], ['workoutsByType', 'types']]) {
+    for (const r of pair(name, l => `${l.product}|${l.channel || ''}|${l.type || ''}|${l.window}`)) {
+      const { product, channel, type, window } = r.labels;
+      const path = field === 'all' ? ['all', window] : field === 'channels' ? ['channels', channel, window] : ['types', type, window];
+      put(of(product).workouts, path, { now: r.now, before: r.before });
+    }
+  }
+  for (const [name, field] of [['duration', 'duration'], ['distance', 'distance']]) {
+    for (const s of queries[name] || []) {
+      const { product, type, window, channel } = s.labels;
+      if (channel && channel !== 'app') continue; // the apps' medians; machines differ too much to mix in
+      put(of(product)[field], [type, window], s.value);
+    }
+  }
+  for (const s of queries.strava || []) of(s.labels.product).strava = s.value;
+  for (const s of queries.training || []) put(of(s.labels.product).training, [s.labels.kind, s.labels.window || 'all'], s.value);
+  for (const s of queries.subscriptions || []) of(s.labels.product).subscriptions = s.value;
+  for (const s of queries.mrr || []) of(s.labels.product).mrr = s.value;
+  for (const s of queries.extra || []) put(of(s.labels.product).extra, [s.labels.name, s.labels.window || 'all'], s.value);
+  return products;
+}
+
+/** The PromQL behind shapeBusiness, by name; `name@w` is the same one window back. */
+function businessQueries() {
+  const q = {
+    users: 'sum by (product, kind, window) (business_users)',
+    workouts: 'sum by (product, window) (business_workouts)',
+    workoutsByChannel: 'sum by (product, channel, window) (business_workouts)',
+    workoutsByType: 'sum by (product, type, window) (business_workouts)',
+    duration: 'max by (product, channel, type, window) (business_workout_duration_seconds{quantile="0.5"})',
+    distance: 'max by (product, channel, type, window) (business_workout_distance_meters{quantile="0.5"})',
+    strava: 'sum by (product) (business_strava_connected)',
+    training: 'sum by (product, kind, window) (business_training)',
+    subscriptions: 'sum by (product) (business_subscriptions)',
+    mrr: 'sum by (product) (business_mrr_euros)',
+    extra: 'sum by (product, name, window) (business_extra)',
+  };
+  for (const name of ['users', 'workouts', 'workoutsByChannel', 'workoutsByType']) {
+    for (const w of BUSINESS_WINDOWS) q[`${name}@${w}`] = q[name].replace(/\((business_\w+)\)$/, `($1{window="${w}"} offset ${w})`);
+  }
+  return q;
+}
+
+/** Every product's business figures; empty until the backends export them. */
+async function getBusiness() {
+  const queries = businessQueries();
+  const answers = await Promise.all(Object.entries(queries).map(async ([name, expr]) => [name, await promInstant(expr).catch(() => [])]));
+  const products = shapeBusiness(Object.fromEntries(answers));
+  return { products, available: Object.keys(products).length > 0 };
+}
+
 // --- A Claude session on logs or an alert ---
 
 /** How a session reads Grafana itself: the token and URL from the keychain, never in the prompt. */
@@ -296,6 +391,7 @@ function asResult(promise) {
 
 module.exports = {
   PLATFORMS, DEFAULT_URL, URL_SERVICE, TOKEN_SERVICE, ACCOUNT,
-  getConfig, saveConfig, getAlerts, getDashboards, getVitals, getLogs, getLogContext, getAlertSeries,
+  getConfig, saveConfig, getAlerts, getDashboards, getVitals, getLogs, getLogContext, getAlertSeries, getBusiness,
+  shapeBusiness, businessQueries,
   alertPlatform, alertApps, logQuery, serviceOf, sessionToolsNote, asResult,
 };
