@@ -53,7 +53,6 @@ test('shapeBusiness: per product, now and one window back, app medians only', ()
     duration: [s({ product: 'waterrower', channel: 'app', type: 'all', window: '7d' }, 1500), s({ product: 'waterrower', channel: 'commercial', type: 'all', window: '7d' }, 600)],
     strava: [s({ product: 'waterrower' }, 4000)],
     training: [s({ product: 'waterrower', kind: 'new_enrollments', window: '7d' }, 30)],
-    mrr: [s({ product: 'waterrower' }, 12345)], // business_mrr_euros
   });
   const wr = products.waterrower;
   assert.deepEqual(wr.users.active['7d'], { now: 1200, before: 1000 });
@@ -63,6 +62,5 @@ test('shapeBusiness: per product, now and one window back, app medians only', ()
   assert.equal(wr.duration.all['7d'], 1500);
   assert.equal(wr.strava, 4000);
   assert.equal(wr.training.new_enrollments['7d'], 30);
-  assert.equal(wr.mrr, 12345);
   assert.deepEqual(products.nohrd.workouts.channels.commercial['7d'], { now: 40, before: null });
 });

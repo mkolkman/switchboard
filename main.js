@@ -59,6 +59,7 @@ const helpscout = require('./helpscout');
 const grafana = require('./grafana');
 const observability = require('./observability');
 const bugsnag = require('./bugsnag');
+const revenuecat = require('./revenuecat');
 const sleepControl = require('./sleep-control');
 
 
@@ -898,6 +899,9 @@ ipcMain.handle('observability-problems', (_e, spec) => observability.asResult(ob
 ipcMain.handle('observability-flags', (_e, spec) => observability.asResult(observability.getFlags(spec || {})));
 ipcMain.handle('bugsnag-config', () => observability.asResult(bugsnag.getConfig()));
 ipcMain.handle('bugsnag-session-note', () => bugsnag.sessionToolsNote());
+ipcMain.handle('revenuecat-config', () => revenuecat.asResult(revenuecat.getConfig()));
+ipcMain.handle('revenuecat-save-config', (_e, spec) => revenuecat.asResult(revenuecat.saveConfig(spec || {})));
+ipcMain.handle('revenuecat-overviews', (_e, opts) => revenuecat.asResult(revenuecat.getOverviews({ force: !!opts?.force })));
 
 // --- IPC: Help Scout (helpscout.js) ---
 // Each write is a click in the Help Scout tab. A reply is always a draft:

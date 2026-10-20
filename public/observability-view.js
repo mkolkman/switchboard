@@ -15,8 +15,9 @@
 // switches on or off, from its code and the live values (1Password .env for
 // a backend, Remote Config for an app), features apart from technical ones.
 // Usage: the business figures each backend exports as business_* gauges
-// (users, workouts, training, subscriptions), a row on the product's page and
-// a Usage page with the rest.
+// (users, workouts, training), with subscriptions and revenue read from
+// RevenueCat directly (revenuecat.js); a row on the product's page and a
+// Usage page with the rest.
 // Depends on: utils.js (escapeHtml), projects-view.js (PICONS), github-view.js
 // (openGithubViewPullRequest), grafana-view.js (grafanaViewState,
 // selectGrafana, grafanaAlertRow, grafanaVitalsHtml, grafanaService,
@@ -31,6 +32,9 @@ const observabilityState = {
   problems: new Map(), // "component|tag|rate" → { loading } | Bugsnag errors | { error }
   flags: new Map(), // component id → { loading } | its production version's flags | { error }
   business: null, // product id → its business figures (grafana.js getBusiness), once read
+  revenue: null, // product id → its RevenueCat overview (revenuecat.js), or { error }
+  revenueConfig: null, // { connected: { product: { projectId } | null }, known }
+  revenueForm: { error: null, saving: false },
   versions: new Map(), // component id → the tag picked on its page ("staging" for main)
   unfolded: new Set(), // folded-by-default parts opened: "chores:<feature key>", "quiet:<page>", "dash:<component>"
   timer: null,
@@ -82,11 +86,18 @@ function loadObservabilityProblems(componentId, tag, rate = false) {
   });
 }
 
-/** Every product's business figures from Prometheus; again on each poll. */
+/** Every product's business figures from Prometheus, and its subscriptions and revenue from RevenueCat; again on each poll. */
 async function loadObservabilityBusiness() {
-  if (!grafanaViewState.config?.hasToken) return;
-  const result = await window.api.getGrafanaBusiness().catch(() => null);
-  if (result && !result.error) observabilityState.business = result.products || {};
+  const s = observabilityState;
+  const revenue = Promise.all([
+    window.api.getRevenueCatConfig().then(r => { if (!r?.error) s.revenueConfig = r; }).catch(() => {}),
+    window.api.getRevenueCatOverviews().then(r => { if (!r?.error) s.revenue = r.products || {}; }).catch(() => {}),
+  ]);
+  if (grafanaViewState.config?.hasToken) {
+    const result = await window.api.getGrafanaBusiness().catch(() => null);
+    if (result && !result.error) s.business = result.products || {};
+  }
+  await revenue;
 }
 
 /** A component's production flags, read once (1Password may ask to unlock). */
@@ -759,8 +770,9 @@ function obsTrend(pair) {
 
 /** The core figures at the top of a product's page: who uses it, how much they train, and what it earns. */
 function observabilityUsageRowHtml(p) {
-  const b = observabilityState.business?.[p.id];
-  if (!b) {
+  const b = observabilityState.business?.[p.id] || { users: {}, workouts: { all: {}, channels: {}, types: {} } };
+  const rc = observabilityState.revenue?.[p.id];
+  if (!observabilityState.business?.[p.id] && !rc) {
     return `<div class="gh-muted">${observabilityState.business ? 'No usage figures for this product yet: they come once its backends export the business metrics.' : grafanaViewState.config?.hasToken ? 'Reading the usage figures…' : 'Usage figures come from Grafana, which is not connected.'}</div>`;
   }
   const w = (pair) => (pair ? obsCount(pair.now) : '–');
@@ -769,17 +781,17 @@ function observabilityUsageRowHtml(p) {
   if (b.users.active) figures.push(obsFigure('Active users · 7d', `${w(b.users.active['7d'])} ${obsTrend(b.users.active['7d'])}`, sub('active')));
   if (b.users.training) figures.push(obsFigure('Training users · 7d', `${w(b.users.training['7d'])} ${obsTrend(b.users.training['7d'])}`, sub('training')));
   if (b.workouts.all['7d']) figures.push(obsFigure('Workouts · 7d', `${w(b.workouts.all['7d'])} ${obsTrend(b.workouts.all['7d'])}`, `24h ${w(b.workouts.all['1d'])} · 30d ${w(b.workouts.all['30d'])}`));
-  if (b.mrr != null) figures.push(obsFigure('MRR', escapeHtml(obsEuros(b.mrr)), b.subscriptions != null ? `${obsCount(b.subscriptions)} subscriptions` : ''));
-  else if (b.subscriptions != null) figures.push(obsFigure('Subscriptions', obsCount(b.subscriptions), '', 'ok'));
+  if (rc?.error) figures.push(obsFigure('MRR', '–', escapeHtml(rc.error), 'warn'));
+  else if (rc?.mrr != null) figures.push(obsFigure('MRR', escapeHtml(obsEuros(rc.mrr)), rc.subscriptions != null ? `${obsCount(rc.subscriptions)} subscriptions` : ''));
+  else if (rc?.subscriptions != null) figures.push(obsFigure('Subscriptions', obsCount(rc.subscriptions), ''));
   return figures.length ? `<div class="obs-kpis obs-kpis--usage">${figures.join('')}</div>` : '<div class="gh-muted">No usage figures yet.</div>';
 }
 
 /** A product's Usage page: every business figure, by window, with its trend. */
 function observabilityUsageHtml(p) {
   if (!p) return '<div class="ghv-empty">This product is gone.</div>';
-  const b = observabilityState.business?.[p.id];
+  const b = observabilityState.business?.[p.id] || { users: {}, workouts: { all: {}, channels: {}, types: {} }, duration: {}, distance: {}, training: {}, extra: {}, strava: null, accounts: null };
   const head = `<div class="gfv-title"><button type="button" class="obs-comp-link obs-comp-link--up" data-obs-product="${obsAttr(p.id)}">${escapeHtml(p.label)}</button> · Usage</div>`;
-  if (!b) return `<div class="gfv-page obs-page">${head}<div class="gfv-sec">${observabilityUsageRowHtml(p)}</div></div>`;
   const windows = ['1d', '7d', '30d'];
   const cell = (pair) => `<span>${pair ? `${escapeHtml(obsCount(pair.now))} ${obsTrend(pair)}` : '–'}</span>`;
   const table = (rows) => `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${obsWindow(x)}</span>`).join('')}</div>${rows.join('')}</div>`;
@@ -809,8 +821,34 @@ function observabilityUsageHtml(p) {
       ${Object.keys(b.distance).length ? `<div class="gfv-sec"><div class="gh-sec-h" title="${obsAttr(OBS_FIGURE_HELP['Median distance'])}">Median distance</div>${medians('distance', obsMeters)}</div>` : ''}
       ${b.strava != null ? `<div class="gfv-sec"><div class="gh-sec-h">Connections</div>${kv('Strava', `${obsCount(b.strava)} accounts${share}`)}</div>` : ''}
       ${training.length ? `<div class="gfv-sec"><div class="gh-sec-h">Training</div>${training.map(([kind, v]) => kv(kind.replace(/_/g, ' '), windowed(v))).join('')}</div>` : ''}
-      ${b.subscriptions != null || b.mrr != null ? `<div class="gfv-sec"><div class="gh-sec-h">Subscriptions</div>${kv('Active', obsCount(b.subscriptions))}${b.mrr != null ? kv('Monthly recurring revenue', obsEuros(b.mrr)) : ''}</div>` : ''}
+      <div class="gfv-sec"><div class="gh-sec-h" title="From RevenueCat directly, in euros">Subscriptions and revenue</div>${observabilityRevenueHtml(p)}</div>
       ${extras.length ? `<div class="gfv-sec"><div class="gh-sec-h">More</div>${extras.map(([name, v]) => kv(name.replace(/_/g, ' '), windowed(v))).join('')}</div>` : ''}
+    </div>`;
+}
+
+/** A product's RevenueCat figures, or the form to connect its project. */
+function observabilityRevenueHtml(p) {
+  const s = observabilityState;
+  const rc = s.revenue?.[p.id];
+  const kv = (label, value, title = '') => `<div class="obs-kv"><span${title ? ` title="${obsAttr(title)}"` : ''}>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`;
+  const connected = s.revenueConfig?.connected?.[p.id];
+  const editing = s.unfolded.has(`rc-edit:${p.id}`);
+  if (connected && !editing && rc && !rc.error) {
+    return `${kv('Active subscriptions', obsCount(rc.subscriptions))}${kv('Monthly recurring revenue', obsEuros(rc.mrr))}
+      ${rc.trials != null ? kv('Active trials', obsCount(rc.trials)) : ''}${rc.revenue != null ? kv('Revenue, last 28 days', obsEuros(rc.revenue), 'All revenue RevenueCat recorded in the last 28 days, in euros') : ''}
+      ${rc.newCustomers != null ? kv('New customers, last 28 days', obsCount(rc.newCustomers)) : ''}
+      <div class="obs-feat-more gh-muted">RevenueCat project ${escapeHtml(connected.projectId)} <button type="button" class="obs-link" data-obs-rc-edit="${obsAttr(p.id)}">Change</button></div>`;
+  }
+  if (connected && !editing) {
+    return `${rc?.error ? `<div class="gh-error obs-err">${escapeHtml(rc.error)}</div>` : '<div class="gh-muted">Reading RevenueCat…</div>'}<button type="button" class="obs-link" data-obs-rc-edit="${obsAttr(p.id)}">Change the project or key</button>`;
+  }
+  const known = connected?.projectId || s.revenueConfig?.known?.[p.id] || '';
+  return `<div class="gfv-setup obs-rc-form">
+      <p>Read this product's subscriptions and revenue straight from RevenueCat. In RevenueCat: Project settings, API keys, a new <b>secret API key (v2)</b> with only <b>Charts metrics: overview, read</b>. It is kept in the keychain.</p>
+      <label class="gfv-field">Project id <input type="text" class="ws-input" id="obs-rc-project" value="${obsAttr(known)}" placeholder="e.g. 07893d7d" spellcheck="false"></label>
+      <label class="gfv-field">Secret key <input type="password" class="ws-input" id="obs-rc-key" placeholder="sk_…" spellcheck="false"></label>
+      ${s.revenueForm.error ? `<div class="gh-error">${escapeHtml(s.revenueForm.error)}</div>` : ''}
+      <button type="button" class="ws-btn ws-btn--primary" id="obs-rc-save" data-product="${obsAttr(p.id)}">${s.revenueForm.saving ? 'Checking…' : 'Connect'}</button>
     </div>`;
 }
 
@@ -973,6 +1011,24 @@ function bindObservabilityPage() {
   root.querySelectorAll('[data-obs-dashboard]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'dashboard', id: b.dataset.obsDashboard }); });
   root.querySelectorAll('[data-obs-logs]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'logs', id: b.dataset.obsLogs }); });
   root.querySelectorAll('[data-obs-connect]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'setup', id: null }); });
+  root.querySelectorAll('[data-obs-rc-edit]').forEach(b => { b.onclick = () => { s.unfolded.add(`rc-edit:${b.dataset.obsRcEdit}`); renderGrafanaMain(); }; });
+  const rcSave = root.querySelector('#obs-rc-save');
+  if (rcSave) {
+    rcSave.onclick = async () => {
+      const product = rcSave.dataset.product;
+      const spec = { product, projectId: root.querySelector('#obs-rc-project').value, key: root.querySelector('#obs-rc-key').value };
+      s.revenueForm = { error: null, saving: true };
+      renderGrafanaMain();
+      const result = await window.api.saveRevenueCatConfig(spec).catch(err => ({ error: err?.message || String(err) }));
+      s.revenueForm = { error: result?.error || null, saving: false };
+      if (!result?.error) {
+        s.unfolded.delete(`rc-edit:${product}`);
+        await loadObservabilityBusiness();
+      }
+      renderGrafanaMain();
+      renderGrafanaList();
+    };
+  }
   root.querySelectorAll('[data-obs-usage]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'usage', id: b.dataset.obsUsage }); });
   root.querySelectorAll('[data-obs-changes]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'changes', id: b.dataset.obsChanges }); });
   root.querySelectorAll('[data-obs-ask]').forEach(b => { b.onclick = () => askClaudeAboutObservabilityError(...b.dataset.obsAsk.split('|')); });

@@ -295,12 +295,13 @@ const BUSINESS_TREND_OFFSET = { '1d': '1d', '7d': '7d', '30d': '29d' };
  * window; null without history):
  * { users: { kind: { window: { now, before } } }, workouts: { all, channels, types } (each
  * { window: { now, before } }), duration / distance: { type: { window: median } }, strava,
- * accounts, training: { kind: { window: value } }, subscriptions, mrr, extra: { name: { window: value } } }.
+ * accounts, training: { kind: { window: value } }, extra: { name: { window: value } } }.
+ * Subscriptions and revenue come from RevenueCat directly (revenuecat.js).
  * `queries` holds the answers keyed as businessQueries() names them.
  */
 function shapeBusiness(queries) {
   const products = {};
-  const of = (id) => (products[id] = products[id] || { users: {}, workouts: { all: {}, channels: {}, types: {} }, duration: {}, distance: {}, training: {}, extra: {}, strava: null, accounts: null, subscriptions: null, mrr: null });
+  const of = (id) => (products[id] = products[id] || { users: {}, workouts: { all: {}, channels: {}, types: {} }, duration: {}, distance: {}, training: {}, extra: {}, strava: null, accounts: null });
   const put = (obj, path, value) => {
     let o = obj;
     for (const k of path.slice(0, -1)) o = o[k] = o[k] || {};
@@ -340,8 +341,6 @@ function shapeBusiness(queries) {
   }
   for (const s of queries.strava || []) of(s.labels.product).strava = s.value;
   for (const s of queries.training || []) put(of(s.labels.product).training, [s.labels.kind, s.labels.window || 'all'], s.value);
-  for (const s of queries.subscriptions || []) of(s.labels.product).subscriptions = s.value;
-  for (const s of queries.mrr || []) of(s.labels.product).mrr = s.value;
   for (const s of queries.extra || []) put(of(s.labels.product).extra, [s.labels.name, s.labels.window || 'all'], s.value);
   return products;
 }
@@ -357,8 +356,6 @@ function businessQueries() {
     distance: 'max by (product, channel, type, window) (business_workout_distance_meters{quantile="0.5"})',
     strava: 'sum by (product) (business_strava_connected)',
     training: 'sum by (product, kind, window) (business_training)',
-    subscriptions: 'sum by (product) (business_subscriptions)',
-    mrr: 'sum by (product) (business_mrr_euros)',
     extra: 'sum by (product, name, window) (business_extra)',
   };
   for (const name of ['users', 'workouts', 'workoutsByChannel', 'workoutsByType']) {

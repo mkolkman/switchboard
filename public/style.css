@@ -8305,6 +8305,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .obs-bar-n { font-variant-numeric: tabular-nums; color: #d0d0e0; }
 .obs-kv { display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 10px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12.5px; max-width: 640px; font-variant-numeric: tabular-nums; }
 .obs-kv span:first-child { color: #a8aec8; }
+.obs-rc-form { max-width: 520px; }
 .rail-obs { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
 
 /* A PR walkthrough (session-context.js): the session on the left, under a brief
