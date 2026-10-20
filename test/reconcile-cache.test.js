@@ -287,7 +287,6 @@ test('a live plain terminal keeps its project filing across renderer reloads', (
       isPlainTerminal: true,
       projectPath: '/tmp/attached-repo',
       projectId: 'project-1',
-      trackId: 'track-1',
       _openedAt: 12345,
     }]]),
     getMainWindow: () => null,
@@ -299,7 +298,6 @@ test('a live plain terminal keeps its project filing across renderer reloads', (
   const terminal = projects.flatMap(project => project.sessions)
     .find(session => session.sessionId === 'terminal-1');
   assert.equal(terminal.projectId, 'project-1');
-  assert.equal(terminal.trackId, 'track-1');
 });
 
 // --- codex folders ---

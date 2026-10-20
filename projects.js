@@ -2,14 +2,14 @@
 //
 // A project owns a root folder under the projects root (default ~/Switchboard),
 // attaches zero or more folders (the cwds sessions run in), and files sessions
-// under itself or under one of its tracks. The folder on disk carries the
+// under itself. The folder on disk carries the
 // context: CLAUDE.md / AGENTS.md is the brief every session below it reads,
 // plan.md holds the plan in whatever form the agent writes it, plan-tracker.md
 // is the fixed-format checklist Switchboard reads for progress, and todos.md
 // the follow-ups.
 //
-// Rows live in their own tables (db.js: projects, project_folders, tracks) and
-// the session ↔ project link is session_meta.projectId / trackId. Nothing here
+// Rows live in their own tables (db.js: projects, project_folders) and the
+// session ↔ project link is session_meta.projectId. Nothing here
 // is keyed on the `project:<path>` settings blob, which is deleted when a folder
 // is hidden.
 //
@@ -45,7 +45,7 @@ function init(ctx) {
   log = ctx.log || console;
   buildProjectsFromCache = ctx.buildProjectsFromCache;
   notifyRendererProjectsChanged = ctx.notifyRendererProjectsChanged || (() => {});
-  // Which CLI ids a track may name. Main passes the harness registry; tests
+  // Which CLI ids a schedule may name. Main passes the harness registry; tests
   // and callers that do not care accept anything.
   isHarnessId = ctx.isHarnessId || (() => true);
   // Where Claude Code keeps plan-mode plans (~/.claude/plans), for adopting one.
@@ -183,7 +183,7 @@ function writeProjectFiles(root, name, folderPaths, header = null) {
 // --- Templates ---
 //
 // A template is a folder under <data dir>/templates/<kind>/ with a
-// template.json ({ name, description, tracks }) and the files a new project
+// template.json ({ name, description }) and the files a new project
 // starts with. Three are seeded from the app's own templates/ folder the
 // first time the folder is missing; after that they are the user's to edit,
 // and a new folder there is a new template with no code change. A template's
@@ -224,11 +224,7 @@ function readTemplate(kind) {
   if (!fs.existsSync(metaPath)) return null;
   let meta;
   try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { return null; }
-  const tracks = (Array.isArray(meta.tracks) ? meta.tracks : [])
-    .map(t => (typeof t === 'string' ? { name: t } : t))
-    .filter(t => t && typeof t.name === 'string' && t.name.trim())
-    .map(t => ({ name: t.name.trim(), cli: typeof t.cli === 'string' && t.cli ? t.cli : null }));
-  return { kind, dir, name: typeof meta.name === 'string' && meta.name.trim() ? meta.name.trim() : kind, description: typeof meta.description === 'string' ? meta.description : '', tracks };
+  return { kind, dir, name: typeof meta.name === 'string' && meta.name.trim() ? meta.name.trim() : kind, description: typeof meta.description === 'string' ? meta.description : '' };
 }
 
 function listTemplates() {
@@ -239,7 +235,7 @@ function listTemplates() {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const template = readTemplate(entry.name);
-      if (template) templates.push({ kind: template.kind, name: template.name, description: template.description, tracks: template.tracks });
+      if (template) templates.push({ kind: template.kind, name: template.name, description: template.description });
     }
   }
   templates.sort((a, b) => a.name.localeCompare(b.name));
@@ -559,20 +555,11 @@ function isInside(child, parent) {
 
 // --- Tree node shape handed to the renderer ---
 
-function trackNode(row) {
-  return {
-    id: row.id, projectId: row.projectId, name: row.name,
-    cwd: row.cwd || null, cli: row.cli || null, status: row.status || 'active',
-    sortOrder: row.sortOrder || 0, created: row.created,
-    sessions: [],
-  };
-}
-
 /** A schedule row as the renderer sees it: booleans, nulls, and nothing it cannot use. */
 function scheduleNode(row) {
   return {
     id: row.id, name: row.name,
-    projectId: row.projectId || null, trackId: row.trackId || null, cwd: row.cwd || null,
+    projectId: row.projectId || null, cwd: row.cwd || null,
     prompt: row.prompt,
     every: row.every, atHour: row.atHour ?? null, atMinute: row.atMinute ?? null,
     weekday: row.weekday ?? null, cron: row.cron || null,
@@ -591,7 +578,7 @@ function parseGithubRefs(text) {
   } catch { return []; }
 }
 
-function projectNode(row, folderRows = [], trackRows = [], scheduleRows = []) {
+function projectNode(row, folderRows = [], scheduleRows = []) {
   const added = addedFilesAtRoot(row.root);
   return {
     id: row.id, name: row.name, slug: row.slug, root: row.root,
@@ -610,7 +597,6 @@ function projectNode(row, folderRows = [], trackRows = [], scheduleRows = []) {
       path: f.path, mode: f.mode || 'in-place', sourcePath: f.sourcePath || null,
       branch: f.branch || null, sortOrder: f.sortOrder || 0,
     })),
-    tracks: trackRows.map(trackNode),
     schedules: scheduleRows.map(scheduleNode),
     sessions: [],
   };
@@ -619,7 +605,7 @@ function projectNode(row, folderRows = [], trackRows = [], scheduleRows = []) {
 function loadProjectNode(id) {
   const row = db.getProject(id);
   if (!row) return null;
-  return projectNode(row, db.listProjectFolders(id), db.listTracks(id), db.listSchedulesByProject(id));
+  return projectNode(row, db.listProjectFolders(id), db.listSchedulesByProject(id));
 }
 
 // --- Create / update / delete ---
@@ -672,14 +658,6 @@ async function createProject(spec) {
   };
   db.insertProject(row);
   inPlace.forEach((f, i) => db.upsertProjectFolder({ projectId: row.id, path: f.path, mode: 'in-place', sortOrder: i }));
-  // A template's tracks start in the project folder and inherit the default CLI
-  // unless the template names one.
-  if (template) {
-    template.tracks.forEach((t, i) => db.insertTrack({
-      id: crypto.randomUUID(), projectId: row.id, name: t.name, cwd: null,
-      cli: t.cli && isHarnessId(t.cli) ? t.cli : null, status: 'active', sortOrder: i, created: now,
-    }));
-  }
 
   const errors = [];
   for (const f of folders.filter(f => f.mode === 'worktree')) {
@@ -943,13 +921,10 @@ async function detachFolder(id, folderPath, opts = {}) {
     }
   }
   db.deleteProjectFolder(id, folderPath);
-  // A default or track cwd that pointed into the detached folder falls back
-  // to the project folder rather than a place the project no longer works in.
+  // A default cwd that pointed into the detached folder falls back to the
+  // project folder rather than a place the project no longer works in.
   if (row.defaultCwd && isInside(realOrResolved(row.defaultCwd), realOrResolved(folderPath))) {
     db.updateProject(id, { defaultCwd: null });
-  }
-  for (const track of db.listTracks(id)) {
-    if (track.cwd && isInside(realOrResolved(track.cwd), realOrResolved(folderPath))) db.updateTrack(track.id, { cwd: null });
   }
   db.updateProject(id, { modified: new Date().toISOString() });
   await syncProjectBrief(id);
@@ -970,7 +945,7 @@ function worktreeParentFor(folderPath) {
  * Extra directories for a session that belongs to a project: the project
  * folder and every attached folder, except the cwd itself and anything
  * already under it. A parent of the cwd (the project folder above a worktree,
- * a repo above a track that starts in one of its subfolders) is added too:
+ * a repo above a default cwd in one of its subfolders) is added too:
  * the CLI only edits under the cwd unless told otherwise, and the plan and
  * todos live in the project folder. Claude loads CLAUDE.md from added
  * directories when CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD is set, so a
@@ -1006,12 +981,12 @@ function mergeAddDirs(existing, extra) {
   return list.join(',');
 }
 
-// --- Tracks ---
+// --- Default cwd and CLI ---
 
 /**
- * Where sessions start, for a project's default or a track. It has to be the
- * project folder, an attached folder, or somewhere inside one of them; null
- * means "not set" (the project folder, or for a track the project's default).
+ * Where a project's sessions start by default. It has to be the project
+ * folder, an attached folder, or somewhere inside one of them; null means
+ * "not set" (the project folder).
  * Returns { cwd } or { error }.
  */
 function normalizeCwdWithinProject(project, cwd) {
@@ -1026,76 +1001,10 @@ function normalizeCwdWithinProject(project, cwd) {
   }
   return { cwd: resolved };
 }
-const normalizeTrackCwd = normalizeCwdWithinProject;
-
-function normalizeTrackCli(cli) {
+function normalizeCli(cli) {
   if (cli === undefined || cli === null || cli === '') return { cli: null };
   if (typeof cli !== 'string' || !isHarnessId(cli)) return { error: `Unknown CLI: ${cli}` };
   return { cli };
-}
-
-function createTrack(projectId, spec) {
-  const project = db.getProject(projectId);
-  if (!project) return { error: 'Project not found' };
-  const name = typeof spec?.name === 'string' ? spec.name.trim() : '';
-  if (!name) return { error: 'Track name is required' };
-  const cwd = normalizeTrackCwd(project, spec.cwd);
-  if (cwd.error) return { error: cwd.error };
-  const cli = normalizeTrackCli(spec.cli);
-  if (cli.error) return { error: cli.error };
-  const existing = db.listTracks(projectId);
-  const sortOrder = existing.reduce((max, t) => Math.max(max, t.sortOrder || 0), -1) + 1;
-  const row = {
-    id: crypto.randomUUID(), projectId, name, cwd: cwd.cwd, cli: cli.cli,
-    status: 'active', sortOrder, created: new Date().toISOString(),
-  };
-  db.insertTrack(row);
-  db.updateProject(projectId, { modified: row.created });
-  notifyRendererProjectsChanged();
-  return { ok: true, track: trackNode(row), project: loadProjectNode(projectId) };
-}
-
-function updateTrack(id, patch) {
-  const track = db.getTrack(id);
-  if (!track) return { error: 'Track not found' };
-  const project = db.getProject(track.projectId);
-  if (!project) return { error: 'Project not found' };
-  const clean = {};
-  if (typeof patch?.name === 'string') {
-    const name = patch.name.trim();
-    if (!name) return { error: 'Track name is required' };
-    clean.name = name;
-  }
-  if (patch?.cwd !== undefined) {
-    const cwd = normalizeTrackCwd(project, patch.cwd);
-    if (cwd.error) return { error: cwd.error };
-    clean.cwd = cwd.cwd;
-  }
-  if (patch?.cli !== undefined) {
-    const cli = normalizeTrackCli(patch.cli);
-    if (cli.error) return { error: cli.error };
-    clean.cli = cli.cli;
-  }
-  if (patch?.status !== undefined) {
-    if (!PROJECT_STATUSES.has(patch.status)) return { error: `Unknown status: ${patch.status}` };
-    clean.status = patch.status;
-  }
-  if (patch?.sortOrder !== undefined) clean.sortOrder = Number(patch.sortOrder) || 0;
-  if (!Object.keys(clean).length) return { ok: true, track: trackNode(track) };
-  db.updateTrack(id, clean);
-  db.updateProject(track.projectId, { modified: new Date().toISOString() });
-  notifyRendererProjectsChanged();
-  return { ok: true, track: trackNode(db.getTrack(id)) };
-}
-
-/** Sessions keep their project and a snapshot of the deleted track's name. */
-function deleteTrack(id, { archiveSessions = false } = {}) {
-  const track = db.getTrack(id);
-  if (!track) return { error: 'Track not found' };
-  const sessionIds = db.deleteTrack(id, { archiveSessions }) || [];
-  db.updateProject(track.projectId, { modified: new Date().toISOString() });
-  notifyRendererProjectsChanged();
-  return { ok: true, projectId: track.projectId, formerTrackName: track.name, sessionIds };
 }
 
 // --- Schedules ---
@@ -1103,8 +1012,8 @@ function deleteTrack(id, { archiveSessions = false } = {}) {
 // session with the prompt as its first message (initialPrompt) and the
 // schedule's id on the launch options, so the session row can show where it
 // came from. A row lives in exactly one place: with a projectId it belongs to
-// the project view (under trackId, null = General) and runs in the track's
-// cwd; without one it is a folder schedule listed on the Sessions tab under
+// the project view and runs where the project's sessions start; without one
+// it is a folder schedule listed on the Sessions tab under
 // `cwd`. Timing is fields, not cron, except for rows imported from the old
 // schedule-*.md files (every = 'cron').
 
@@ -1148,23 +1057,18 @@ function normalizeScheduleTiming(spec, existing = null) {
   return { timing };
 }
 
-/** Where a schedule belongs: { projectId, trackId, cwd } or { error }. */
+/** Where a schedule belongs: { projectId, cwd } or { error }. */
 function normalizeSchedulePlace(spec) {
   const projectId = spec.projectId || null;
   if (projectId) {
     const project = db.getProject(projectId);
     if (!project) return { error: 'Project not found' };
-    let trackId = spec.trackId || null;
-    if (trackId) {
-      const track = db.getTrack(trackId);
-      if (!track || track.projectId !== projectId) return { error: 'Track not found in that project' };
-    }
-    return { projectId, trackId, cwd: null };
+    return { projectId, cwd: null };
   }
   const cwd = typeof spec.cwd === 'string' ? spec.cwd.trim() : '';
   if (!cwd || !path.isAbsolute(cwd)) return { error: 'A folder schedule needs a folder' };
   if (!isDirectory(cwd)) return { error: `Not a directory: ${cwd}` };
-  return { projectId: null, trackId: null, cwd: path.resolve(cwd) };
+  return { projectId: null, cwd: path.resolve(cwd) };
 }
 
 function listSchedules() {
@@ -1190,7 +1094,7 @@ function createSchedule(spec) {
   if (place.error) return { error: place.error };
   const timing = normalizeScheduleTiming(spec || {});
   if (timing.error) return { error: timing.error };
-  const cli = normalizeTrackCli(spec.cli);
+  const cli = normalizeCli(spec.cli);
   if (cli.error) return { error: cli.error };
   const config = normalizeScheduleConfig(spec.sessionConfig === undefined ? {} : spec.sessionConfig);
   if (config.error) return config;
@@ -1226,24 +1130,13 @@ function updateSchedule(id, patch) {
     if (!prompt) return { error: 'The task needs a prompt' };
     clean.prompt = prompt;
   }
-  // A schedule can move between tracks of its project, but never between a
-  // project and a folder: that is a different row in a different place.
-  if (patch?.trackId !== undefined) {
-    if (!row.projectId) return { error: 'A folder schedule has no track' };
-    const trackId = patch.trackId || null;
-    if (trackId) {
-      const track = db.getTrack(trackId);
-      if (!track || track.projectId !== row.projectId) return { error: 'Track not found in that project' };
-    }
-    clean.trackId = trackId;
-  }
   if (SCHEDULE_TIMING_KEYS.some(k => patch?.[k] !== undefined)) {
     const timing = normalizeScheduleTiming(patch, row);
     if (timing.error) return { error: timing.error };
     Object.assign(clean, timing.timing);
   }
   if (patch?.cli !== undefined) {
-    const cli = normalizeTrackCli(patch.cli);
+    const cli = normalizeCli(patch.cli);
     if (cli.error) return { error: cli.error };
     clean.cli = cli.cli;
   }
@@ -1267,7 +1160,7 @@ function deleteSchedule(id) {
 
 /**
  * Why a schedule is not firing right now, in words, or null when it would.
- * Pausing is derived: a done project or track pauses its schedules and
+ * Pausing is derived: a done project pauses its schedules and
  * reopening resumes them, with nothing stored.
  */
 function schedulePausedReason(row) {
@@ -1276,17 +1169,13 @@ function schedulePausedReason(row) {
   const project = db.getProject(row.projectId);
   if (!project) return 'project missing';
   if (project.status === 'done') return 'project done';
-  if (row.trackId) {
-    const track = db.getTrack(row.trackId);
-    if (track && track.status === 'done') return 'track done';
-  }
   return null;
 }
 
 /**
  * Everything the renderer needs to start the session for a schedule, resolved
- * now rather than stored: a project schedule runs where its track's sessions
- * start, so moving the track moves it. { schedule, target, runtime } or
+ * now rather than stored: a project schedule runs where the project's sessions
+ * start, so changing that moves it. { schedule, target, runtime } or
  * { error }.
  */
 function resolveScheduleLaunch(id) {
@@ -1299,25 +1188,21 @@ function resolveScheduleLaunch(id) {
 }
 
 // Shared by the dialog's preview and the actual launch. Defaults are resolved
-// from the current track/project folder, never copied into the schedule row.
+// from the current project folder, never copied into the schedule row.
 function resolveScheduleContext(row) {
   let target;
   let runtime = row.cli || null;
   if (row.projectId) {
     const project = db.getProject(row.projectId);
     if (!project) return { error: 'Project not found' };
-    const track = row.trackId ? db.getTrack(row.trackId) : null;
-    if (row.trackId && (!track || track.projectId !== project.id)) return { error: 'Track not found in that project' };
     target = {
-      projectPath: track?.cwd || project.defaultCwd || project.root,
+      projectPath: project.defaultCwd || project.root,
       projectId: project.id,
-      trackId: track ? track.id : null,
       projectName: project.name,
     };
-    if (!runtime && track?.cli) runtime = track.cli;
   } else {
     if (typeof row.cwd !== 'string' || !path.isAbsolute(row.cwd)) return { error: 'A folder schedule needs a folder' };
-    target = { projectPath: row.cwd, projectId: null, trackId: null, projectName: null };
+    target = { projectPath: row.cwd, projectId: null, projectName: null };
   }
   return { target, runtime: runtime || 'claude' };
 }
@@ -1409,7 +1294,7 @@ function importLegacySchedules(scanned) {
     const imported = db.importLegacySchedule({
       id: crypto.randomUUID(),
       name: s.name || path.basename(s.filePath, '.md').replace(/^schedule-/, ''),
-      projectId: null, trackId: null, cwd: s.projectPath,
+      projectId: null, cwd: s.projectPath,
       prompt: `Run the scheduled task defined in ${s.filePath}. Read that file and follow its instructions.`,
       ...timing,
       cli: 'claude', sessionConfig: config, enabled: s.enabled !== false, catchUp: false,
@@ -1425,22 +1310,16 @@ function importLegacySchedules(scanned) {
 
 // --- Session assignment ---
 
-/** Explicitly file a session. projectId null clears both ids. */
-function assignSession(sessionId, projectId, trackId) {
+/** Explicitly file a session. projectId null clears the assignment. */
+function assignSession(sessionId, projectId) {
   if (!sessionId) return { error: 'Session id is required' };
   if (!projectId) {
-    db.setSessionAssignment(sessionId, null, null);
+    db.setSessionAssignment(sessionId, null);
     notifyRendererProjectsChanged();
     return { ok: true };
   }
   if (!db.getProject(projectId)) return { error: 'Project not found' };
-  let cleanTrack = null;
-  if (trackId) {
-    const track = db.getTrack(trackId);
-    if (!track || track.projectId !== projectId) return { error: 'Track not found in that project' };
-    cleanTrack = trackId;
-  }
-  db.setSessionAssignment(sessionId, projectId, cleanTrack);
+  db.setSessionAssignment(sessionId, projectId);
   notifyRendererProjectsChanged();
   return { ok: true };
 }
@@ -1452,13 +1331,8 @@ function assignSession(sessionId, projectId, trackId) {
 function recordLaunchAssignment(sessionId, options) {
   const projectId = options?.projectId;
   if (!projectId || !db.getProject(projectId)) return null;
-  let trackId = options?.trackId || null;
-  if (trackId) {
-    const track = db.getTrack(trackId);
-    if (!track || track.projectId !== projectId) trackId = null;
-  }
-  db.setSessionAssignment(sessionId, projectId, trackId);
-  return { projectId, trackId };
+  db.setSessionAssignment(sessionId, projectId);
+  return { projectId };
 }
 
 // --- The tree ---
@@ -1475,7 +1349,7 @@ function projectForCwd(cwd, projectRows) {
 }
 
 /**
- * Every project with its folders, tracks and sessions. Sessions come from the
+ * Every project with its folders, schedules and sessions. Sessions come from the
  * same buildProjectsFromCache() the Sessions tab uses, so a row here is the
  * exact object the sidebar already knows how to render.
  */
@@ -1484,14 +1358,12 @@ function buildProjectTree(showArchived) {
   if (!projectRows.length) return { projects: [] };
 
   const folderRows = db.listAllProjectFolders();
-  const trackRows = db.listAllTracks();
   const scheduleRows = db.listSchedules();
   const byId = new Map();
   for (const row of projectRows) {
     byId.set(row.id, projectNode(
       row,
       folderRows.filter(f => f.projectId === row.id),
-      trackRows.filter(t => t.projectId === row.id),
       scheduleRows.filter(t => t.projectId === row.id)
     ));
   }
@@ -1515,9 +1387,7 @@ function buildProjectTree(showArchived) {
       let pid = session.projectId && byId.has(session.projectId) ? session.projectId : null;
       if (!pid) pid = projectIdForCwd(session.projectPath);
       if (!pid) continue;
-      const node = byId.get(pid);
-      const track = session.trackId ? node.tracks.find(t => t.id === session.trackId) : null;
-      (track ? track.sessions : node.sessions).push(session);
+      byId.get(pid).sessions.push(session);
     }
   }
 
@@ -1526,15 +1396,9 @@ function buildProjectTree(showArchived) {
   for (const node of byId.values()) {
     node.sessions.sort(byModified);
     let latest = null;
-    let count = node.sessions.length;
     for (const s of node.sessions) if (!latest || s.modified > latest) latest = s.modified;
-    for (const track of node.tracks) {
-      track.sessions.sort(byModified);
-      count += track.sessions.length;
-      for (const s of track.sessions) if (!latest || s.modified > latest) latest = s.modified;
-    }
     node.lastActivity = latest;
-    node.sessionCount = count;
+    node.sessionCount = node.sessions.length;
     projects.push(node);
   }
 
@@ -1821,7 +1685,6 @@ module.exports = {
   initPlanWatch, refreshPlanWatchers, stopPlanWatchers,
   listTemplates, templatesRoot, renderTemplateText, editPlanItem,
   listEnvFiles, defaultEnvSelection, copyEnvFiles,
-  createTrack, updateTrack, deleteTrack,
   listSchedules, createSchedule, updateSchedule, deleteSchedule, resolveScheduleLaunch, resolveScheduleContext,
   dueSchedules, missedSchedules, recordScheduleRun, importLegacySchedules, schedulePausedReason,
   assignSession, recordLaunchAssignment,

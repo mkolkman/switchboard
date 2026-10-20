@@ -58,7 +58,7 @@ test('scheduled launches use current folder defaults with only the selected CLI 
   const schedule = { id: 'schedule', prompt: 'Do it', sessionConfig: {
     claude: { permissionMode: null, chrome: false }, codex: { codexModel: 'custom-model' },
   } };
-  await context.launchScheduledSession({ schedule, target: { projectPath: '/first', projectId: 'project', trackId: 'track' }, runtime: 'claude' });
+  await context.launchScheduledSession({ schedule, target: { projectPath: '/first', projectId: 'project' }, runtime: 'claude' });
   assert.equal(launches[0].options.permissionMode, null);
   assert.equal(launches[0].options.chrome, false);
   assert.equal(launches[0].options.codexModel, undefined);

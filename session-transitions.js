@@ -13,7 +13,7 @@ function init(ctx) {
   getMainWindow = ctx.getMainWindow;
   log = ctx.log;
   rekeyMcpServer = ctx.rekeyMcpServer;
-  // A fork inherits its parent's project and track (db.js). Optional so the
+  // A fork inherits its parent's project (db.js). Optional so the
   // tests that exercise detection alone need not provide it.
   copySessionAssignment = ctx.copySessionAssignment || null;
 }

@@ -58,7 +58,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteProject: (id) => ipcRenderer.invoke('delete-project', id),
   attachProjectFolder: (id, spec) => ipcRenderer.invoke('attach-project-folder', id, spec),
   detachProjectFolder: (id, folderPath, opts) => ipcRenderer.invoke('detach-project-folder', id, folderPath, opts),
-  setSessionAssignment: (sessionId, projectId, trackId) => ipcRenderer.invoke('set-session-assignment', sessionId, projectId, trackId),
+  setSessionAssignment: (sessionId, projectId) => ipcRenderer.invoke('set-session-assignment', sessionId, projectId),
   getProjectsRoot: () => ipcRenderer.invoke('get-projects-root'),
   getChatFolder: () => ipcRenderer.invoke('get-chat-folder'),
   getRepoInfo: (paths) => ipcRenderer.invoke('get-repo-info', paths),
@@ -160,9 +160,6 @@ contextBridge.exposeInMainWorld('api', {
   onScheduleDue: (callback) => {
     ipcRenderer.on('schedule-due', (_event, launch) => callback(launch));
   },
-  createTrack: (projectId, spec) => ipcRenderer.invoke('create-track', projectId, spec),
-  updateTrack: (id, patch) => ipcRenderer.invoke('update-track', id, patch),
-  deleteTrack: (id, options) => ipcRenderer.invoke('delete-track', id, options),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   openPath: (target) => ipcRenderer.invoke('open-path', target),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard-write-text', text),

@@ -1,5 +1,4 @@
 {
   "name": "Customer",
-  "description": "Work for one customer: discovery, a proposal, then the build.",
-  "tracks": ["Discovery", "Proposal", "Build"]
+  "description": "Work for one customer: discovery, a proposal, then the build."
 }

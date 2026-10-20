@@ -12,7 +12,7 @@ const haveGit = spawnSync('git', ['--version'], { encoding: 'utf8' }).status ===
 // An in-memory stand-in for the project tables in db.js. Same function names,
 // same return shapes, no SQLite (db.js needs Electron's ABI to load).
 function makeFakeDb({ global = {} } = {}) {
-  const rows = { projects: [], folders: [], tracks: [], schedules: [], scheduleImports: new Set(), settings: new Map(), meta: new Map() };
+  const rows = { projects: [], folders: [], schedules: [], scheduleImports: new Set(), settings: new Map(), meta: new Map() };
   const db = {
     rows,
     getSetting: (key) => (key === 'global' ? global : (rows.settings.get(key) ?? null)),
@@ -31,7 +31,7 @@ function makeFakeDb({ global = {} } = {}) {
     updateSchedule: (id, patch) => {
       const r = rows.schedules.find(x => x.id === id);
       if (!r) return 0;
-      for (const key of ['name', 'trackId', 'cwd', 'prompt', 'every', 'atHour', 'atMinute', 'weekday', 'cron', 'cli', 'enabled', 'catchUp', 'lastRunAt', 'lastSessionId', 'sessionConfig']) {
+      for (const key of ['name', 'cwd', 'prompt', 'every', 'atHour', 'atMinute', 'weekday', 'cron', 'cli', 'enabled', 'catchUp', 'lastRunAt', 'lastSessionId', 'sessionConfig']) {
         if (key in patch) r[key] = (key === 'enabled' || key === 'catchUp') ? (patch[key] ? 1 : 0) : patch[key];
       }
       return 1;
@@ -57,8 +57,7 @@ function makeFakeDb({ global = {} } = {}) {
     deleteProject: (id) => {
       rows.projects = rows.projects.filter(r => r.id !== id);
       rows.folders = rows.folders.filter(f => f.projectId !== id);
-      rows.tracks = rows.tracks.filter(t => t.projectId !== id);
-      for (const [sid, m] of rows.meta) if (m.projectId === id) rows.meta.set(sid, { projectId: null, trackId: null });
+      for (const [sid, m] of rows.meta) if (m.projectId === id) rows.meta.set(sid, { projectId: null });
     },
     listProjectFolders: (projectId) => rows.folders.filter(f => f.projectId === projectId).sort((a, b) => a.sortOrder - b.sortOrder),
     listAllProjectFolders: () => rows.folders.slice(),
@@ -68,22 +67,7 @@ function makeFakeDb({ global = {} } = {}) {
       if (i === -1) rows.folders.push(clean); else rows.folders[i] = clean;
     },
     deleteProjectFolder: (projectId, p) => { rows.folders = rows.folders.filter(f => !(f.projectId === projectId && f.path === p)); },
-    listTracks: (projectId) => rows.tracks.filter(t => t.projectId === projectId),
-    listAllTracks: () => rows.tracks.slice(),
-    getTrack: (id) => rows.tracks.find(t => t.id === id) || null,
-    insertTrack: (row) => { rows.tracks.push({ ...row }); },
-    updateTrack: (id, patch) => {
-      const t = rows.tracks.find(r => r.id === id);
-      if (!t) return 0;
-      for (const key of ['name', 'cwd', 'cli', 'status', 'sortOrder']) if (key in patch) t[key] = patch[key];
-      return 1;
-    },
-    deleteTrack: (id) => {
-      rows.tracks = rows.tracks.filter(t => t.id !== id);
-      for (const [sid, m] of rows.meta) if (m.trackId === id) rows.meta.set(sid, { ...m, trackId: null });
-      for (const r of rows.schedules) if (r.trackId === id) r.trackId = null;
-    },
-    setSessionAssignment: (sessionId, projectId, trackId) => { rows.meta.set(sessionId, { projectId, trackId }); },
+    setSessionAssignment: (sessionId, projectId) => { rows.meta.set(sessionId, { projectId }); },
     insertPlanLink: (row) => { rows.links = rows.links || []; rows.links.push({ ...row }); },
     listPlanLinks: (projectId) => (rows.links || []).filter(l => l.projectId === projectId),
   };
@@ -273,12 +257,10 @@ test('buildProjectTree files by explicit id, then by cwd, and leaves the rest ou
   try {
     const { project: a } = await projects.createProject({ name: 'A' });
     const { project: b } = await projects.createProject({ name: 'B' });
-    t.db.rows.tracks.push({ id: 'trk', projectId: a.id, name: 'Build', cwd: null, cli: null, status: 'active', sortOrder: 0, created: '2026-09-01T00:00:00.000Z' });
     const folders = [
       { projectPath: '/repo/one', sessions: [
         session('s-explicit', '/repo/one', { projectId: a.id, modified: '2026-09-03T00:00:00.000Z' }),
-        session('s-track', '/repo/one', { projectId: a.id, trackId: 'trk' }),
-        session('s-stale-track', '/repo/one', { projectId: a.id, trackId: 'gone' }),
+        session('s-explicit-old', '/repo/one', { projectId: a.id }),
         session('s-none', '/repo/one'),
       ] },
       { projectPath: path.join(b.root, 'repos', 'x'), sessions: [
@@ -292,10 +274,10 @@ test('buildProjectTree files by explicit id, then by cwd, and leaves the rest ou
 
     const tree = projects.buildProjectTree(false);
     const byName = Object.fromEntries(tree.projects.map(p => [p.name, p]));
-    assert.deepEqual(byName.A.sessions.map(s => s.sessionId), ['s-explicit', 's-stale-track', 's-cwd-but-explicit']);
-    assert.deepEqual(byName.A.tracks[0].sessions.map(s => s.sessionId), ['s-track']);
+    assert.deepEqual(byName.A.sessions.map(s => s.sessionId), ['s-explicit', 's-explicit-old', 's-cwd-but-explicit']);
+    assert.equal(byName.A.tracks, undefined, 'a project node has no tracks');
     assert.deepEqual(byName.B.sessions.map(s => s.sessionId), ['s-cwd']);
-    assert.equal(byName.A.sessionCount, 4);
+    assert.equal(byName.A.sessionCount, 3);
     assert.equal(byName.A.lastActivity, '2026-09-03T00:00:00.000Z');
     assert.deepEqual(tree.projects.map(p => p.name), ['A', 'B'], 'most recent activity first');
   } finally { t.cleanup(); }
@@ -312,93 +294,26 @@ test('done projects sort after active ones', async () => {
   } finally { t.cleanup(); }
 });
 
-test('assignSession validates the project and the track, and can clear', async () => {
+test('assignSession validates the project, and can clear', async () => {
   const t = setup();
   try {
     const { project } = await projects.createProject({ name: 'P' });
-    t.db.rows.tracks.push({ id: 'trk', projectId: project.id, name: 'T', created: 'x' });
-    t.db.rows.tracks.push({ id: 'other', projectId: 'someone-else', name: 'T', created: 'x' });
-    assert.equal(projects.assignSession('s1', 'nope', null).error, 'Project not found');
-    assert.match(projects.assignSession('s1', project.id, 'other').error, /Track not found/);
-    assert.equal(projects.assignSession('s1', project.id, 'trk').ok, true);
-    assert.deepEqual(t.db.rows.meta.get('s1'), { projectId: project.id, trackId: 'trk' });
-    assert.equal(projects.assignSession('s1', null, null).ok, true);
-    assert.deepEqual(t.db.rows.meta.get('s1'), { projectId: null, trackId: null });
+    assert.equal(projects.assignSession('s1', 'nope').error, 'Project not found');
+    assert.equal(projects.assignSession('s1', project.id).ok, true);
+    assert.deepEqual(t.db.rows.meta.get('s1'), { projectId: project.id });
+    assert.equal(projects.assignSession('s1', null).ok, true);
+    assert.deepEqual(t.db.rows.meta.get('s1'), { projectId: null });
   } finally { t.cleanup(); }
 });
 
-test('recordLaunchAssignment ignores unknown projects and mismatched tracks', async () => {
+test('recordLaunchAssignment ignores unknown projects', async () => {
   const t = setup();
   try {
     const { project } = await projects.createProject({ name: 'P' });
-    t.db.rows.tracks.push({ id: 'trk', projectId: 'elsewhere', name: 'T', created: 'x' });
     assert.equal(projects.recordLaunchAssignment('s1', { projectId: 'nope' }), null);
     assert.equal(projects.recordLaunchAssignment('s1', {}), null);
-    assert.deepEqual(projects.recordLaunchAssignment('s1', { projectId: project.id, trackId: 'trk' }), { projectId: project.id, trackId: null });
-    assert.deepEqual(t.db.rows.meta.get('s1'), { projectId: project.id, trackId: null });
-  } finally { t.cleanup(); }
-});
-
-test('createTrack validates the project, name, folder and CLI', async () => {
-  const t = setup();
-  try {
-    projects.init({
-      db: t.db, log: { info() {}, error() {} }, buildProjectsFromCache: () => [],
-      notifyRendererProjectsChanged() {}, isHarnessId: (id) => id === 'claude' || id === 'codex',
-    });
-    const repo = tmpDir('switchboard-repo-');
-    try {
-      const { project } = await projects.createProject({ name: 'Feature', folders: [{ path: repo }] });
-      assert.equal(projects.createTrack('nope', { name: 'Build' }).error, 'Project not found');
-      assert.match(projects.createTrack(project.id, { name: '  ' }).error, /name/i);
-      assert.match(projects.createTrack(project.id, { name: 'Build', cwd: os.tmpdir() }).error, /inside/);
-      assert.match(projects.createTrack(project.id, { name: 'Build', cwd: 'relative' }).error, /absolute/);
-      assert.match(projects.createTrack(project.id, { name: 'Build', cli: 'gemini' }).error, /Unknown CLI/);
-
-      const root = projects.createTrack(project.id, { name: 'Plan' });
-      assert.equal(root.ok, true);
-      assert.equal(root.track.cwd, null, 'no cwd means the project default');
-      assert.equal(root.track.cli, null);
-      assert.equal(root.track.sortOrder, 0);
-
-      const sub = path.join(repo, 'packages', 'web');
-      fs.mkdirSync(sub, { recursive: true });
-      const build = projects.createTrack(project.id, { name: 'Build', cwd: sub, cli: 'codex' });
-      assert.equal(build.ok, true);
-      assert.equal(build.track.cwd, sub, 'inside an attached folder is allowed');
-      assert.equal(build.track.cli, 'codex');
-      assert.equal(build.track.sortOrder, 1);
-
-      const inRoot = projects.createTrack(project.id, { name: 'Notes', cwd: project.root });
-      assert.equal(inRoot.ok, true);
-      assert.deepEqual(build.project.tracks.map(x => x.name), ['Plan', 'Build']);
-    } finally { rm(repo); }
-  } finally { t.cleanup(); }
-});
-
-test('updateTrack and deleteTrack; deleting keeps sessions in the project', async () => {
-  const t = setup();
-  try {
-    const { project } = await projects.createProject({ name: 'Feature' });
-    const { track } = projects.createTrack(project.id, { name: 'Build' });
-    assert.equal(projects.updateTrack('nope', { name: 'x' }).error, 'Track not found');
-    assert.match(projects.updateTrack(track.id, { name: ' ' }).error, /name/i);
-    assert.match(projects.updateTrack(track.id, { cwd: os.tmpdir() }).error, /inside/);
-    assert.equal(projects.updateTrack(track.id, { status: 'later' }).error, 'Unknown status: later');
-    const updated = projects.updateTrack(track.id, { name: 'Build v2', status: 'done', cwd: project.root, cli: '' }).track;
-    assert.equal(updated.name, 'Build v2');
-    assert.equal(updated.status, 'done');
-    assert.equal(updated.cwd, project.root);
-    assert.equal(updated.cli, null);
-
-    projects.assignSession('s1', project.id, track.id);
-    projects.assignSession('s2', project.id, null);
-    const removed = projects.deleteTrack(track.id);
-    assert.equal(removed.ok, true);
-    assert.equal(removed.projectId, project.id);
-    assert.deepEqual(t.db.rows.meta.get('s1'), { projectId: project.id, trackId: null }, 'session stays in the project');
-    assert.deepEqual(t.db.rows.meta.get('s2'), { projectId: project.id, trackId: null });
-    assert.equal(projects.deleteTrack(track.id).error, 'Track not found');
+    assert.deepEqual(projects.recordLaunchAssignment('s1', { projectId: project.id }), { projectId: project.id });
+    assert.deepEqual(t.db.rows.meta.get('s1'), { projectId: project.id });
   } finally { t.cleanup(); }
 });
 
@@ -500,7 +415,7 @@ My trailing notes.
   } finally { t.cleanup(); }
 });
 
-test('defaultCwd is validated, and detaching a folder resets cwds that pointed into it', async () => {
+test('defaultCwd is validated, and detaching a folder resets a default that pointed into it', async () => {
   const t = setup();
   try {
     const repo = tmpDir('switchboard-repo-');
@@ -508,13 +423,12 @@ test('defaultCwd is validated, and detaching a folder resets cwds that pointed i
       const { project } = await projects.createProject({ name: 'Feature', folders: [{ path: repo }] });
       assert.equal(project.defaultCwd, null, 'sessions start in the project folder by default');
       assert.match(projects.updateProject(project.id, { defaultCwd: os.tmpdir() }).error, /inside/);
+      assert.match(projects.updateProject(project.id, { defaultCwd: 'relative' }).error, /absolute/);
       assert.equal(projects.updateProject(project.id, { defaultCwd: path.resolve(repo) }).project.defaultCwd, path.resolve(repo));
       assert.equal(projects.updateProject(project.id, { defaultCwd: '' }).project.defaultCwd, null);
       projects.updateProject(project.id, { defaultCwd: path.resolve(repo) });
-      const { track } = projects.createTrack(project.id, { name: 'Build', cwd: path.resolve(repo) });
       const after = (await projects.detachFolder(project.id, path.resolve(repo))).project;
       assert.equal(after.defaultCwd, null, 'project default falls back to the project folder');
-      assert.equal(after.tracks.find(x => x.id === track.id).cwd, null, 'track falls back too');
     } finally { rm(repo); }
   } finally { t.cleanup(); }
 });
@@ -836,7 +750,7 @@ test('adoptPlan copies a plan-mode plan into plan.md and refuses to clobber one'
   }
 });
 
-test('templates: listed from the bundled folder, applied with tokens, tracks created, rules appended', async () => {
+test('templates: listed from the bundled folder, applied with tokens, rules appended', async () => {
   const t = setup();
   const bundled = path.join(__dirname, '..', 'templates');
   try {
@@ -847,14 +761,11 @@ test('templates: listed from the bundled folder, applied with tokens, tracks cre
     const listed = projects.listTemplates();
     assert.equal(listed.dir, bundled);
     assert.deepEqual(listed.templates.map(x => x.kind), ['customer', 'feature', 'research']);
-    assert.deepEqual(listed.templates.find(x => x.kind === 'feature').tracks.map(x => x.name), ['Plan', 'Build', 'Review']);
 
     assert.match((await projects.createProject({ name: 'x', template: 'nope' })).error, /Unknown template/);
     assert.match((await projects.createProject({ name: 'x', template: '../etc' })).error, /Unknown template/);
 
     const { project } = await projects.createProject({ name: 'Onboarding flow', template: 'customer' });
-    assert.deepEqual(project.tracks.map(x => x.name), ['Discovery', 'Proposal', 'Build']);
-    assert.deepEqual(project.tracks.map(x => x.cwd), [null, null, null], 'template tracks start in the project folder');
     const brief = fs.readFileSync(path.join(project.root, 'CLAUDE.md'), 'utf8');
     assert.ok(brief.startsWith('<!-- switchboard:managed -->'), 'the managed block leads');
     assert.ok(brief.includes('\n# Onboarding flow\n'), 'title from the project name');
@@ -879,13 +790,13 @@ test('templates are seeded once into a missing folder and never overwritten', ()
     assert.equal(first.templates.length, 3, 'seeded from the bundle');
     fs.writeFileSync(path.join(dir, 'feature', 'CLAUDE.md'), '# {{name}}\n\nMine now.\n');
     fs.mkdirSync(path.join(dir, 'mine'));
-    fs.writeFileSync(path.join(dir, 'mine', 'template.json'), JSON.stringify({ name: 'Mine', tracks: [{ name: 'Only', cli: 'codex' }] }));
+    fs.writeFileSync(path.join(dir, 'mine', 'template.json'), JSON.stringify({ name: 'Mine', description: 'My own' }));
     fs.mkdirSync(path.join(dir, 'broken'));
     fs.writeFileSync(path.join(dir, 'broken', 'template.json'), '{ not json');
     const second = projects.listTemplates();
     assert.deepEqual(second.templates.map(x => x.name), ['Customer', 'Feature', 'Mine', 'Research'], 'user template listed, broken one skipped');
     assert.ok(fs.readFileSync(path.join(dir, 'feature', 'CLAUDE.md'), 'utf8').includes('Mine now.'), 'edit kept');
-    assert.deepEqual(second.templates.find(x => x.kind === 'mine').tracks, [{ name: 'Only', cli: 'codex' }]);
+    assert.deepEqual(second.templates.find(x => x.kind === 'mine'), { kind: 'mine', name: 'Mine', description: 'My own' });
   } finally {
     rm(path.dirname(dir));
   }
@@ -1101,14 +1012,14 @@ test('a new worktree gets the .env files the caller picked', { skip: !haveGit &&
 
 // --- Scheduled tasks ---
 
-test('createSchedule: a project schedule lives under its track, a folder schedule under its cwd', async () => {
+test('createSchedule: a project schedule lives in its project, a folder schedule under its cwd', async () => {
   const t = setup();
   try {
     const { project } = await projects.createProject({ name: 'Sched' });
-    const { track } = projects.createTrack(project.id, { name: 'Digest' });
-    const a = projects.createSchedule({ name: 'Morning', prompt: 'do it', projectId: project.id, trackId: track.id, every: 'day', atHour: 9, atMinute: 0 });
+    const a = projects.createSchedule({ name: 'Morning', prompt: 'do it', projectId: project.id, every: 'day', atHour: 9, atMinute: 0 });
     assert.equal(a.error, undefined);
-    assert.equal(a.schedule.trackId, track.id);
+    assert.equal(a.schedule.projectId, project.id);
+    assert.equal('trackId' in a.schedule, false);
     assert.equal(a.schedule.cwd, null, 'project schedules store no cwd');
     assert.equal(a.schedule.enabled, true);
     const b = projects.createSchedule({ name: 'Folder', prompt: 'do it', cwd: t.root, every: '15m' });
@@ -1130,14 +1041,13 @@ test('createSchedule rejects what it cannot run', async () => {
     assert.match(projects.createSchedule({ name: 'x', projectId: project.id, every: 'day' }).error, /prompt/i);
     assert.match(projects.createSchedule({ name: 'x', prompt: 'x', projectId: project.id, every: 'fortnight' }).error, /when/i);
     assert.match(projects.createSchedule({ name: 'x', prompt: 'x', projectId: project.id, every: 'day', atHour: 25 }).error, /atHour/);
-    assert.match(projects.createSchedule({ name: 'x', prompt: 'x', projectId: project.id, trackId: 'nope', every: 'day' }).error, /Track/);
     assert.match(projects.createSchedule({ name: 'x', prompt: 'x', projectId: 'nope', every: 'day' }).error, /Project/);
     assert.match(projects.createSchedule({ name: 'x', prompt: 'x', every: 'day' }).error, /folder/i);
     assert.match(projects.createSchedule({ name: 'x', prompt: 'x', cwd: '/definitely/not/here', every: 'day' }).error, /Not a directory/);
   } finally { t.cleanup(); }
 });
 
-test('updateSchedule: timing fields are replaced as a set, a folder schedule has no track, cron is one-way', async () => {
+test('updateSchedule: timing fields are replaced as a set, cron is one-way', async () => {
   const t = setup();
   try {
     const { project } = await projects.createProject({ name: 'Sched' });
@@ -1146,10 +1056,8 @@ test('updateSchedule: timing fields are replaced as a set, a folder schedule has
     assert.equal(moved.schedule.every, '15m');
     assert.equal(moved.schedule.atHour, null, 'old timing does not linger');
     assert.equal(moved.schedule.weekday, null);
-    const folder = projects.createSchedule({ name: 'F', prompt: 'x', cwd: t.root, every: 'hour' });
-    assert.match(projects.updateSchedule(folder.schedule.id, { trackId: 'any' }).error, /folder schedule/);
     // An imported cron keeps its string until a preset replaces it.
-    t.db.rows.schedules.push({ id: 'legacy', name: 'L', projectId: null, trackId: null, cwd: t.root, prompt: 'x', every: 'cron', cron: '*/5 * * * *', enabled: 1, catchUp: 0, created: '2026-09-01T00:00:00.000Z' });
+    t.db.rows.schedules.push({ id: 'legacy', name: 'L', projectId: null, cwd: t.root, prompt: 'x', every: 'cron', cron: '*/5 * * * *', enabled: 1, catchUp: 0, created: '2026-09-01T00:00:00.000Z' });
     assert.equal(projects.updateSchedule('legacy', { name: 'Legacy' }).schedule.cron, '*/5 * * * *');
     const replaced = projects.updateSchedule('legacy', { every: 'hour', atMinute: 5 });
     assert.equal(replaced.schedule.cron, null);
@@ -1161,51 +1069,46 @@ test('updateSchedule: timing fields are replaced as a set, a folder schedule has
   } finally { t.cleanup(); }
 });
 
-test('dueSchedules: fires at the minute, skips off, done project, done track, and a run still going', async () => {
+test('dueSchedules: fires at the minute, skips off, done project, and a run still going', async () => {
   const t = setup();
   try {
     const { project } = await projects.createProject({ name: 'Sched' });
-    const { track } = projects.createTrack(project.id, { name: 'T' });
     const mk = (name, extra) => projects.createSchedule({ name, prompt: 'x', projectId: project.id, every: 'day', atHour: 9, atMinute: 0, ...extra }).schedule;
     const general = mk('general');
-    const inTrack = mk('in track', { trackId: track.id });
+    const second = mk('second');
     const off = mk('off', { enabled: false });
     const nine = new Date(2026, 8, 9, 9, 0, 0);
     const names = (ids) => ids.map(id => t.db.getSchedule(id).name).sort();
-    assert.deepEqual(names(projects.dueSchedules(nine)), ['general', 'in track']);
+    assert.deepEqual(names(projects.dueSchedules(nine)), ['general', 'second']);
     assert.deepEqual(projects.dueSchedules(new Date(2026, 8, 9, 9, 1, 0)), [], 'not at 9:01');
     assert.equal(projects.schedulePausedReason(t.db.getSchedule(off.id)), 'off');
-    projects.updateTrack(track.id, { status: 'done' });
-    assert.deepEqual(names(projects.dueSchedules(nine)), ['general'], 'a done track pauses its schedule');
-    assert.equal(projects.schedulePausedReason(t.db.getSchedule(inTrack.id)), 'track done');
-    projects.updateTrack(track.id, { status: 'active' });
     projects.updateProject(project.id, { status: 'done' });
     assert.deepEqual(projects.dueSchedules(nine), [], 'a done project pauses all of them');
+    assert.equal(projects.schedulePausedReason(t.db.getSchedule(second.id)), 'project done');
     projects.updateProject(project.id, { status: 'active' });
     // Reopening resumed them with nothing stored.
-    assert.deepEqual(names(projects.dueSchedules(nine)), ['general', 'in track']);
+    assert.deepEqual(names(projects.dueSchedules(nine)), ['general', 'second']);
     projects.recordScheduleRun(general.id, 'sess-1');
-    assert.deepEqual(names(projects.dueSchedules(nine, (id) => id === 'sess-1')), ['in track'], 'still working: skipped');
-    assert.deepEqual(names(projects.dueSchedules(nine, () => false)), ['general', 'in track'], 'finished: fires again');
+    assert.deepEqual(names(projects.dueSchedules(nine, (id) => id === 'sess-1')), ['second'], 'still working: skipped');
+    assert.deepEqual(names(projects.dueSchedules(nine, () => false)), ['general', 'second'], 'finished: fires again');
     assert.deepEqual(t.db.rows.meta.get('sess-1').scheduleId, general.id, 'the session remembers its schedule');
   } finally { t.cleanup(); }
 });
 
-test('resolveScheduleLaunch runs where the track starts, and a folder schedule in its folder', async () => {
+test('resolveScheduleLaunch runs where the project starts, and a folder schedule in its folder', async () => {
   const t = setup();
   try {
     const sub = path.join(t.root, 'sub');
     fs.mkdirSync(sub);
     const { project } = await projects.createProject({ name: 'Sched' });
-    const { track } = projects.createTrack(project.id, { name: 'T', cwd: path.join(project.root), cli: 'codex' });
-    const s = projects.createSchedule({ name: 'x', prompt: 'go', projectId: project.id, trackId: track.id, every: 'hour' }).schedule;
+    const s = projects.createSchedule({ name: 'x', prompt: 'go', projectId: project.id, every: 'hour' }).schedule;
     const launch = projects.resolveScheduleLaunch(s.id);
     assert.equal(launch.target.projectPath, project.root);
     assert.equal(launch.target.projectId, project.id);
-    assert.equal(launch.target.trackId, track.id);
-    assert.equal(launch.runtime, 'codex', 'the track CLI unless the schedule names one');
-    const own = projects.createSchedule({ name: 'y', prompt: 'go', projectId: project.id, trackId: track.id, every: 'hour', cli: 'claude' }).schedule;
-    assert.equal(projects.resolveScheduleLaunch(own.id).runtime, 'claude');
+    assert.equal('trackId' in launch.target, false);
+    assert.equal(launch.runtime, 'claude', 'Claude unless the schedule names a CLI');
+    const own = projects.createSchedule({ name: 'y', prompt: 'go', projectId: project.id, every: 'hour', cli: 'codex' }).schedule;
+    assert.equal(projects.resolveScheduleLaunch(own.id).runtime, 'codex');
     const f = projects.createSchedule({ name: 'f', prompt: 'go', cwd: sub, every: 'hour' }).schedule;
     const fl = projects.resolveScheduleLaunch(f.id);
     assert.equal(fl.target.projectPath, sub);
@@ -1214,28 +1117,26 @@ test('resolveScheduleLaunch runs where the track starts, and a folder schedule i
   } finally { t.cleanup(); }
 });
 
-test('schedule configuration stays per CLI while inherited project folders and track CLIs move', async () => {
+test('schedule configuration stays per CLI while the inherited project folder and CLI move', async () => {
   const t = setup();
   try {
     const { project } = await projects.createProject({ name: 'Configured schedules' });
     const sub = path.join(project.root, 'working');
     fs.mkdirSync(sub);
-    const { track } = projects.createTrack(project.id, { name: 'Run', cli: 'claude' });
     const sessionConfig = { claude: { permissionMode: null, chrome: false }, codex: { codexModel: 'saved-model' } };
-    const { schedule } = projects.createSchedule({ name: 'Configured', prompt: 'Do it', every: 'hour', projectId: project.id, trackId: track.id, sessionConfig });
+    const { schedule } = projects.createSchedule({ name: 'Configured', prompt: 'Do it', every: 'hour', projectId: project.id, cli: 'claude', sessionConfig });
     assert.deepEqual(schedule.sessionConfig, sessionConfig);
     let launch = projects.resolveScheduleLaunch(schedule.id);
     assert.equal(launch.target.projectPath, project.root);
     assert.equal(launch.runtime, 'claude');
     projects.updateProject(project.id, { defaultCwd: sub });
     launch = projects.resolveScheduleLaunch(schedule.id);
-    assert.equal(launch.target.projectPath, sub, 'track without a cwd follows the project default');
-    projects.updateTrack(track.id, { cwd: project.root, cli: 'codex' });
+    assert.equal(launch.target.projectPath, sub, 'a project schedule follows the project default');
+    projects.updateSchedule(schedule.id, { cli: 'codex' });
     launch = projects.resolveScheduleLaunch(schedule.id);
-    assert.equal(launch.target.projectPath, project.root);
     assert.equal(launch.runtime, 'codex');
     assert.deepEqual(launch.schedule.sessionConfig, sessionConfig, 'a CLI change preserves both sets of custom settings');
-    const preview = projects.resolveScheduleContext({ projectId: project.id, trackId: track.id });
+    const preview = projects.resolveScheduleContext({ projectId: project.id, cli: 'codex' });
     assert.deepEqual(preview.target, launch.target);
     assert.equal(preview.runtime, launch.runtime);
     const updated = projects.updateSchedule(schedule.id, { sessionConfig: { codex: sessionConfig.codex } });
@@ -1247,14 +1148,11 @@ test('schedule configuration stays per CLI while inherited project folders and t
   } finally { t.cleanup(); }
 });
 
-test('deleting a track moves its schedules to General; deleting the project removes them', async () => {
+test('deleteSchedule removes a schedule and reports a missing one', async () => {
   const t = setup();
   try {
     const { project } = await projects.createProject({ name: 'Sched' });
-    const { track } = projects.createTrack(project.id, { name: 'T' });
-    const s = projects.createSchedule({ name: 'x', prompt: 'go', projectId: project.id, trackId: track.id, every: 'hour' }).schedule;
-    projects.deleteTrack(track.id);
-    assert.equal(t.db.getSchedule(s.id).trackId, null);
+    const s = projects.createSchedule({ name: 'x', prompt: 'go', projectId: project.id, every: 'hour' }).schedule;
     assert.equal(projects.deleteSchedule('missing').error, 'Schedule not found');
     assert.equal(projects.deleteSchedule(s.id).ok, true);
     assert.equal(t.db.getSchedule(s.id), null);

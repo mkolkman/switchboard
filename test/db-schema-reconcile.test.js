@@ -43,7 +43,7 @@ function inspectDb(dataDir) {
   return JSON.parse(r.stdout.trim().split('\n').pop());
 }
 
-const PROJECT_TABLES = ['projects', 'project_folders', 'tracks'];
+const PROJECT_TABLES = ['projects', 'project_folders'];
 
 test('schedule settings preserve explicit defaults and separate CLI choices across restarts', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-schedule-config-'));
@@ -295,53 +295,91 @@ test('fresh database gets fileMtime column', () => {
     const state = inspectDb(dir);
     assert.ok(state.cols.includes('fileMtime'));
     for (const t of PROJECT_TABLES) assert.ok(state.tables.includes(t), `${t} table created`);
-    assert.ok(state.metaCols.includes('projectId') && state.metaCols.includes('trackId'), 'session_meta carries the assignment columns');
+    assert.ok(state.metaCols.includes('projectId'), 'session_meta carries the assignment column');
+    assert.ok(!state.tables.includes('tracks'), 'no tracks table');
+    assert.ok(!state.metaCols.includes('trackId') && !state.metaCols.includes('formerTrackName'), 'no track columns');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('deleting tracks retains their names and optionally archives only their sessions', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-delete-track-'));
+// Project tracks were removed. A database from a build that still had them
+// loses the tracks table and the three track columns on the next start, while
+// every session, schedule and project row and the other columns stay.
+test('a database with tracks upgrades cleanly: tracks gone, other data kept', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-db-drop-tracks-'));
   try {
+    const seed = runInElectronNode(`
+      const Database = require('better-sqlite3');
+      const db = new Database(require('path').join(process.env.SWITCHBOARD_DATA_DIR, 'switchboard.db'));
+      db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
+      db.prepare("INSERT INTO settings (key, value) VALUES ('db_version', '4')").run();
+      db.exec(\`CREATE TABLE session_meta (sessionId TEXT PRIMARY KEY, name TEXT, starred INTEGER DEFAULT 0,
+        archived INTEGER DEFAULT 0, projectId TEXT, trackId TEXT, formerTrackName TEXT, scheduleId TEXT, scheduledAt TEXT)\`);
+      db.exec(\`CREATE TABLE projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, root TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active', sharedBranch INTEGER NOT NULL DEFAULT 1,
+        branchName TEXT, created TEXT NOT NULL, modified TEXT NOT NULL, defaultCwd TEXT
+      )\`);
+      db.exec(\`CREATE TABLE tracks (id TEXT PRIMARY KEY, projectId TEXT NOT NULL, name TEXT NOT NULL, cwd TEXT,
+        cli TEXT, status TEXT NOT NULL DEFAULT 'active', sortOrder INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL)\`);
+      db.exec('CREATE INDEX idx_tracks_project ON tracks(projectId)');
+      db.exec(\`CREATE TABLE schedules (id TEXT PRIMARY KEY, name TEXT NOT NULL, projectId TEXT, trackId TEXT, cwd TEXT,
+        prompt TEXT NOT NULL, every TEXT NOT NULL, atHour INTEGER, atMinute INTEGER, weekday INTEGER, cron TEXT, cli TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1, catchUp INTEGER NOT NULL DEFAULT 0, sourceFile TEXT, lastRunAt TEXT,
+        lastSessionId TEXT, created TEXT NOT NULL, sessionConfig TEXT)\`);
+      // An index on a track column would make DROP COLUMN fail if left in place.
+      db.exec('CREATE INDEX idx_session_meta_track ON session_meta(trackId)');
+      db.exec('CREATE INDEX idx_schedules_track ON schedules(projectId, trackId)');
+      db.prepare("INSERT INTO projects (id, name, slug, root, created, modified) VALUES ('p1', 'P', 'p', '/tmp/p', 'x', 'x')").run();
+      db.prepare("INSERT INTO tracks (id, projectId, name, created) VALUES ('t1', 'p1', 'Build', 'x')").run();
+      db.prepare(\`INSERT INTO session_meta (sessionId, name, starred, archived, projectId, trackId, formerTrackName, scheduleId)
+        VALUES ('s1', 'kept', 1, 1, 'p1', 't1', 'Old', 'sch1')\`).run();
+      db.prepare(\`INSERT INTO schedules (id, name, projectId, trackId, prompt, every, atMinute, created, sessionConfig)
+        VALUES ('sch1', 'Hourly', 'p1', 't1', 'go', 'hour', 5, 'x', '{}')\`).run();
+      db.close();
+    `, dir);
+    assert.equal(seed.status, 0, seed.stderr);
+
+    // Upgrade, then open again to check the drop is idempotent.
+    assert.equal(loadDbModule(dir).status, 0);
     const r = runInElectronNode(`
-      const assert = require('node:assert/strict');
       const db = require('./db');
-      db.insertTrack({ id: 'keep', projectId: 'project', name: 'Keep work', created: '2026-09-05' });
-      db.insertTrack({ id: 'archive', projectId: 'project', name: 'Finished work', created: '2026-09-05' });
-      db.setSessionAssignment('active', 'project', 'keep');
-      db.setSessionAssignment('done', 'project', 'archive');
-      db.setSessionAssignment('already-archived', 'project', 'archive');
-      db.setArchived('already-archived', 1);
-      db.setSessionAssignment('unrelated', 'project', null);
-      assert.deepEqual(db.deleteTrack('keep'), ['active']);
-      assert.equal(db.getMeta('active').archived, 0);
-      assert.equal(db.getMeta('active').formerTrackName, 'Keep work');
-      assert.equal(db.getMeta('active').trackId, null);
-      assert.deepEqual(new Set(db.deleteTrack('archive', { archiveSessions: true })), new Set(['done', 'already-archived']));
-      for (const id of ['done', 'already-archived']) {
-        const meta = db.getMeta(id);
-        assert.equal(meta.projectId, 'project');
-        assert.equal(meta.trackId, null);
-        assert.equal(meta.formerTrackName, 'Finished work');
-        assert.equal(meta.archived, 1);
-      }
-      assert.equal(db.getTrack('keep'), null);
-      assert.equal(db.getTrack('archive'), null);
-      assert.equal(db.getMeta('unrelated').archived, 0);
-      db.closeDb();
-      delete require.cache[require.resolve('./db')];
-      const reopened = require('./db');
-      assert.equal(reopened.getMeta('done').formerTrackName, 'Finished work');
-      reopened.closeDb();
+      const Database = require('better-sqlite3');
+      const raw = new Database(require('path').join(process.env.SWITCHBOARD_DATA_DIR, 'switchboard.db'), { readonly: true });
+      console.log(JSON.stringify({
+        tables: raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(t => t.name),
+        indexes: raw.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(t => t.name),
+        metaCols: raw.prepare('PRAGMA table_info(session_meta)').all().map(c => c.name),
+        scheduleCols: raw.prepare('PRAGMA table_info(schedules)').all().map(c => c.name),
+        meta: db.getMeta('s1'), schedule: db.getSchedule('sch1'), project: db.getProject('p1'),
+        version: db.getSetting('db_version'),
+      }));
     `, dir);
     assert.equal(r.status, 0, r.stderr);
+    const state = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.ok(!state.tables.includes('tracks'), 'tracks table dropped');
+    for (const index of ['idx_tracks_project', 'idx_session_meta_track', 'idx_schedules_track']) {
+      assert.ok(!state.indexes.includes(index), `${index} dropped`);
+    }
+    assert.ok(!state.metaCols.includes('trackId') && !state.metaCols.includes('formerTrackName'), 'session_meta track columns dropped');
+    assert.ok(!state.scheduleCols.includes('trackId'), 'schedules.trackId dropped');
+    assert.equal(state.meta.name, 'kept');
+    assert.equal(state.meta.starred, 1);
+    assert.equal(state.meta.archived, 1);
+    assert.equal(state.meta.projectId, 'p1', 'the session stays in its project');
+    assert.equal(state.meta.scheduleId, 'sch1');
+    assert.equal(state.schedule.name, 'Hourly');
+    assert.equal(state.schedule.projectId, 'p1');
+    assert.equal(state.schedule.atMinute, 5);
+    assert.equal(state.project.name, 'P');
+    assert.equal(state.version, 5);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-// The project tables and the two session_meta columns are added by inspecting
+// The project tables and the session_meta column are added by inspecting
 // the schema, not by db_version, so a database from before projects existed
 // gets them without losing its names, stars or archive flags.
 test('projects tables and session_meta columns are added to an older database', () => {
@@ -376,13 +414,13 @@ test('projects tables and session_meta columns are added to an older database', 
 
     const state = inspectDb(dir);
     for (const t of PROJECT_TABLES) assert.ok(state.tables.includes(t), `${t} table created`);
-    assert.ok(state.metaCols.includes('projectId') && state.metaCols.includes('trackId'));
+    assert.ok(state.metaCols.includes('projectId'));
     assert.ok(state.projectCols.includes('defaultCwd'), 'defaultCwd added to an existing projects table');
 
     const after = JSON.parse(runInElectronNode(`
       const db = require(${JSON.stringify(path.join(APP_DIR, 'db.js'))});
       db.setSessionAssignment('s1', 'p1', null);
-      db.setSessionAssignment('s2', 'p1', 't1');
+      db.setSessionAssignment('s2', 'p1');
       db.copySessionAssignment('s1', 's3');
       db.moveSessionAssignment('s2', 's4');
       console.log(JSON.stringify({
@@ -395,7 +433,6 @@ test('projects tables and session_meta columns are added to an older database', 
     assert.equal(after.s3.projectId, 'p1', 'copy creates the fork\'s row');
     assert.equal(after.s2.projectId, null, 'move clears the temporary id');
     assert.equal(after.s4.projectId, 'p1');
-    assert.equal(after.s4.trackId, 't1');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -580,7 +617,7 @@ for (const version of [4, 12]) {
       assert.equal(state.meta.archived, 1);
       assert.equal(state.folder.indexMtimeMs, 123);
       assert.equal(state.hits[0].id, 'kept');
-      assert.equal(state.version, version);
+      assert.equal(state.version, Math.max(version, 5), 'migrated up to v5, a higher version kept');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }

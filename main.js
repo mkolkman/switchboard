@@ -262,7 +262,6 @@ function sessionState({ projectPath, projectFolder, knownJsonlFiles, sessionSlug
     // its output with the right harness.
     runtime: runtime || null,
     projectId: sessionOptions?.projectId || null,
-    trackId: sessionOptions?.trackId || null,
     openedAt: Date.now(),
   };
 }
@@ -354,8 +353,6 @@ async function adoptDaemonSessions() {
       // Watches the output for dev-server and artifact links (preview-urls.js).
       previewWatcher: state.isPlainTerminal ? null : createPreviewWatcher(),
       projectId: state.projectId || null,
-      trackId: state.trackId || null,
-      formerTrackName: state.formerTrackName || null,
       // A Codex session still waiting for its transcript keeps waiting.
       pendingLaunch: state.realSessionId ? null : (state.pendingLaunch || null),
       // The IDE MCP server lived in the previous app process and is gone.
@@ -772,10 +769,9 @@ ipcMain.handle('update-project', guarded((id, patch) => projects.updateProject(i
 ipcMain.handle('delete-project', guarded((id) => projects.deleteProject(id)));
 ipcMain.handle('attach-project-folder', guarded((id, spec) => projects.attachFolder(id, spec || {})));
 ipcMain.handle('detach-project-folder', guarded((id, folderPath, opts) => projects.detachFolder(id, folderPath, opts || {})));
-ipcMain.handle('set-session-assignment', guarded((sessionId, projectId, trackId) => {
+ipcMain.handle('set-session-assignment', guarded((sessionId, projectId) => {
   const cleanProjectId = projectId || null;
-  const cleanTrackId = trackId || null;
-  const result = projects.assignSession(sessionId, cleanProjectId, cleanTrackId);
+  const result = projects.assignSession(sessionId, cleanProjectId);
   // Raw terminals have no transcript to rehydrate this relationship from.
   // Keep the live PTY metadata aligned with the durable renderer descriptor so
   // a renderer reload cannot put a moved terminal back in its old location.
@@ -783,9 +779,8 @@ ipcMain.handle('set-session-assignment', guarded((sessionId, projectId, trackId)
     const session = activeSessions.get(sessionId);
     if (session?.isPlainTerminal) {
       session.projectId = cleanProjectId;
-      session.trackId = cleanProjectId ? cleanTrackId : null;
       // And in the daemon, which hands it back when a later app run adopts it.
-      ptyClient.setState(session.pty?.sessionId || sessionId, { projectId: session.projectId, trackId: session.trackId });
+      ptyClient.setState(session.pty?.sessionId || sessionId, { projectId: session.projectId });
     }
   }
   return result;
@@ -797,31 +792,6 @@ ipcMain.handle('update-schedule', guarded((id, patch) => projects.updateSchedule
 ipcMain.handle('delete-schedule', guarded((id) => projects.deleteSchedule(id)));
 ipcMain.handle('resolve-schedule-launch', guarded((id) => projects.resolveScheduleLaunch(id)));
 ipcMain.handle('get-schedule-context', guarded((spec) => projects.resolveScheduleContext(spec || {})));
-ipcMain.handle('create-track', guarded((projectId, spec) => projects.createTrack(projectId, spec || {})));
-ipcMain.handle('update-track', guarded((id, patch) => projects.updateTrack(id, patch || {})));
-ipcMain.handle('delete-track', guarded((id, options = {}) => {
-  const track = dbModule.getTrack(id);
-  if (!track) return { error: 'Track not found' };
-  const archiveSessions = options.archiveSessions === true;
-  // Raw terminals have no transcript row, but participate in track deletion.
-  for (const [sid, session] of activeSessions) {
-    if (session.trackId === id && session.isPlainTerminal) dbModule.setSessionAssignment(sid, track.projectId, id);
-  }
-  const result = projects.deleteTrack(id, { archiveSessions });
-  if (result.error) return result;
-  const affected = new Set(result.sessionIds);
-  for (const [sid, session] of activeSessions) {
-    if (session.trackId !== id && !affected.has(sid)) continue;
-    session.trackId = null;
-    session.formerTrackName = track.name;
-    ptyClient.setState(session.pty?.sessionId || sid, { trackId: null, formerTrackName: track.name });
-    if (archiveSessions && !session.exited) {
-      session.stopRequested = true;
-      try { session.pty.kill(); } catch (error) { log.error('[delete-track] stop failed', error); }
-    }
-  }
-  return result;
-}));
 ipcMain.handle('get-projects-root', guarded(() => projects.projectsRoot()));
 // Where repo-less chat sessions run: a plain folder under the projects root,
 // created on first use, so they get a sidebar group of their own.
@@ -1700,7 +1670,6 @@ ipcMain.handle('get-active-terminals', () => {
         sessionId,
         projectPath: session.projectPath,
         projectId: session.projectId || null,
-        trackId: session.trackId || null,
       });
     }
   }
@@ -2114,11 +2083,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   // starts and the agent can edit the repos. New sessions say which project
   // in their options; resumed ones are looked up by their assignment.
   let projectEnv = {};
-  // A fork of a project session belongs to the same project and track, even
+  // A fork of a project session belongs to the same project, even
   // when it is started from the Sessions tab where no project is in play.
   if (!isPlainTerminal && sessionOptions?.forkFrom && !sessionOptions.projectId) {
     const source = getMeta(sessionOptions.forkFrom);
-    if (source?.projectId) sessionOptions = { ...sessionOptions, projectId: source.projectId, trackId: source.trackId || null };
+    if (source?.projectId) sessionOptions = { ...sessionOptions, projectId: source.projectId };
   }
   if (!isPlainTerminal) {
     const launchProjectId = sessionOptions?.projectId || getMeta(sessionId)?.projectId || null;
@@ -2330,9 +2299,8 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     }) : null,
     // Plain terminals have no transcript row to carry their project filing.
     // Keep the launch context on the live PTY so renderer reloads can put a
-    // terminal started in an attached folder back into the same project/track.
+    // terminal started in an attached folder back into the same project.
     projectId: sessionOptions?.projectId || null,
-    trackId: sessionOptions?.trackId || null,
     // Set for a harness whose real session id only appears once its transcript
     // does; cleared by resolvePendingLaunches when the transcript is matched.
     pendingLaunch: (harness?.needsIdDetection?.({ isNew: startFresh, options: sessionOptions })) ? {
@@ -2359,7 +2327,6 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       const assignment = projects.recordLaunchAssignment(sessionId, sessionOptions);
       if (assignment) {
         session.projectId = assignment.projectId;
-        session.trackId = assignment.trackId;
         // Started from a phase or a todo on the project page.
         const item = sessionOptions.planItem;
         if (item?.itemText) projects.recordPlanLink(assignment.projectId, item.file, item.itemText, sessionId, 'started');
@@ -2379,7 +2346,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   // A resumed project session is a project session too, for the plan watcher.
   if (!isPlainTerminal && !session.projectId) {
     const meta = getMeta(session.realSessionId || sessionId);
-    if (meta?.projectId) { session.projectId = meta.projectId; session.trackId = meta.trackId || null; }
+    if (meta?.projectId) session.projectId = meta.projectId;
   }
 
   // A resumed conversation replays its old links first; a new one has none.

@@ -382,11 +382,9 @@ function buildProjectsFromCache(showArchived) {
       name: meta?.name || null,
       starred: meta?.starred || 0,
       archived: meta?.archived || 0,
-      // Explicit filing into a project / track (projects.js). Null when the
-      // session was never filed; the tree builder then falls back to cwd.
+      // Explicit filing into a project (projects.js). Null when the session
+      // was never filed; the tree builder then falls back to cwd.
       projectId: meta?.projectId || null,
-      trackId: meta?.trackId || null,
-      formerTrackName: meta?.formerTrackName || null,
       // Started by a schedule (projects.js recordScheduleRun): the row shows a
       // clock chip with the schedule's name and the time it fired.
       scheduleId: meta?.scheduleId || null,
@@ -451,8 +449,6 @@ function buildProjectsFromCache(showArchived) {
         created: new Date(session._openedAt).toISOString(),
         type: 'terminal',
         projectId: session.projectId || null,
-        trackId: session.trackId || null,
-        formerTrackName: session.formerTrackName || null,
       });
     }
   }
