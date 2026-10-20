@@ -98,7 +98,7 @@ function githubViewRow(item, selectedKey) {
   const type = prType(item);
   return `<div class="ghv-row${key === selectedKey ? ' selected' : ''}" data-item="${escapeHtml(key)}" title="${escapeHtml(`${item.repo}#${item.number}: ${item.title}`)}">
       <div class="ghv-row-title">${escapeHtml(item.title)}</div>
-      <div class="ghv-row-meta"><span class="ghv-type ghv-type--${type.type}" title="${escapeHtml(`${PR_TYPE_LABELS[type.type]}: ${type.reason}`)}">${escapeHtml(PR_TYPE_LABELS[type.type])}</span><span class="ghv-row-ref">${escapeHtml(githubRepoName(item.repo))}#${item.number}</span>
+      <div class="ghv-row-meta"><span class="ghv-type ghv-type--${type.type}" title="${escapeHtml(`${PR_TYPE_LABELS[type.type]}: ${type.reason}`)}">${escapeHtml(PR_TYPE_LABELS[type.type])}</span><span class="ghv-row-ref">${escapeHtml(githubRepoName(item.repo))}</span>
         ${item.author && item.author !== 'ghost' ? `<span class="ghv-row-author">${escapeHtml(item.author)}</span>` : ''}
         <span class="ws-flex"></span>${githubPrChip(pr, key)}</div>
     </div>`;
