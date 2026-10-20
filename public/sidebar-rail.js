@@ -3,7 +3,7 @@
 // mode (tab) it is in, which opens a menu to switch mode, and below it a short
 // form of that mode's list. Projects show their marks, Sessions (only the live
 // ones) their repo's short name with a status dot, the kind of session and its
-// track or branch, GitHub its PR numbers, Todo its section icons, Help Scout
+// branch, GitHub its PR numbers, Todo its section icons, Help Scout
 // its ticket numbers and Observability its products and firing or pending
 // alerts; each one does what its full row does on a click.
 // In Sessions a + under the mode button starts a new session, like the open
@@ -91,11 +91,8 @@ function railSessionKind(session) {
   return 'build';
 }
 
-/** The session's track, else the worktree branch its folder is, as a few letters. */
+/** The worktree branch the session's folder is, as a few letters. */
 function railSessionPlace(session) {
-  const project = session.projectId ? findTreeProject(session.projectId) : null;
-  const track = session.trackId ? (project?.tracks || []).find(t => t.id === session.trackId) : null;
-  if (track) return track.name;
   const worktree = String(session.projectPath || '').match(/\/(?:\.claude\/)?(?:\.worktrees|worktrees)\/([^/]+)\/?$/);
   return worktree ? worktree[1] : '';
 }
@@ -111,7 +108,7 @@ function railSessionItems() {
     const repo = repoInfoByPath.get(session.projectPath)?.name || (isChatFolder(session.projectPath) ? 'Chat' : folderBaseName(session.projectPath));
     const hue = projectHue(repo.toLowerCase());
     const kind = railSessionKind(session);
-    // What it works on beats its track or branch: "#2283" for a PR, issue or ticket.
+    // What it works on beats its branch: "#2283" for a PR, issue or ticket.
     const ctx = typeof sessionContextLabel === 'function' ? sessionContextLabel(id) : null;
     const ctxShort = ctx && /#\d+/.test(ctx.label) ? `#${ctx.label.split('#')[1]}` : '';
     const place = ctxShort || railSessionPlace(session);

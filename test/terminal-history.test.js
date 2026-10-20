@@ -49,12 +49,11 @@ test('restored history is grey and resets styling before live output', () => {
   assert.match(rendered, /\x1b\[0m\r\n$/);
 });
 
-test('raw terminal persistence retains its project, track and starting folder', () => {
+test('raw terminal persistence retains its project and starting folder', () => {
   const record = persistedTerminalRecord({
     sessionId: 'terminal-1',
     projectPath: '/work/attached-repo',
     projectId: 'project-1',
-    trackId: 'track-1',
     created: '2026-09-04T00:00:00.000Z',
     modified: '2026-09-04T00:00:00.000Z',
     type: 'terminal',
@@ -62,7 +61,7 @@ test('raw terminal persistence retains its project, track and starting folder', 
   assert.equal(record.sessionId, 'terminal-1');
   assert.equal(record.projectPath, '/work/attached-repo');
   assert.equal(record.projectId, 'project-1');
-  assert.equal(record.trackId, 'track-1');
+  assert.equal('trackId' in record, false);
   assert.equal(record.type, 'terminal');
 });
 

@@ -1,6 +1,6 @@
 // --- What a session works on, and the way back to where it was opened ---
-// A session's context is everything it belongs to or works on: its project and
-// track, plan items and the issues and PRs among them (plan links), a PR or
+// A session's context is everything it belongs to or works on: its project,
+// plan items and the issues and PRs among them (plan links), a PR or
 // issue it was started from elsewhere, a Help Scout ticket, a Grafana alert, a
 // Bugsnag error or log search (session_links), and the PR of the branch it
 // works on (found from its transcript). The terminal header shows it as a
@@ -100,8 +100,6 @@ function sessionContexts(sessionId) {
   const project = owner?.project || null;
   if (project) {
     push({ kind: 'project', key: `project:${project.id}`, label: project.name, title: `Project ${project.name}`, open: () => openProjectAt(project, 'overview') });
-    const track = session.trackId ? (project.tracks || []).find(t => t.id === session.trackId) : null;
-    if (track) push({ kind: 'track', key: `track:${track.id}`, label: track.name, title: `Track ${track.name}`, open: () => openProjectAt(project, 'overview') });
     // The plan's links: the issue or PR an item is (githubLinkForSession), else the item itself.
     const state = planState(project);
     if (!state.data && !state.loading) {
@@ -394,7 +392,7 @@ function renderPrWalkBrief(sessionId, key) {
   const known = prWalkDetails.get(lower);
   const detail = known && !known.then && !known.failed ? known : null;
   const contexts = sessionContexts(sessionId);
-  const place = contexts.filter(c => ['project', 'track', 'plan'].includes(c.kind)).map(c => escapeHtml(c.label)).join(' › ');
+  const place = contexts.filter(c => ['project', 'plan'].includes(c.kind)).map(c => escapeHtml(c.label)).join(' › ');
   const ctx = { kind: 'pr', key: lower, ref: key, label: `PR #${key.split('#')[1]}` };
   const status = sessionContextStatus(ctx);
   const intro = detail?.body ? (githubFirstParagraph(detail.body) || githubMarkdown(detail.body)) : '';
@@ -524,7 +522,7 @@ function sessionContextInner(ctx, status) {
 // --- The terminal header's breadcrumb ---
 
 const SESSION_CONTEXT_ICONS = {
-  project: () => PICONS.folder(11), track: () => PICONS.branch(11), plan: () => PICONS.check(11),
+  project: () => PICONS.folder(11), plan: () => PICONS.check(11),
   pr: () => '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="m13 3-3 3 3 3"/></svg>',
   issue: () => '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>',
   ticket: () => '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H8l-4 4z"/></svg>',
@@ -559,9 +557,9 @@ function renderSessionContextHeader() {
   // When the breadcrumb already names the origin, the button just says Back.
   const named = origin && contexts.some(c => c.label === origin.label);
   const back = origin && !split ? `<button type="button" class="ctx-back" data-ctx-back="1" title="${escapeHtml(`Back to ${origin.label}, where this session was opened`).replace(/"/g, '&quot;')}">${PICONS.back(11)}<span>${escapeHtml(named ? 'Back' : origin.label)}</span></button>` : '';
-  // Project › track › what it works on · and more: a chevron down the hierarchy, a dot between the rest.
+  // Project › what it works on · and more: a chevron after the project, a dot between the rest.
   const crumbs = contexts.map((c, i) => {
-    const sep = !i ? '' : (['project', 'track'].includes(contexts[i - 1].kind) ? '<span class="ctx-sep">›</span>' : '<span class="ctx-sep">·</span>');
+    const sep = !i ? '' : (contexts[i - 1].kind === 'project' ? '<span class="ctx-sep">›</span>' : '<span class="ctx-sep">·</span>');
     const status = sessionContextStatus(c);
     const title = status ? `${c.title}\n${status.text}` : c.title;
     return `${sep}<button type="button" class="ctx-crumb ctx-crumb--${c.kind}${status ? ` ctx-state--${status.state}` : ''}${c.detected ? ' ctx-crumb--detected' : ''}" data-ctx="${i}" title="${escapeHtml(title).replace(/"/g, '&quot;')}">${sessionContextInner(c, status)}</button>`;

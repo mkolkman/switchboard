@@ -83,7 +83,7 @@ let showRunningOnly = false;
 let showTodayOnly = false;
 let cachedProjects = [];
 let cachedAllProjects = [];
-// Projects tab (projects-view.js): project → tracks → sessions, from
+// Projects tab (projects-view.js): project → sessions, from
 // getProjectTree. Same session objects as the two caches above (dedupTree).
 let cachedProjectTree = { projects: [] };    // archived excluded
 let cachedProjectTreeAll = { projects: [] }; // everything
@@ -223,7 +223,7 @@ function rekeySessionActivity(oldId, newId) {
 }
 
 // A session row can be on screen twice: under its folder in the Sessions tab
-// and in a project's pane or track card. State classes go to every copy.
+// and in a project's pane or sessions card. State classes go to every copy.
 function forEachSessionItem(sessionId, fn) {
   document.querySelectorAll(`.session-item[data-session-id="${sessionId}"], .pane-session[data-session-id="${sessionId}"]`).forEach(fn);
 }
@@ -1053,7 +1053,7 @@ async function loadProjects({ resort = false, reason = 'project' } = {}) {
   // Track active plain terminals in pendingSessions/sessionMap (data now comes from backend)
   try {
     const activeTerminals = await window.api.getActiveTerminals();
-    for (const { sessionId, projectPath, projectId, trackId } of activeTerminals) {
+    for (const { sessionId, projectPath, projectId } of activeTerminals) {
       if (pendingSessions.has(sessionId)) continue; // already tracked
       const folder = encodeProjectPath(projectPath);
       // Find the session object already injected by the backend
@@ -1066,7 +1066,6 @@ async function loadProjects({ resort = false, reason = 'project' } = {}) {
       // An attached folder can sit outside the project's root, so cwd alone is
       // not enough to restore where this ephemeral terminal belongs.
       if (projectId) session.projectId = projectId;
-      if (trackId) session.trackId = trackId;
       // Also adopts terminals that were already running when this persistence
       // feature was introduced; the next restart should retain them too.
       persistTerminalSession(session);
@@ -1077,7 +1076,7 @@ async function loadProjects({ resort = false, reason = 'project' } = {}) {
 
   // A full app exit kills raw PTYs, so the main-process active list is empty on
   // the next launch. Their durable descriptors still put them back in the same
-  // project/track and starting folder.
+  // project and starting folder.
   injectPersistedTerminalRows();
 
   // Project roots and attached folders get their tasks too, even with no
@@ -1188,14 +1187,12 @@ async function launchNewSession(project, sessionOptions, { focus = true } = {}) 
     created: new Date().toISOString(),
   };
 
-  // Launched from a project (or one of its tracks): main files the session
-  // there when it spawns, and the Projects tab shows it right away.
+  // Launched from a project: main files the session there when it spawns,
+  // and the Projects tab shows it right away.
   const options = { ...(sessionOptions || {}) };
   if (project.projectId) {
     options.projectId = project.projectId;
-    if (project.trackId) options.trackId = project.trackId;
     session.projectId = project.projectId;
-    session.trackId = project.trackId || null;
   }
   // Started by a scheduled task: the row shows the chip from the first
   // moment, not only once the DB has the link (main records it on spawn).

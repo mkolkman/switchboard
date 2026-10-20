@@ -63,7 +63,7 @@ Turn either CLI off under **CLI Agents** in Settings. A switched-off CLI is not 
 - **IDE emulation** (Claude only) — Review and edit Claude's proposed diffs in a side panel before they land.
 - **Projects** — Group work by what it is, not where it lives: a folder on disk, a brief the agent reads, a plan, a todo list, and the sessions filed under it.
 - **Project tasks and server logs** — Run `.vscode/tasks.json` commands and keep their logs beside your sessions.
-- **Scheduled tasks** — Start a session with a prompt on a timer, in a project, a track, or any folder.
+- **Scheduled tasks** — Start a session with a prompt on a timer, in a project or any folder.
 - **Plans and memory** (Claude only) — Browse and edit plan files and `CLAUDE.md` in one place.
 - **Activity stats** — Heatmap of your coding activity across all projects.
 
@@ -92,7 +92,7 @@ Schedules use the same CLI-specific configuration form as **New Session → Conf
 
 Legacy schedule imports keep permission mode, allowed tools, additional directories, appended system instructions, and the model, with the old runner's defaults saved explicitly. Budget is intentionally omitted, and effort is left unset. Successfully imported schedules are left alone on later scans.
 
-For Project View schedules, defaults come from the track's starting folder, then the project's default starting folder, then the Switchboard project folder. The schedule dialog shows the resolved folder. Attached project folders are supplied automatically; additional directories in the form are optional extras.
+For Project View schedules, defaults come from the project's default starting folder, then the Switchboard project folder. The schedule dialog shows the resolved folder. Attached project folders are supplied automatically; additional directories in the form are optional extras.
 
 ### Status notifications
 
@@ -135,7 +135,6 @@ The Sessions tab groups sessions by the folder they run in. The **Projects** tab
 | | What it is |
 |---|---|
 | **Project** | A piece of work with a folder on disk. Everything else about it is optional. |
-| **Track** | A line of effort inside a project, with its own sessions. Optional. |
 | **Session** | A session as it is today, plus the project it belongs to. |
 | **Folder** | What the Sessions tab shows: a path on disk. A project can attach any number. |
 
@@ -156,7 +155,7 @@ None of these is read at the start of a session, only when the plan or the todos
 
 ### Where sessions start
 
-Sessions start in the project folder by default. A project or a track can choose an attached folder instead. Wherever a project session starts, Switchboard passes the project folder and every attached folder to the CLI as extra directories, so the agent can read and edit all of them.
+Sessions start in the project folder by default. A project can choose an attached folder instead. Wherever a project session starts, Switchboard passes the project folder and every attached folder to the CLI as extra directories, so the agent can read and edit all of them.
 
 The two CLIs handle this differently:
 
@@ -165,25 +164,24 @@ The two CLIs handle this differently:
 
 ### Overview and working mode
 
-The Projects tab lists projects only. Selecting one opens its **Overview**: the plan's progress, open todos, the newest files in the project folder, attached folders, files you've dropped in, and one card per track with its latest sessions. A file opens in the **Files** tab, which browses the whole project folder in the same viewer.
+The Projects tab lists projects only. Selecting one opens its **Overview**: the plan's progress, open todos, the newest files in the project folder, attached folders, files you've dropped in, and a card with its latest sessions. A file opens in the **Files** tab, which browses the whole project folder in the same viewer.
 
 Opening a session from there switches to working mode: a slim project strip on top, a session list beside the terminal, and the plan and todo counts at the foot of the list.
 
 ![Project View session workspace](build/project-view-session.png)
 
-- **Grouping** — Group the list by **Time** (today, yesterday, this week...), **Track**, or **State** (needs input, running, idle).
-- **Rows** — Each row shows the title, the track, the CLI, its age, and message count. Right-click a project, track, or session for its actions.
+- **Grouping** — Group the list by **Time** (today, yesterday, this week...) or **State** (needs input, running, idle).
+- **Rows** — Each row shows the title, the CLI, its age, and message count. Right-click a project or session for its actions.
 - **Ordering** — Projects and sessions are ordered by their last event: a new session started, a turn finished, or the CLI asked for something. Opening or resuming a session does not move it, so the list holds still under a click. A session that is still working does not move while its transcript grows, so two working sessions hold their places instead of leapfrogging.
-- **Archived** — Archived sessions sit in a closed "Archived" line at the foot of the list and under each track card. One click opens them, dimmed, in place.
+- **Archived** — Archived sessions sit in a closed "Archived" line at the foot of the list and under the sessions card. One click opens them, dimmed, in place.
 
-The project's **Settings** tab is a list of rows: the name, the start folder, folders, the worktree branch, and the tracks. Changes save as you make them. Folder rows show the branch each folder is on, read from git when the page opens, and "modified" when there are uncommitted changes.
+The project's **Settings** tab is a list of rows: the name, the start folder, folders, and the worktree branch. Changes save as you make them. Folder rows show the branch each folder is on, read from git when the page opens, and "modified" when there are uncommitted changes.
 
 ### Creating and organizing projects
 
 ![Project View new session menu](build/project-view-new-session-menu.png)
 
-- **New project** — Name it, pick a template, and attach the folders it works in. The dialog shows what Create will make: the project folder and its files, each worktree on its branch, and the tracks the template adds. Sessions started from the overview are filed under the project and still show under their folder in the Sessions tab.
-- **Tracks** — Optional lines of work inside a project, each with its own sessions, start folder, and CLI. A track card's "Resume latest" reopens its most recent session. "New" starts one there.
+- **New project** — Name it, pick a template, and attach the folders it works in. The dialog shows what Create will make: the project folder and its files, and each worktree on its branch. Sessions started from the overview are filed under the project and still show under their folder in the Sessions tab.
 - **Move to project** — Any session row has a move action. Nothing is filed until you launch it from a project or move it there.
 - **Mark as done** — Done projects drop to the bottom, collapsed. Removing a project only forgets it. The folder and the sessions stay on disk.
 - **Snooze** — Right-click a project and choose **Snooze**: in 1 hour, in 3 hours, this evening, tomorrow, next week, or a time you pick. It moves to a collapsed **Snoozed** section below Active, and its sessions keep running. It comes back at that time, or sooner if a session needs your input, marked with a violet dot until you open it. **Wake now** brings it back early. A project waiting on your input can't be snoozed.

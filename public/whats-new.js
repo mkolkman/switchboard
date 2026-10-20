@@ -3,8 +3,8 @@
   const SLIDES = [
     {
       src: 'project-view/overview.png',
-      alt: 'Project View overview with tracks, sessions, plan progress, todos, and attached folders',
-      caption: 'Keep every track, session, plan, and follow-up together.',
+      alt: 'Project View overview with sessions, plan progress, todos, and attached folders',
+      caption: 'Keep every session, plan, and follow-up together.',
     },
     {
       src: 'project-view/session.png',

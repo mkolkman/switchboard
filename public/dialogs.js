@@ -112,7 +112,6 @@ async function openRawTerminalSession(session, { show = true } = {}) {
   const result = await window.api.openTerminal(sessionId, projectPath, true, {
     type: 'terminal',
     projectId: session.projectId || null,
-    trackId: session.trackId || null,
   });
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
@@ -139,12 +138,9 @@ async function launchTerminalSession(project) {
     created: new Date().toISOString(),
     type: 'terminal',
   };
-  // Started from a project or one of its tracks: the terminal belongs there,
-  // so it shows in the project's list and not only in its own window.
-  if (project.projectId) {
-    session.projectId = project.projectId;
-    session.trackId = project.trackId || null;
-  }
+  // Started from a project: the terminal belongs there, so it shows in the
+  // project's list and not only in its own window.
+  if (project.projectId) session.projectId = project.projectId;
 
   // Track as pending
   const { sessionId, projectPath } = session;

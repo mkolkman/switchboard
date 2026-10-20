@@ -145,7 +145,7 @@ async function startWayfinderSession(project, result, ticket) {
     rememberClonePick(result.repo, info.root);
     clone = info.root;
   }
-  const target = { ...launchTargetFor(project, null), projectPath: clone };
+  const target = { ...launchTargetFor(project), projectPath: clone };
   const options = await resolveDefaultSessionOptions(target);
   options.runtime = 'claude';
   options.initialPrompt = wayfinderPrompt(result, ticket);

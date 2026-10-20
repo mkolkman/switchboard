@@ -5,8 +5,8 @@
 // ticks once a minute and sends 'schedule-due' with everything resolved; the
 // session it starts is an ordinary one (launchNewSession) that carries the
 // schedule's id so its row can show a clock chip. A schedule lives in one
-// place: with a projectId it is listed in the project view under its track,
-// without one it is a folder schedule on the Sessions tab, under `cwd`.
+// place: with a projectId it is listed in the project view, without one it
+// is a folder schedule on the Sessions tab, under `cwd`.
 //
 // Depends on globals: launchNewSession, resolveDefaultSessionOptions,
 // showContextMenu, loadProjects, escapeHtml, ICONS, PICONS, shortProjectPath.
@@ -43,10 +43,6 @@ function schedulesForProject(project) {
 function schedulePauseLabel(schedule, project = null) {
   if (!schedule.enabled) return 'off';
   if (project?.status === 'done') return 'paused: project done';
-  if (schedule.trackId && project) {
-    const track = (project.tracks || []).find(t => t.id === schedule.trackId);
-    if (track?.status === 'done') return 'paused: track done';
-  }
   return '';
 }
 
@@ -108,7 +104,7 @@ async function refreshSchedules() {
 
 /**
  * Menu rows for a list of schedules, each with its own submenu, then a row to
- * add one. `place` says where a new one goes: { projectId, trackId } or { cwd }.
+ * add one. `place` says where a new one goes: { projectId } or { cwd }.
  */
 function scheduleMenuItems(schedules, place, project = null) {
   const items = [];
@@ -144,23 +140,11 @@ function showFolderScheduleMenu(projectPath, anchor) {
   showContextMenu(scheduleMenuItems(schedules, { cwd: projectPath }), { anchor });
 }
 
-/** The project view's Schedules button: rows grouped by track. */
+/** The project view's Schedules button: straight to the dialog when it has none, else the list. */
 function showProjectScheduleMenu(project, anchor) {
   const schedules = schedulesForProject(project);
-  if (!schedules.length) { showScheduleDialog({ projectId: project.id, trackId: null, project }); return; }
-  const items = [];
-  const groups = [{ track: null, list: schedules.filter(s => !s.trackId) }];
-  for (const t of project.tracks || []) groups.push({ track: t, list: schedules.filter(s => s.trackId === t.id) });
-  for (const g of groups) {
-    if (!g.list.length) continue;
-    const rows = scheduleMenuItems(g.list, { projectId: project.id, trackId: g.track?.id || null }, project);
-    // One heading per track, then its rows without the generic one.
-    items.push({ head: g.track ? g.track.name : 'General' });
-    items.push(...rows.filter(r => !r.head && !(r.label && r.label.startsWith('New scheduled'))).filter(r => !r.sep));
-  }
-  items.push({ sep: true });
-  items.push({ label: 'New scheduled task…', icon: PICONS.plus(13), onClick: () => showScheduleDialog({ projectId: project.id, trackId: null, project }) });
-  showContextMenu(items, { anchor });
+  if (!schedules.length) { showScheduleDialog({ projectId: project.id, project }); return; }
+  showContextMenu(scheduleMenuItems(schedules, { projectId: project.id }, project), { anchor });
 }
 
 /** Tint and badge for a clock button, from how many schedules it has. */
@@ -200,13 +184,12 @@ function pad2(n) { return String(n).padStart(2, '0'); }
 
 /**
  * Create or edit a schedule. `schedule` set means edit; otherwise `place`
- * says where the new one goes: { projectId, trackId } or { cwd }. `project`
- * is the tree node, for the track picker and the pause label.
+ * says where the new one goes: { projectId } or { cwd }. `project` is the
+ * tree node, for the title and the pause label.
  */
-function showScheduleDialog({ schedule = null, projectId = null, trackId = null, cwd = null, project = null } = {}) {
+function showScheduleDialog({ schedule = null, projectId = null, cwd = null, project = null } = {}) {
   const editing = !!schedule;
   const isProject = editing ? !!schedule.projectId : !!projectId;
-  const tracks = (project?.tracks || []).filter(t => t.status !== 'done' || t.id === schedule?.trackId);
   const fromFile = !!schedule?.sourceFile;
   const configs = SessionConfig.normalizeByCli(schedule?.sessionConfig || {});
   const state = {
@@ -234,16 +217,6 @@ function showScheduleDialog({ schedule = null, projectId = null, trackId = null,
       <div class="settings-field-info"><span class="settings-label">Name</span></div>
       <div class="settings-field-control"><input type="text" class="settings-input" id="sd-name" placeholder="e.g. Morning digest" value="${escapeHtml(schedule?.name || '')}"></div>
     </div>
-    ${isProject ? `
-    <div class="settings-field">
-      <div class="settings-field-info"><span class="settings-label">Track</span><div class="settings-description">Sessions it starts land here and run where the track's sessions start</div></div>
-      <div class="settings-field-control">
-        <select class="settings-select" id="sd-track">
-          <option value="">General</option>
-          ${tracks.map(t => `<option value="${escapeHtml(t.id)}" ${(editing ? schedule.trackId : trackId) === t.id ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
-        </select>
-      </div>
-    </div>` : ''}
     <div class="settings-field settings-field-wide">
       <div class="settings-field-info"><span class="settings-label">When</span><div class="settings-description" id="sd-when-desc"></div></div>
       <div class="settings-field-control sd-when">
@@ -309,13 +282,12 @@ function showScheduleDialog({ schedule = null, projectId = null, trackId = null,
   let configRequest = null;
   let configReady = false;
 
-  // The CLI list comes from the harness registry, like the track row's does,
-  // so a CLI added later appears here and one switched off in settings does
-  // not. A schedule already naming a disabled one keeps it, visibly.
+  // The CLI list comes from the harness registry, so a CLI added later
+  // appears here and one switched off in settings does not. A schedule already naming a disabled one keeps it, visibly.
   const cliSel = dialog.querySelector('#sd-cli');
   const renderCli = (harnesses) => {
     const selected = cliSel.options.length ? cliSel.value : (schedule?.cli || '');
-    const options = [{ id: '', label: isProject ? 'Track default' : 'Default (Claude)' }, ...harnesses.map(h => ({ id: h.id, label: h.label }))];
+    const options = [{ id: '', label: 'Default (Claude)' }, ...harnesses.map(h => ({ id: h.id, label: h.label }))];
     if (schedule?.cli && !options.some(o => o.id === schedule.cli)) options.push({ id: schedule.cli, label: `${schedule.cli} (off in settings)` });
     cliSel.replaceChildren();
     for (const opt of options) {
@@ -355,7 +327,7 @@ function showScheduleDialog({ schedule = null, projectId = null, trackId = null,
     defaultsFolder.textContent = 'Loading folder defaults…';
     try {
       const place = isProject
-        ? { projectId: editing ? schedule.projectId : projectId, trackId: dialog.querySelector('#sd-track').value || null }
+        ? { projectId: editing ? schedule.projectId : projectId }
         : { cwd: editing ? schedule.cwd : cwd };
       const context = await window.api.getScheduleContext({ ...place, cli: cliSel.value || null });
       if (version !== configVersion || !dialog.isConnected) return;
@@ -380,8 +352,6 @@ function showScheduleDialog({ schedule = null, projectId = null, trackId = null,
   }
   const reloadConfiguration = () => { configRequest = refreshConfiguration(); };
   cliSel.onchange = reloadConfiguration;
-  const trackSelect = dialog.querySelector('#sd-track');
-  if (trackSelect) trackSelect.onchange = reloadConfiguration;
   configMode.onchange = () => {
     if (configMode.value === 'defaults') delete configs[configRuntime];
     renderConfiguration();
@@ -449,7 +419,6 @@ function showScheduleDialog({ schedule = null, projectId = null, trackId = null,
       enabled: dialog.querySelector('#sd-enabled').checked,
       catchUp: dialog.querySelector('#sd-catchup').checked,
     };
-    if (isProject) patch.trackId = dialog.querySelector('#sd-track').value || null;
     let result;
     if (editing) result = await window.api.updateSchedule(schedule.id, patch);
     else result = await window.api.createSchedule(isProject ? { ...patch, projectId } : { ...patch, cwd });

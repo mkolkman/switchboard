@@ -180,10 +180,10 @@ function githubPhasePrompt(source, phase) {
 }
 
 /** Launch Claude or Codex on an item, in the local checkout of its repository. */
-async function launchGithubItem(project, track, runtime, { repo, prompt, itemText }) {
+async function launchGithubItem(project, runtime, { repo, prompt, itemText }) {
   const clones = githubClones.get(project.id) || {};
   const clone = repo ? clones[repo.toLowerCase()] : null;
-  const base = launchTargetFor(project, track);
+  const base = launchTargetFor(project);
   const target = clone ? { ...base, projectPath: clone } : base;
   const options = await resolveDefaultSessionOptions(target);
   options.runtime = runtime;
@@ -196,9 +196,9 @@ async function launchGithubItem(project, track, runtime, { repo, prompt, itemTex
 }
 
 function showGithubStartMenu(project, spec, anchor) {
-  const rows = (track) => [
-    { label: 'Claude', icon: ICONS.claude(14), onClick: () => launchGithubItem(project, track, 'claude', spec) },
-    { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: () => launchGithubItem(project, track, 'codex', spec) },
+  const rows = [
+    { label: 'Claude', icon: ICONS.claude(14), onClick: () => launchGithubItem(project, 'claude', spec) },
+    { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: () => launchGithubItem(project, 'codex', spec) },
   ];
   const clone = spec.repo ? (githubClones.get(project.id) || {})[spec.repo.toLowerCase()] : null;
   // With an open PR the work is done: the PR's sessions come first, and
@@ -213,12 +213,7 @@ function showGithubStartMenu(project, spec, anchor) {
     else items.push({ label: `PR ${number}`, icon: PICONS.list(13), submenu: prSessionMenuRows(project, key, { itemKey: spec.itemText }) });
   }
   if (prs.length) items.push({ sep: true });
-  items.push({ head: prs.length ? 'Implement again' : clone ? `Start in ${pathBasename(clone)}` : 'Start a session on this' }, ...rows(null));
-  const tracks = (project.tracks || []).filter(t => t.status !== 'done');
-  if (tracks.length) {
-    items.push({ sep: true }, { head: 'In a track' });
-    for (const t of tracks) items.push({ label: t.name, icon: PICONS.list(13), submenu: rows(t) });
-  }
+  items.push({ head: prs.length ? 'Implement again' : clone ? `Start in ${pathBasename(clone)}` : 'Start a session on this' }, ...rows);
   showContextMenu(items, { anchor });
 }
 

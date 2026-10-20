@@ -9,8 +9,8 @@ const source = fs.readFileSync(path.join(__dirname, '../public/projects-view.js'
 const controller = source.slice(source.indexOf('function updateProjectSessionSearch('), source.indexOf('function buildSessionPaneList('));
 
 function setup() {
-  const project = { id: 'project', sessions: [{ sessionId: 'active' }], tracks: [] };
-  const full = { ...project, tracks: [{ sessions: [{ sessionId: 'archived', archived: 1 }] }] };
+  const project = { id: 'project', sessions: [{ sessionId: 'active' }] };
+  const full = { ...project, sessions: [...project.sessions, { sessionId: 'archived', archived: 1 }] };
   const state = { query: 'needle', displayQuery: '', titlesOnly: false, version: 0, ids: new Set() };
   const timers = new Map();
   const calls = [];
@@ -22,7 +22,7 @@ function setup() {
     selectedProject: () => project,
     projectPanes: { querySelector: () => null },
     cachedProjectTreeAll: { projects: [full, { id: 'other', sessions: [{ sessionId: 'outside' }] }] },
-    projectSessionsAll: p => [...p.sessions, ...p.tracks.flatMap(t => t.sessions)],
+    projectSessionsAll: p => [...p.sessions],
     window: { api: { searchSessionIds: (query, ids) => new Promise(resolve => calls.push({ query, ids, resolve })) } },
   });
   vm.runInContext(controller, context);

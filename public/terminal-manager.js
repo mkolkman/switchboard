@@ -384,8 +384,6 @@ function persistedTerminalRecord(session) {
     firstPrompt: '',
     projectPath: String(session.projectPath),
     projectId: session.projectId ? String(session.projectId) : null,
-    trackId: session.trackId ? String(session.trackId) : null,
-    formerTrackName: session.formerTrackName || null,
     name: null,
     starred: 0,
     archived: 0,

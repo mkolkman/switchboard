@@ -41,7 +41,7 @@ const githubTabStates = new Map();
 // The GitHub tab (github-view.js) shows the same PR panel and review outside
 // any project. It is a pseudo-project to the code below, drawn in its own
 // viewer; everything else looks things up in the window it was drawn in.
-const GITHUB_VIEW_PROJECT = { id: '__github__', name: 'GitHub', isGithubView: true, githubRefs: [], folders: [], tracks: [], root: null };
+const GITHUB_VIEW_PROJECT = { id: '__github__', name: 'GitHub', isGithubView: true, githubRefs: [], folders: [], root: null };
 
 function githubRoot(project) {
   return project?.isGithubView ? document.getElementById('github-viewer') : projectViewer;
@@ -1182,7 +1182,7 @@ async function startPrSession(project, pr, state, { prompt, label, focus }) {
   }
   // Filed under this project, started in the repository's own checkout.
   // From the GitHub tab there is no project: it is a plain session there.
-  const target = project.isGithubView ? { projectPath: clone } : { ...launchTargetFor(project, null), projectPath: clone };
+  const target = project.isGithubView ? { projectPath: clone } : { ...launchTargetFor(project), projectPath: clone };
   const options = await resolveDefaultSessionOptions(target);
   options.runtime = 'claude';
   options.initialPrompt = prompt;

@@ -5216,21 +5216,14 @@ body.fp-resizing webview { pointer-events: none; }
 .ws-ghost--sm { height: 22px; padding: 0 7px; font-size: 11px; }
 .ws-ghost--muted { color: #6a6a80; }
 
-/* One card per row: General first, then the tracks in order. */
+/* The sessions card, one per row. */
 .ws-cards {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.ws-hint {
-  grid-column: 1 / -1;
-  font-size: 12px;
-  color: #7a7a90;
-  padding: 4px 2px;
-}
-
-/* ---- Track cards ---- */
+/* ---- The sessions card ---- */
 .tcard {
   background: #18181f;
   border: 1px solid rgba(255,255,255,0.06);
@@ -5238,22 +5231,6 @@ body.fp-resizing webview { pointer-events: none; }
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.tcard--general { border-color: rgba(255,255,255,0.09); }
-
-.tcard--done { opacity: 0.6; }
-.tcard--done:hover { opacity: 1; }
-
-/* A done track shows only its heading until the heading is clicked. */
-.tcard-h--toggle { cursor: pointer; user-select: none; }
-.tcard--collapsed .tcard-h { border-bottom: none; border-radius: 9px; }
-.tcard-chevron {
-  display: inline-flex;
-  align-items: center;
-  color: #6a6a80;
-  flex: none;
-  margin-right: -2px;
 }
 
 .tcard-h {
@@ -5291,22 +5268,6 @@ body.fp-resizing webview { pointer-events: none; }
 }
 
 .tcard-meta.mono { font-family: 'SF Mono', 'Fira Code', Menlo, monospace; font-size: 10.5px; }
-
-.tcard-more {
-  background: none;
-  border: none;
-  color: #6a6a80;
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.12s;
-}
-
-.tcard-more:hover { background: rgba(255,255,255,0.06); color: #c0c0d8; }
 
 .tcard .pane-session { margin: 0 6px; }
 
@@ -6134,10 +6095,7 @@ body.fp-resizing webview { pointer-events: none; }
   user-select: none;
 }
 
-.pane-sec.done { opacity: 0.6; }
 .pane-sec-count { font-weight: 500; color: #6a6a80; }
-.pane-sec-plus { opacity: 0; width: 18px; height: 18px; }
-.pane-sec:hover .pane-sec-plus { opacity: 1; }
 
 .pane-session {
   display: flex;
@@ -6351,7 +6309,7 @@ body.fp-resizing webview { pointer-events: none; }
 .ws-chip--cli { padding: 0 5px; }
 .ws-chip--cli.codex { color: #10a37f; }
 
-/* Track card rows: a hairline between sessions, so the card reads as rows instead of one block of text. */
+/* Sessions card rows: a hairline between sessions, so the card reads as rows instead of one block of text. */
 .tcard .tcard-session { margin: 0; padding: 9px 14px; border-radius: 0; position: relative; }
 .tcard .tcard-session + .tcard-session::before {
   content: '';
@@ -7085,29 +7043,17 @@ body.fp-resizing webview { pointer-events: none; }
 .ws-switch-input:checked + .ws-switch::after { transform: translateX(11px); }
 .ws-switch-input:focus-visible + .ws-switch { outline: 2px solid rgba(120,130,255,0.5); outline-offset: 2px; }
 
-.ws-trow {
-  display: grid;
-  grid-template-columns: auto minmax(120px, 1fr) minmax(150px, 1fr) minmax(110px, auto) auto auto;
-  gap: 8px;
-  align-items: center;
-}
-.ws-trow.done { opacity: 0.6; }
-.ws-trow-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.ws-trow .ws-cwd .ws-label { display: none; }
-.ws-trow .ws-input, .ws-trow .ws-select { height: 26px; font-size: 12px; }
-.ws-trow-field { min-width: 0; }
-
 .ws-foot { display: flex; align-items: center; gap: 14px; padding: 22px 2px 0; font-size: 12px; }
 .ws-link-danger { background: none; border: none; padding: 0; color: #e05070; font-size: 12px; cursor: pointer; font-family: inherit; }
 .ws-link-danger:hover { color: #f07090; text-decoration: underline; }
 .ws-foot-note { margin-left: auto; font-size: 11px; color: #5e5e74; }
 
-/* Pane and track card rows carry the Sessions tab's states: green dot while a
+/* Pane and sessions card rows carry the Sessions tab's states: green dot while a
    CLI is alive, blue text while it works or has an unread answer, orange when
    it needs you. Same colours and motion as the Sessions tab. */
 .pane-session.running .pane-dot { display: block; background: #3ecf5a; box-shadow: 0 0 5px rgba(62,207,90,0.5); }
 /* The spinner ring is wider than the 6px dot it replaces, so this state gets a
-   box the ring actually fits in. Drawn outside the box it crowded the track tag
+   box the ring actually fits in. Drawn outside the box it crowded the tag
    beside it and bled into the row's left padding. */
 .pane-session.cli-busy:not(.needs-attention) .pane-dot {
   display: block;
@@ -7176,8 +7122,8 @@ body.fp-resizing webview { pointer-events: none; }
 .add-project-add-btn:disabled { opacity: 0.45; cursor: default; }
 .add-project-add-btn:disabled:hover { background: rgba(120,130,255,0.15); }
 
-/* Archived sessions: a closed line at the foot of the pane and under a track
-   card's foot. One click opens the dimmed rows in place. */
+/* Archived sessions: a closed line at the foot of the pane and under the
+   sessions card's foot. One click opens the dimmed rows in place. */
 .pane-scroll { display: flex; flex-direction: column; }
 .pane-scroll > * { flex-shrink: 0; }
 /* Sits at the foot when the list is short, after the list when it is long; the gap above the hairline is padding so it never collapses. */

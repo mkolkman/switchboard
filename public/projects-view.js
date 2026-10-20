@@ -3,12 +3,12 @@
 // The Projects tab is not another session tree. The sidebar lists projects,
 // nothing else. Selecting one opens its workspace in the main area:
 //
-//   Overview  — header, then tracks as cards beside the plan, todos
+//   Overview  — header, then the sessions as a card beside the plan, todos
 //               and folders. Settings is a second tab of the same page.
 //   Working   — opening one of its sessions keeps you in the project: a slim
-//               strip on top, then tracks | sessions | terminal side by side.
+//               strip on top, then sessions | terminal side by side.
 //
-// Right-click works on a project, a track and a session.
+// Right-click works on a project and a session.
 //
 // Depends on globals from app.js: projectsContent, cachedProjectTree,
 // cachedProjectTreeAll, showArchived, searchMatchIds, searchInput,
@@ -34,7 +34,6 @@ const projectsUi = {
   // Each project owns its runtime-only navigation state. Nothing here is
   // persisted: projects start on their Overview tab after an app restart.
   navigationByProject: new Map(), // projectId → { tab, mode, sessionId }
-  trackByProject: (() => { try { return JSON.parse(sessionStorage.getItem('projects.track') || '{}'); } catch { return {}; } })(),
   groupBy: (() => { try { return JSON.parse(sessionStorage.getItem('projects.groupBy') || '{}'); } catch { return {}; } })(),
   expandedLists: {},
   sessionSearchByProject: new Map(),
@@ -42,13 +41,10 @@ const projectsUi = {
   working: false,
   doneOpen: false,
   snoozedOpen: false,
-  // `${projectId}:${trackKey}` → true while a done track's card is expanded.
-  // Done cards collapse to their heading; this is the user peeking inside.
-  doneCardsOpen: {},
   // Ids of the projects the list last showed as snoozed. The session poll
   // compares against it to notice a snoozed project raising its hand.
   snoozedKey: '',
-  // 'pane:<projectId>' or 'card:<projectId>:<trackKey>' → true while its archived list is open
+  // 'pane:<projectId>' or 'card:<projectId>' → true while its archived list is open
   archivedOpen: (() => { try { return JSON.parse(sessionStorage.getItem('projects.archivedOpen') || '{}'); } catch { return {}; } })(),
   files: new Map(), // `${projectId}:${name}` → { content, at }
   git: new Map(), // projectId → { at, byPath } from get-project-git-status
@@ -167,7 +163,6 @@ function saveProjectsUi() {
   else sessionStorage.removeItem('projects.selected');
   // Tab selection belongs to each project and intentionally resets on restart.
   sessionStorage.removeItem('projects.tab');
-  sessionStorage.setItem('projects.track', JSON.stringify(projectsUi.trackByProject));
   sessionStorage.setItem('projects.groupBy', JSON.stringify(projectsUi.groupBy));
   sessionStorage.setItem('projects.archivedOpen', JSON.stringify(projectsUi.archivedOpen));
 }
@@ -285,20 +280,16 @@ function selectedProject() {
 }
 
 /**
- * Archived sessions of a project, or of one of its tracks ('general' for
- * none). They come from the full tree, since the working tree leaves them out.
+ * Archived sessions of a project. They come from the full tree, since the
+ * working tree leaves them out.
  */
-function archivedSessionsOf(project, trackKey = null) {
+function archivedSessionsOf(project) {
   const full = (cachedProjectTreeAll?.projects || []).find(p => p.id === project.id) || project;
-  let list;
-  if (trackKey === null) list = [...(full.sessions || []), ...(full.tracks || []).flatMap(t => t.sessions || [])];
-  else if (trackKey === 'general') list = full.sessions || [];
-  else list = (full.tracks || []).find(t => t.id === trackKey)?.sessions || [];
-  return list.filter(s => s.archived).sort((a, b) => sessionEventTime(b) - sessionEventTime(a));
+  return (full.sessions || []).filter(s => s.archived).sort((a, b) => sessionEventTime(b) - sessionEventTime(a));
 }
 
 /** The closed-by-default "Archived · N" section: a hairline, a toggle line, and the dimmed rows when open. */
-function buildArchivedSection(project, sessions, key, { showTrack, rowClass }) {
+function buildArchivedSection(project, sessions, key, { rowClass }) {
   const wrap = document.createElement('div');
   wrap.className = 'archived-sec';
   const open = !!projectsUi.archivedOpen[key];
@@ -312,14 +303,12 @@ function buildArchivedSection(project, sessions, key, { showTrack, rowClass }) {
     refreshProjectViews({ reason: 'sessions' });
   };
   wrap.appendChild(toggle);
-  if (open) for (const s of sessions) wrap.appendChild(buildSessionRow(project, s, { showTrack, className: rowClass }));
+  if (open) for (const s of sessions) wrap.appendChild(buildSessionRow(project, s, { className: rowClass }));
   return wrap;
 }
 
 function projectSessionsAll(project) {
-  const all = [...(project.sessions || [])];
-  for (const track of project.tracks || []) all.push(...(track.sessions || []));
-  return all;
+  return [...(project.sessions || [])];
 }
 
 function pathBasename(p) {
@@ -377,16 +366,14 @@ function projectForSession(session) {
 // a pin, rename or exit changes every view at once.
 function dedupTree(tree) {
   for (const project of tree?.projects || []) {
-    const lists = [project.sessions, ...(project.tracks || []).map(t => t.sessions)];
-    for (const list of lists) {
-      for (let i = 0; i < list.length; i++) {
-        const s = list[i];
-        if (sessionMap.has(s.sessionId)) {
-          Object.assign(sessionMap.get(s.sessionId), s);
-          list[i] = sessionMap.get(s.sessionId);
-        } else {
-          sessionMap.set(s.sessionId, s);
-        }
+    const list = project.sessions;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (sessionMap.has(s.sessionId)) {
+        Object.assign(sessionMap.get(s.sessionId), s);
+        list[i] = sessionMap.get(s.sessionId);
+      } else {
+        sessionMap.set(s.sessionId, s);
       }
     }
   }
@@ -398,9 +385,7 @@ function injectPendingIntoTree(session) {
   for (const tree of [cachedProjectTree, cachedProjectTreeAll]) {
     const project = (tree?.projects || []).find(p => p.id === session.projectId);
     if (!project) continue;
-    const track = session.trackId ? (project.tracks || []).find(t => t.id === session.trackId) : null;
-    const list = track ? track.sessions : project.sessions;
-    if (!list.some(s => s.sessionId === session.sessionId)) list.unshift(session);
+    if (!project.sessions.some(s => s.sessionId === session.sessionId)) project.sessions.unshift(session);
   }
 }
 
@@ -408,9 +393,6 @@ function removeSessionFromTrees(sessionId) {
   for (const tree of [cachedProjectTree, cachedProjectTreeAll]) {
     for (const project of tree?.projects || []) {
       project.sessions = project.sessions.filter(s => s.sessionId !== sessionId);
-      for (const track of project.tracks || []) {
-        track.sessions = track.sessions.filter(s => s.sessionId !== sessionId);
-      }
     }
   }
 }
@@ -425,12 +407,11 @@ function treeTaskPaths(tree) {
   return [...paths];
 }
 
-/** The launch target a project's or track's New session button hands to the popover. */
-function launchTargetFor(project, track = null) {
+/** The launch target a project's New session button hands to the popover. */
+function launchTargetFor(project) {
   return {
-    projectPath: track?.cwd || project.defaultCwd || project.root,
+    projectPath: project.defaultCwd || project.root,
     projectId: project.id,
-    trackId: track?.id || null,
     projectName: project.name,
   };
 }
@@ -472,18 +453,6 @@ function scheduleButtonHtml(project, id, small = false) {
   return `<button type="button" class="ws-btn${small ? ' ws-btn--sm' : ''} ws-schedule-btn${cls}" id="${id}" title="${schedules.length ? `${schedules.length} scheduled task${schedules.length === 1 ? '' : 's'}` : 'New scheduled task'}">${PICONS.clock(small ? 11 : 12)}<span>Schedules</span><span class="ws-badge" ${schedules.length ? '' : 'style="display:none"'}>${schedules.length || ''}</span></button>`;
 }
 
-/** A track's +: straight to its CLI when it has one, else the shared Project View menu. */
-async function launchFromTrack(project, track, anchor) {
-  const target = launchTargetFor(project, track);
-  if (track?.cli) {
-    const options = await resolveDefaultSessionOptions(target);
-    options.runtime = track.cli;
-    launchNewSession(target, options);
-    return;
-  }
-  showNewSessionMenu(project, track, anchor);
-}
-
 // --- Identity ---
 
 function projectHue(id) {
@@ -507,22 +476,6 @@ function markHtml(project, size = 28, extraClass = '') {
   return `<span class="proj-mark ${extraClass}" style="width:${size}px;height:${size}px;font-size:${fontSize}px;background:hsla(${h},70%,60%,0.18);color:hsl(${h},80%,72%);">${escapeHtml(projectInitials(project.name))}</span>`;
 }
 
-/**
- * One color per track, spread around the wheel from the project's own hue so
- * two tracks in a project never share one. General is grey.
- */
-function trackColors(project, track) {
-  if (!track) return { fg: '#9090a8', bg: 'rgba(255,255,255,0.08)' };
-  const index = Math.max(0, (project.tracks || []).findIndex(t => t.id === track.id));
-  const h = Math.round((projectHue(project.id) + 40 + index * 137.5) % 360);
-  return { fg: `hsl(${h},78%,72%)`, bg: `hsla(${h},70%,60%,0.16)` };
-}
-
-function trackTagHtml(project, track) {
-  const c = trackColors(project, track);
-  return `<span class="pane-tag" style="color:${c.fg};background:${c.bg}">${escapeHtml(track ? track.name : 'General')}</span>`;
-}
-
 function cliLabel(session) {
   if (session.type === 'terminal') return 'Terminal';
   if (session.runtime === 'codex') return 'Codex';
@@ -543,8 +496,8 @@ async function toggleArchiveSession(session) {
   loadProjects();
 }
 
-/** The J row: title over one meta line (dot, track label, CLI, age, size). */
-function buildSessionRow(project, session, { showTrack = true, className = 'pane-session', hoverPreview = false } = {}) {
+/** The J row: title over one meta line (dot, CLI, age, size). */
+function buildSessionRow(project, session, { className = 'pane-session', hoverPreview = false } = {}) {
   const row = document.createElement('div');
   const id = session.sessionId;
   // The same state classes the Sessions tab uses, so the two rows read alike.
@@ -557,12 +510,8 @@ function buildSessionRow(project, session, { showTrack = true, className = 'pane
   row.className = className + (id === activeSessionId ? ' here' : '') + (stateClasses ? ' ' + stateClasses : '');
   row.dataset.sessionId = id;
   const state = sessionState(session);
-  const track = session.trackId ? (project.tracks || []).find(t => t.id === session.trackId) : null;
   const parts = [];
   parts.push(`<span class="session-status-dot pane-dot${state === 'running' ? ' running' : ''}${state === 'attention' ? ' needs-attention' : ''}"></span>`);
-  if (!track && session.formerTrackName) {
-    parts.push(`<span class="pane-tag" title="Previously in a deleted track">Formerly: ${escapeHtml(session.formerTrackName)}</span>`);
-  } else if (showTrack) parts.push(trackTagHtml(project, track));
   // Started by a scheduled task: which one, and when it fired.
   if (session.scheduleId && typeof scheduleChipHtml === 'function') parts.push(scheduleChipHtml(session));
   // The CLI mark, same as the status bar: the logo says which CLI, no word needed.
@@ -684,12 +633,9 @@ function updateProjectStatusDots() {
     const text = projectSubline(project);
     if (subline && subline.textContent !== text) subline.textContent = text;
   });
-  document.querySelectorAll('.tcard[data-track-key]').forEach(el => {
+  document.querySelectorAll('.tcard[data-project-id]').forEach(el => {
     const project = findTreeProject(el.dataset.projectId);
-    if (!project) return;
-    const key = el.dataset.trackKey;
-    const sessions = key === 'general' ? project.sessions : (project.tracks.find(t => t.id === key)?.sessions || []);
-    apply(el, sessions);
+    if (project) apply(el, project.sessions);
   });
   document.querySelectorAll('.pane-session[data-session-id], .tcard-session[data-session-id]').forEach(el => {
     const session = sessionMap.get(el.dataset.sessionId);
@@ -738,9 +684,7 @@ function projectSortTime(project) {
 function projectSubline(project) {
   const sessions = projectSessionsAll(project);
   const state = groupState(sessions);
-  const trackCount = (project.tracks || []).length;
-  const parts = [trackCount ? `${trackCount} track${trackCount === 1 ? '' : 's'}` : 'no tracks'];
-  parts.push(`${sessions.length} session${sessions.length === 1 ? '' : 's'}`);
+  const parts = [`${sessions.length} session${sessions.length === 1 ? '' : 's'}`];
   if (state === 'attention') parts.push('needs input');
   else if (projectSnoozed(project, Date.now())) parts.push(`wakes ${snoozeWakeDescription(project.snoozedUntil)}`);
   else if (projectWokeAt(project, Date.now())) parts.push(`woke ${formatDate(new Date(project.snoozedUntil))}`);
@@ -1048,15 +992,15 @@ function editingInPage() {
   return active.classList.contains('ws-todo-input') || active.classList.contains('ws-todo-edit');
 }
 
-/** The session ids and states a track card is currently showing. */
+/** The session ids and states the sessions card is currently showing. */
 function cardSessionKey(sessions) {
   return sessions.map(s => s.sessionId + ':' + sessionState(s)).join('|');
 }
 
 /**
  * Patch the project page for a session change: the header dot and task badge,
- * and any track card whose sessions moved. Everything else — the tracks
- * section, the side cards, the Plan tab, the Files tab — is left alone, in the
+ * and the sessions card when its sessions moved. Everything else (the side
+ * cards, the Plan tab, the Files tab) is left alone, in the
  * same spirit as applyGitStatus. updateProjectStatusDots does the dots
  * themselves right after this.
  */
@@ -1073,13 +1017,9 @@ function applySessionStatus(project) {
 
   // Only the Overview tab shows sessions; the others do not care.
   if (projectTab(project) !== 'overview') return;
-  for (const card of projectViewer.querySelectorAll('.tcard[data-track-key]')) {
-    const key = card.dataset.trackKey;
-    const track = key === 'general' ? null : (project.tracks || []).find(t => t.id === key);
-    if (key !== 'general' && !track) continue;
-    const next = cardSessionKey(sessionsOfTrack(project, key));
-    if (next === card.dataset.sessionKey) continue;
-    card.replaceWith(buildTrackCard(project, track));
+  const card = projectViewer.querySelector('.tcard[data-project-id]');
+  if (card && cardSessionKey(liveProjectSessions(project)) !== card.dataset.sessionKey) {
+    card.replaceWith(buildSessionsCard(project));
   }
 }
 
@@ -1115,10 +1055,7 @@ function enterWorking(project, session) {
     projectsUi.selectedProjectId = project.id;
     projectsContent.querySelectorAll('.proj-row').forEach(r => r.classList.toggle('selected', r.dataset.projectId === project.id));
   }
-  if (session) {
-    projectsUi.trackByProject[project.id] = session.trackId || 'general';
-    rememberProjectSession(project, session.sessionId);
-  }
+  if (session) rememberProjectSession(project, session.sessionId);
   saveProjectsUi();
   if (projectViewer) projectViewer.style.display = 'none';
   const wasWorking = projectsUi.working;
@@ -1329,7 +1266,7 @@ function renderOverview() {
   projectViewer.querySelectorAll('.ws-tab:not([disabled])').forEach(tab => {
     tab.onclick = () => { setProjectTab(project, tab.dataset.tab); renderOverview(); };
   });
-  projectViewer.querySelector('#ws-new').onclick = (e) => showNewSessionMenu(project, null, e.currentTarget);
+  projectViewer.querySelector('#ws-new').onclick = (e) => showNewSessionMenu(project, e.currentTarget);
   projectViewer.querySelector('#ws-more').onclick = (e) => showContextMenu(projectMenuItems(project, { fromPage: true }), { anchor: e.currentTarget });
   projectViewer.querySelector('#ws-tasks').onclick = (e) => showTaskPopover(taskPseudoProject(project), e.currentTarget);
   projectViewer.querySelector('#ws-schedules').onclick = (e) => showProjectScheduleMenu(project, e.currentTarget);
@@ -1347,27 +1284,14 @@ function renderPlanMeta(project) {
 }
 
 function renderOverviewBody(project, body) {
-  const tracks = project.tracks || [];
   body.innerHTML = `
     <div class="ws-grid">
       <div class="ws-main">
-        <div class="ws-section-head"><span class="ws-section-title">Tracks</span><span class="ws-flex"></span><button type="button" class="ws-ghost" id="ws-new-track">${PICONS.plus(12)}<span>New track</span></button></div>
         <div class="ws-cards" id="ws-cards"></div>
       </div>
       <div class="ws-side" id="ws-side"></div>
     </div>`;
-  const cards = body.querySelector('#ws-cards');
-  cards.appendChild(buildTrackCard(project, null));
-  // Finished tracks sit below the live ones, each keeping its own order.
-  const byDoneLast = [...tracks.filter(t => t.status !== 'done'), ...tracks.filter(t => t.status === 'done')];
-  for (const track of byDoneLast) cards.appendChild(buildTrackCard(project, track));
-  if (!tracks.length && !project.sessions.length) {
-    const hint = document.createElement('div');
-    hint.className = 'ws-hint';
-    hint.textContent = 'Start a session from the header, or add tracks for the lines of work in this project.';
-    cards.appendChild(hint);
-  }
-  body.querySelector('#ws-new-track').onclick = () => promptNewTrack(project);
+  body.querySelector('#ws-cards').appendChild(buildSessionsCard(project));
   renderSideCards(project, body.querySelector('#ws-side'));
   loadProjectFiles(project).then(() => {
     if (selectedProject()?.id !== project.id || projectTab(project) !== 'overview') return;
@@ -1377,66 +1301,41 @@ function renderOverviewBody(project, body) {
   });
 }
 
-function sessionsOfTrack(project, trackKey) {
-  const list = trackKey === 'general' || !trackKey ? project.sessions : (project.tracks.find(t => t.id === trackKey)?.sessions || []);
-  return list.filter(s => !s.archived).sort((a, b) => sessionEventTime(b) - sessionEventTime(a));
+/** The project's sessions that are not archived, latest event first. */
+function liveProjectSessions(project) {
+  return project.sessions.filter(s => !s.archived).sort((a, b) => sessionEventTime(b) - sessionEventTime(a));
 }
 
 function buildCardSessionRow(project, session) {
-  return buildSessionRow(project, session, { showTrack: false, className: 'pane-session tcard-session', hoverPreview: true });
+  return buildSessionRow(project, session, { className: 'pane-session tcard-session', hoverPreview: true });
 }
 
-function buildTrackCard(project, track) {
-  const key = track ? track.id : 'general';
-  const sessions = sessionsOfTrack(project, key);
-  const done = track?.status === 'done';
-  // A done track is finished work: just its heading, unless the user opens it.
-  const doneKey = `${project.id}:${key}`;
-  const collapsed = done && !projectsUi.doneCardsOpen[doneKey];
+function buildSessionsCard(project) {
+  const sessions = liveProjectSessions(project);
   const card = document.createElement('div');
-  card.className = 'tcard' + (track ? '' : ' tcard--general') + (done ? ' tcard--done' : '') + (collapsed ? ' tcard--collapsed' : '');
-  card.dataset.trackKey = key;
+  card.className = 'tcard';
   card.dataset.projectId = project.id;
   // What this card is showing, so a session-only refresh can tell whether it
   // has to be rebuilt at all (applySessionStatus).
   card.dataset.sessionKey = cardSessionKey(sessions);
   const state = groupState(sessions);
-  const cwdLabel = track?.cwd ? (isPathInside(track.cwd, project.root) ? (track.cwd === project.root ? 'project folder' : track.cwd.slice(project.root.length + 1)) : pathBasename(track.cwd)) : (project.defaultCwd ? pathBasename(project.defaultCwd) : 'project folder');
+  const cwdLabel = project.defaultCwd ? pathBasename(project.defaultCwd) : 'project folder';
   const head = document.createElement('div');
   head.className = 'tcard-h';
-  const colors = trackColors(project, track);
-  head.innerHTML = (done ? `<span class="tcard-chevron">${collapsed ? PICONS.chevronRight(10) : PICONS.chevronDown(10)}</span>` : '') +
-    stateDot(state) +
-    `<span class="tcard-name" style="color:${colors.fg}">${escapeHtml(track ? track.name : 'General')}${done ? '<span class="project-done-chip">done</span>' : ''}</span>` +
-    `<span class="tcard-meta mono">${track ? escapeHtml(cwdLabel) : 'sessions not in a track'}</span>` +
-    (collapsed && sessions.length ? `<span class="tcard-meta">${sessions.length} session${sessions.length === 1 ? '' : 's'}</span>` : '') +
+  head.innerHTML = stateDot(state) +
+    `<span class="tcard-name">Sessions</span>` +
+    `<span class="tcard-meta mono" title="Sessions start here">${escapeHtml(cwdLabel)}</span>` +
     `<span class="ws-flex"></span>` +
-    (track?.cli ? `<span class="ws-chip ws-chip--cli ${track.cli}" title="${escapeHtml(track.cli === 'codex' ? 'Codex' : 'Claude')}">${track.cli === 'codex' ? ICONS.codex(12) : ICONS.claude(12)}</span>` : '') +
-    `<button type="button" class="ws-ghost ws-ghost--sm tcard-new">${PICONS.plus(11)}<span>New session</span></button>` +
-    (track ? `<button type="button" class="tcard-more" title="Track menu">${PICONS.dots(13)}</button>` : '');
+    `<button type="button" class="ws-ghost ws-ghost--sm tcard-new">${PICONS.plus(11)}<span>New session</span></button>`;
   card.appendChild(head);
-
-  if (done) {
-    // The heading toggles the card open; its buttons keep their own jobs.
-    head.classList.add('tcard-h--toggle');
-    head.onclick = (e) => {
-      if (e.target.closest('button')) return;
-      if (collapsed) projectsUi.doneCardsOpen[doneKey] = true; else delete projectsUi.doneCardsOpen[doneKey];
-      card.replaceWith(buildTrackCard(project, track));
-    };
-  }
-  head.querySelector('.tcard-new').onclick = (e) => launchFromTrack(project, track, e.currentTarget);
-  const moreBtn = head.querySelector('.tcard-more');
-  if (moreBtn) moreBtn.onclick = (e) => { e.stopPropagation(); showContextMenu(trackMenuItems(project, track), { anchor: e.currentTarget }); };
-  if (track) card.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(trackMenuItems(project, track), { x: e.clientX, y: e.clientY }); };
-  if (collapsed) return card;
+  head.querySelector('.tcard-new').onclick = (e) => showNewSessionMenu(project, e.currentTarget);
 
   const shown = sessions.slice(0, visibleSessionCount);
   for (const s of shown) card.appendChild(buildCardSessionRow(project, s));
   if (!sessions.length) {
     const none = document.createElement('div');
     none.className = 'tcard-empty';
-    none.textContent = track ? 'No sessions yet.' : 'Nothing here. Sessions started from the header land here.';
+    none.textContent = 'No sessions yet. Start one from the header.';
     card.appendChild(none);
   }
 
@@ -1446,10 +1345,10 @@ function buildTrackCard(project, track) {
     (sessions.length > shown.length ? `<button type="button" class="ws-ghost ws-ghost--muted tcard-more-sessions">+ ${sessions.length - shown.length} more</button>` : '') +
     `<span class="ws-flex"></span>`;
   card.appendChild(foot);
-  // Archived sessions of this track sit under the foot, closed until asked for.
-  const archived = archivedSessionsOf(project, key);
+  // Archived sessions sit under the foot, closed until asked for.
+  const archived = archivedSessionsOf(project);
   if (archived.length) {
-    const archKey = `card:${project.id}:${key}`;
+    const archKey = `card:${project.id}`;
     const open = !!projectsUi.archivedOpen[archKey];
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1465,7 +1364,7 @@ function buildTrackCard(project, track) {
     if (open) {
       const list = document.createElement('div');
       list.className = 'tcard-archived-list';
-      for (const s of archived) list.appendChild(buildSessionRow(project, s, { showTrack: false, className: 'pane-session tcard-session pane-session--archived', hoverPreview: true }));
+      for (const s of archived) list.appendChild(buildSessionRow(project, s, { className: 'pane-session tcard-session pane-session--archived', hoverPreview: true }));
       card.appendChild(list);
     }
   }
@@ -1473,18 +1372,8 @@ function buildTrackCard(project, track) {
   // Nothing left to show in the foot once New session moved up to the head.
   if (!foot.querySelector('button')) foot.remove();
   const more = foot.querySelector('.tcard-more-sessions');
-  if (more) more.onclick = () => openTrackInPanes(project, key);
+  if (more) more.onclick = () => { if (sessions.length) openSession(sessions[0]); };
   return card;
-}
-
-/** Show a track's full session list: open its latest session so the pane opens with that track expanded. */
-function openTrackInPanes(project, key) {
-  projectsUi.trackByProject[project.id] = key;
-  projectsUi.groupBy[project.id] = 'track';
-  projectsUi.expandedLists[`${project.id}:track:${key}`] = true;
-  saveProjectsUi();
-  const sessions = sessionsOfTrack(project, key);
-  if (sessions.length) openSession(sessions[0]);
 }
 
 // --- Side cards: plan, todos, recent files, folders ---
@@ -1581,7 +1470,7 @@ function openProjectFileInEditor(project, name) {
 // Data comes from main (get-project-plan): the parsed tracker and todos plus
 // the plan_links rows that say which session started or ticked an item. A
 // phase or a todo can start a session with the item as its first prompt; the
-// session is filed in the project (and a chosen track) and linked to the item.
+// session is filed in the project and linked to the item.
 
 const planTabState = new Map(); // projectId → { data, error, expanded: Set<phase line>, showDone }
 
@@ -1633,8 +1522,8 @@ function todoPrompt(data, item) {
 }
 
 /** Claude / Codex rows that launch with a first prompt, filed under the item. */
-function startItemRows(project, track, prompt, planItem) {
-  const target = launchTargetFor(project, track);
+function startItemRows(project, prompt, planItem) {
+  const target = launchTargetFor(project);
   const launch = async (runtime) => {
     const options = await resolveDefaultSessionOptions(target);
     options.runtime = runtime;
@@ -1650,13 +1539,7 @@ function startItemRows(project, track, prompt, planItem) {
 
 function showStartItemMenu(project, kind, itemText, prompt, anchor) {
   const planItem = { file: kind, itemText };
-  const items = [{ head: 'Start a session on this' }, ...startItemRows(project, null, prompt, planItem)];
-  const tracks = (project.tracks || []).filter(t => t.status !== 'done');
-  if (tracks.length) {
-    items.push({ sep: true }, { head: 'In a track' });
-    for (const t of tracks) items.push({ label: t.name, icon: PICONS.list(13), submenu: startItemRows(project, t, prompt, planItem) });
-  }
-  showContextMenu(items, { anchor });
+  showContextMenu([{ head: 'Start a session on this' }, ...startItemRows(project, prompt, planItem)], { anchor });
 }
 
 function linkedBadge(project, data, kind, text) {
@@ -2464,7 +2347,7 @@ function renderSettings(project, body) {
           <div class="ws-row-v"><span class="mono ws-path ws-path--clip" title="${escapeHtml(project.root)}">${escapeHtml(shortPathLabel(project.root))}</span><button type="button" class="ws-ghost ws-ghost--sm" id="ws-set-open">${PICONS.open(12)}<span>Open</span></button></div>
         </div>
         <div class="ws-row">
-          <div class="ws-row-k"><b>Sessions start in</b><span>A track can pick its own.</span></div>
+          <div class="ws-row-k"><b>Sessions start in</b></div>
           <div class="ws-row-v" id="ws-set-cwd"></div>
         </div>
       </div>
@@ -2481,9 +2364,6 @@ function renderSettings(project, body) {
           </div>
         </div>
       </div>
-
-      <div class="ws-sec"><span>Tracks</span><button type="button" class="ws-ghost ws-ghost--sm ws-ghost--accent" id="ws-set-new-track">${PICONS.plus(11)}<span>New track</span></button></div>
-      <div class="ws-card" id="ws-set-tracks"></div>
 
       <div class="ws-foot">
         ${isProjectSnoozed(project) ? `<button type="button" class="ws-btn" id="ws-set-wake" title="Wakes ${escapeHtml(snoozeWakeDescription(project.snoozedUntil))}">Wake now</button>` : ''}
@@ -2561,11 +2441,6 @@ function renderSettings(project, body) {
   sharedBox.onchange = () => { renderBranchState(); saveBranch(); };
   renderBranchState();
 
-  const tracksEl = q('#ws-set-tracks');
-  if (!(project.tracks || []).length) tracksEl.innerHTML = '<div class="ws-item ws-item--empty">No tracks. A track is one line of work with its own sessions, start folder and CLI.</div>';
-  for (const track of project.tracks || []) tracksEl.appendChild(buildTrackSettingsRow(project, track));
-  q('#ws-set-new-track').onclick = () => promptNewTrack(project);
-
   q('#ws-set-status').onclick = () => toggleProjectDone(project);
   const wakeBtn = q('#ws-set-wake');
   if (wakeBtn) wakeBtn.onclick = () => wakeProject(project);
@@ -2596,54 +2471,6 @@ function shortPathLabel(p) {
   return typeof shortProjectPath === 'function' ? shortProjectPath(p) : p;
 }
 
-function buildTrackSettingsRow(project, track) {
-  const row = document.createElement('div');
-  row.className = 'ws-item ws-trow' + (track.status === 'done' ? ' done' : '');
-  const colors = trackColors(project, track);
-  row.innerHTML = `
-    <span class="ws-trow-dot" style="background:${colors.fg}"></span>
-    <input type="text" class="ws-input ws-trow-name" value="${escapeHtml(track.name)}" spellcheck="false" title="Rename (Enter or click away to save)">
-    <span class="ws-trow-cwd"></span>
-    <select class="ws-select ws-trow-cli" title="CLI for new sessions"></select>
-    <button type="button" class="ws-ghost ws-ghost--sm ws-trow-status">${track.status === 'done' ? 'Reopen' : 'Done'}</button>
-    <button type="button" class="ws-ghost ws-ghost--sm ws-trow-delete" title="Delete track">${PICONS.trash(13)}</button>`;
-  const patch = async (fields) => {
-    const result = await window.api.updateTrack(track.id, fields);
-    if (result?.error) { alert(result.error); return false; }
-    loadProjects();
-    return true;
-  };
-  const nameInput = row.querySelector('.ws-trow-name');
-  nameInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); } };
-  nameInput.onblur = () => { const name = nameInput.value.trim(); if (name && name !== track.name) patch({ name }); else nameInput.value = track.name; };
-
-  const inherited = project.defaultCwd || project.root;
-  const cwdField = buildCwdField(project, track.cwd, `Project default (${pathBasename(inherited)})`,
-    project.defaultCwd ? [{ value: project.root, label: `Project folder (${pathBasename(project.root)})` }] : [],
-    (cwd) => patch({ cwd }));
-  cwdField.classList.add('ws-trow-field');
-  row.querySelector('.ws-trow-cwd').replaceWith(cwdField);
-
-  const cli = row.querySelector('.ws-trow-cli');
-  const renderCli = (harnesses) => {
-    cli.replaceChildren();
-    const options = [{ id: '', label: 'Ask each time' }, ...harnesses.map(h => ({ id: h.id, label: h.label }))];
-    if (track.cli && !options.some(o => o.id === track.cli)) options.push({ id: track.cli, label: track.cli });
-    for (const opt of options) {
-      const o = document.createElement('option');
-      o.value = opt.id; o.textContent = opt.label; o.selected = (track.cli || '') === opt.id;
-      cli.appendChild(o);
-    }
-  };
-  renderCli([{ id: 'claude', label: 'Claude' }]);
-  window.api.getHarnesses().then(list => { if (row.isConnected) renderCli((list || []).filter(h => h.enabled)); }).catch(() => {});
-  cli.onchange = () => patch({ cli: cli.value || null });
-
-  row.querySelector('.ws-trow-status').onclick = () => toggleTrackDone(project, track, patch);
-  row.querySelector('.ws-trow-delete').onclick = () => deleteTrackFlow(project, track);
-  return row;
-}
-
 // --- Working mode: strip + panes ---
 
 function renderStrip(project) {
@@ -2665,18 +2492,12 @@ function renderStrip(project) {
   };
   projectStrip.querySelector('#strip-tasks').onclick = (e) => showTaskPopover(taskPseudoProject(project), e.currentTarget);
   projectStrip.querySelector('#strip-schedules').onclick = (e) => showProjectScheduleMenu(project, e.currentTarget);
-  projectStrip.querySelector('#strip-new').onclick = (e) => showNewSessionMenu(project, null, e.currentTarget);
+  projectStrip.querySelector('#strip-new').onclick = (e) => showNewSessionMenu(project, e.currentTarget);
   projectStrip.querySelector('#strip-more').onclick = (e) => showContextMenu(projectMenuItems(project, { fromPage: true }), { anchor: e.currentTarget });
 }
 
-function trackCwdLabel(project, track) {
-  if (!track?.cwd) return '';
-  if (!isPathInside(track.cwd, project.root)) return pathBasename(track.cwd);
-  return track.cwd === project.root ? 'project folder' : track.cwd.slice(project.root.length + 1);
-}
-
 const PANE_GROUP_LIMIT = 8;
-const GROUP_MODES = [['time', 'Time'], ['track', 'Track'], ['state', 'State']];
+const GROUP_MODES = [['time', 'Time'], ['state', 'State']];
 
 function paneGroupMode(project) {
   const mode = projectsUi.groupBy[project.id];
@@ -2701,25 +2522,12 @@ function timeBucket(session, now) {
 }
 
 /**
- * The same rows, grouped three ways. Each group: { key, title, color, sessions,
- * track (Track view), plus (Track view) }.
+ * The same rows, grouped two ways. Each group: { key, title, color, sessions }.
  */
 function groupSessions(project, mode) {
   // One rule everywhere: the session with the latest event comes first.
   const byEvent = (list) => list.filter(s => !s.archived).sort((a, b) => sessionEventTime(b) - sessionEventTime(a));
   const all = byEvent(projectSessionsAll(project));
-  const byRunningFirst = byEvent;
-
-  if (mode === 'track') {
-    const groups = (project.tracks || []).map(track => ({
-      key: track.id, title: track.name, color: trackColors(project, track).fg, track,
-      sessions: byRunningFirst(track.sessions || []), plus: true, done: track.status === 'done',
-    }));
-    if (project.sessions.length || !groups.length) {
-      groups.push({ key: 'general', title: 'General', color: trackColors(project, null).fg, track: null, sessions: byRunningFirst(project.sessions), plus: true });
-    }
-    return groups;
-  }
 
   if (mode === 'state') {
     const attention = all.filter(s => sessionState(s) === 'attention');
@@ -2749,7 +2557,7 @@ function groupSessions(project, mode) {
 
 /**
  * The middle pane in working mode: the project's sessions as one list,
- * grouped by time, track or state, with plan progress and open todos at the
+ * grouped by time or state, with plan progress and open todos at the
  * foot.
  */
 function projectSessionSearch(project) {
@@ -2830,7 +2638,6 @@ function buildSessionPaneList(project) {
     const full = cachedProjectTreeAll?.projects.find(p => p.id === project.id) || project;
     const query = search.displayQuery.toLowerCase();
     const matches = projectSessionsAll(full).filter(s => search.ids.has(s.sessionId) ||
-      (!search.titlesOnly && s.formerTrackName?.toLowerCase().includes(query)) ||
       [s.name, s.aiTitle, s.summary].some(title => title?.toLowerCase().includes(query)))
       .sort((a, b) => sessionEventTime(b) - sessionEventTime(a));
     groups = [
@@ -2848,21 +2655,14 @@ function buildSessionPaneList(project) {
   }
   for (const group of groups) {
     const head = document.createElement('div');
-    head.className = 'pane-sec' + (group.done ? ' done' : '');
+    head.className = 'pane-sec';
     if (group.color) head.style.color = group.color;
-    head.innerHTML = `<span class="pane-sec-title">${escapeHtml(group.title)}</span><span class="pane-sec-count">${group.sessions.length}</span>` +
-      (group.plus ? `<span class="ws-flex"></span><button type="button" class="pane-icon-btn pane-sec-plus" title="${group.track ? `New session in ${escapeHtml(group.track.name)}` : 'New session in the project'}">${PICONS.plus(11)}</button>` : '');
-    if (group.plus) {
-      head.querySelector('.pane-sec-plus').onclick = (e) => { e.stopPropagation(); launchFromTrack(project, group.track, e.currentTarget); };
-      if (group.track) head.oncontextmenu = (e) => { e.preventDefault(); showContextMenu(trackMenuItems(project, group.track), { x: e.clientX, y: e.clientY }); };
-    }
+    head.innerHTML = `<span class="pane-sec-title">${escapeHtml(group.title)}</span><span class="pane-sec-count">${group.sessions.length}</span>`;
     scroll.appendChild(head);
 
     const id = `${project.id}:${mode}:${group.key}`;
-    const defaultLimit = mode === 'track' ? visibleSessionCount : PANE_GROUP_LIMIT;
-    const limit = group.unlimited || expanded[id] ? Infinity : defaultLimit;
+    const limit = group.unlimited || expanded[id] ? Infinity : PANE_GROUP_LIMIT;
     for (const s of group.sessions.slice(0, limit)) scroll.appendChild(buildSessionRow(project, s, {
-      showTrack: searching || mode !== 'track',
       className: s.archived ? 'pane-session pane-session--archived' : 'pane-session',
     }));
     if (!group.sessions.length) {
@@ -2881,7 +2681,7 @@ function buildSessionPaneList(project) {
     }
   }
   const archived = archivedSessionsOf(project);
-  if (!searching && archived.length) scroll.appendChild(buildArchivedSection(project, archived, `pane:${project.id}`, { showTrack: mode !== 'track', rowClass: 'pane-session pane-session--archived' }));
+  if (!searching && archived.length) scroll.appendChild(buildArchivedSection(project, archived, `pane:${project.id}`, { rowClass: 'pane-session pane-session--archived' }));
   return scroll;
 }
 
@@ -2911,7 +2711,7 @@ function renderPanes(project) {
   pane.querySelectorAll('.pane-seg-btn').forEach(btn => {
     btn.onclick = () => { projectsUi.groupBy[project.id] = btn.dataset.mode; saveProjectsUi(); renderPanes(project); };
   });
-  pane.querySelector('#pane-new-session').onclick = (e) => showNewSessionMenu(project, null, e.currentTarget);
+  pane.querySelector('#pane-new-session').onclick = (e) => showNewSessionMenu(project, e.currentTarget);
 
   const searchBar = document.createElement('div');
   searchBar.className = 'pane-search';
@@ -3081,10 +2881,10 @@ function showContextMenu(items, position) {
 
 /**
  * Every folder a terminal can open in from a project launch menu. Keep the
- * current project/track cwd first so the first Terminal row preserves the old
+ * project's start folder first so the first Terminal row preserves the old
  * single-row behavior, then offer the project folder and every attached
- * folder. A track cwd may point inside one of those roots, so include it even
- * when it is not itself an attached-folder row.
+ * folder. The start folder may point inside one of those roots, so include it
+ * even when it is not itself an attached-folder row.
  */
 function terminalLaunchItems(project, target) {
   const paths = [target.projectPath, project.root, ...(project.folders || []).map(f => f.path)]
@@ -3100,8 +2900,8 @@ function terminalLaunchItems(project, target) {
   });
 }
 
-function newSessionItems(project, track) {
-  const target = launchTargetFor(project, track);
+function newSessionItems(project) {
+  const target = launchTargetFor(project);
   return [
     { label: 'Claude', icon: ICONS.claude(14), onClick: async () => { const o = await resolveDefaultSessionOptions(target); o.runtime = 'claude'; launchNewSession(target, o); } },
     { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: async () => { const o = await resolveDefaultSessionOptions(target); o.runtime = 'codex'; launchNewSession(target, o); } },
@@ -3112,14 +2912,8 @@ function newSessionItems(project, track) {
   ];
 }
 
-function showNewSessionMenu(project, track, anchor) {
-  const items = [...newSessionItems(project, track)];
-  const tracks = (project.tracks || []).filter(t => t.status !== 'done');
-  if (tracks.length) {
-    items.push({ sep: true }, { head: 'In a track' });
-    for (const t of tracks) items.push({ label: t.name, icon: PICONS.list(13), submenu: newSessionItems(project, t) });
-  }
-  showContextMenu(items, { anchor });
+function showNewSessionMenu(project, anchor) {
+  showContextMenu(newSessionItems(project), { anchor });
 }
 
 /** One Attach: a plain folder attaches as it is; a repository asks how the project should work in it. */
@@ -3178,12 +2972,11 @@ function projectMenuItems(project, { fromPage = false } = {}) {
   const isDone = project.status === 'done';
   return [
     !fromPage && { label: 'Open overview', icon: PICONS.open(14), onClick: () => selectProject(project.id, { tab: 'overview' }) },
-    { label: 'New session', icon: PICONS.plus(14), submenu: newSessionItems(project, null) },
-    { label: 'New track…', icon: PICONS.list(14), onClick: () => promptNewTrack(project) },
+    { label: 'New session', icon: PICONS.plus(14), submenu: newSessionItems(project) },
     { sep: true },
     { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameProjectFlow(project) },
     { label: 'Attach folder…', icon: PICONS.folder(14), onClick: () => attachFolderAsk(project) },
-    { label: 'New scheduled task…', icon: PICONS.clock(14), onClick: () => showScheduleDialog({ projectId: project.id, trackId: null, project }) },
+    { label: 'New scheduled task…', icon: PICONS.clock(14), onClick: () => showScheduleDialog({ projectId: project.id, project }) },
     { label: 'Settings', icon: ICONS.gear(14), onClick: () => selectProject(project.id, { tab: 'settings' }) },
     { label: 'Open project folder', icon: PICONS.open(14), onClick: () => window.api.openPath(project.root) },
     { sep: true },
@@ -3194,86 +2987,37 @@ function projectMenuItems(project, { fromPage = false } = {}) {
   ].filter(Boolean);
 }
 
-function trackMenuItems(project, track) {
-  const sessions = sessionsOfTrack(project, track.id);
-  const inherited = project.defaultCwd || project.root;
-  const cwdOptions = [{ value: null, label: `Project default (${pathBasename(inherited)})` }];
-  if (project.defaultCwd) cwdOptions.push({ value: project.root, label: `Project folder (${pathBasename(project.root)})` });
-  for (const f of project.folders || []) cwdOptions.push({ value: f.path, label: pathBasename(f.path) });
-  const patch = async (fields) => { const r = await window.api.updateTrack(track.id, fields); if (r?.error) alert(r.error); else loadProjects(); };
-  return [
-    sessions.length ? { label: 'Resume latest', icon: PICONS.play(13), onClick: () => openSession(sessions[0]) } : null,
-    { label: 'New session', icon: PICONS.plus(14), submenu: newSessionItems(project, track) },
-    { label: 'New scheduled task…', icon: PICONS.clock(14), onClick: () => showScheduleDialog({ projectId: project.id, trackId: track.id, project }) },
-    { label: 'Show all sessions', icon: PICONS.list(14), onClick: () => openTrackInPanes(project, track.id) },
-    { sep: true },
-    { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameTrackFlow(project, track) },
-    { label: 'Sessions start in', icon: PICONS.folder(14), hint: track.cwd ? pathBasename(track.cwd) : 'default',
-      submenu: cwdOptions.map(o => ({ label: o.label, muted: (track.cwd || null) === o.value, hint: (track.cwd || null) === o.value ? 'current' : '', onClick: () => patch({ cwd: o.value }) })) },
-    { label: 'CLI', icon: PICONS.terminal(14), hint: track.cli ? (track.cli === 'codex' ? 'Codex' : 'Claude') : 'ask',
-      submenu: [
-        { label: 'Ask each time', muted: !track.cli, onClick: () => patch({ cli: null }) },
-        { label: 'Claude', icon: ICONS.claude(14), muted: track.cli === 'claude', onClick: () => patch({ cli: 'claude' }) },
-        { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), muted: track.cli === 'codex', onClick: () => patch({ cli: 'codex' }) },
-      ] },
-    { sep: true },
-    { label: track.status === 'done' ? 'Reopen track' : 'Mark as done', icon: PICONS.check(14), onClick: () => toggleTrackDone(project, track, patch) },
-    { label: 'Delete track…', icon: PICONS.trash(14), danger: true, onClick: () => deleteTrackFlow(project, track) },
-  ].filter(Boolean);
-}
-
-/** The "Move to…" section of a session menu: tracks of its project, other projects, or no project. */
+/** The "Move to…" section of a session menu: another project, or no project. */
 function sessionMoveItems(session) {
   const info = projectForSession(session);
   const project = info?.project || null;
-  const move = async (projectId, trackId) => {
-    const result = await window.api.setSessionAssignment(session.sessionId, projectId, trackId);
+  const move = async (projectId) => {
+    const result = await window.api.setSessionAssignment(session.sessionId, projectId);
     if (result?.error) { alert(result.error); return; }
     session.projectId = projectId;
-    session.trackId = trackId;
     if (session.type === 'terminal') persistTerminalSession(session);
     loadProjects();
   };
   const moveItems = [];
-  if (project) {
-    moveItems.push({ head: `Move within ${project.name}` });
-    for (const t of (project.tracks || []).filter(t => t.status !== 'done')) {
-      const current = session.trackId === t.id;
-      moveItems.push({ label: t.name, muted: current, hint: current ? 'current' : '', onClick: current ? null : () => move(project.id, t.id) });
-    }
-    const inGeneral = !session.trackId;
-    moveItems.push({ label: 'General', muted: inGeneral, hint: inGeneral ? 'current' : '', onClick: inGeneral ? null : () => move(project.id, null) });
-    moveItems.push({ label: 'New track from here…', onClick: async () => {
-      const name = await showPromptDialog({ title: 'New track', label: 'Name', placeholder: 'Build' });
-      if (!name) return;
-      const created = await window.api.createTrack(project.id, { name, cwd: null });
-      if (created?.error) { alert(created.error); return; }
-      move(project.id, created.track.id);
-    } });
-  }
   const others = (cachedProjectTreeAll?.projects || []).filter(p => p.status !== 'done' && p.id !== project?.id);
   if (others.length) {
-    const projectRows = others.map(p => {
-      const tracks = (p.tracks || []).filter(t => t.status !== 'done');
-      return tracks.length
-        ? { label: p.name, submenu: [{ label: 'General', onClick: () => move(p.id, null) }, ...tracks.map(t => ({ label: t.name, onClick: () => move(p.id, t.id) }))] }
-        : { label: p.name, onClick: () => move(p.id, null) };
-    });
+    const projectRows = others.map(p => ({ label: p.name, onClick: () => move(p.id) }));
     // Inside a project the other projects sit behind one row, so the menu
     // reads as an action. From the Sessions tab they are the whole menu.
-    if (project) moveItems.push({ sep: true }, { label: 'Move to another project', icon: PICONS.folder(14), submenu: projectRows });
-    else moveItems.push({ sep: true }, { head: 'Move to project' }, ...projectRows);
+    if (project) moveItems.push({ label: 'Move to another project', icon: PICONS.folder(14), submenu: projectRows });
+    else moveItems.push({ head: 'Move to project' }, ...projectRows);
   }
-  if (session.projectId) moveItems.push({ sep: true }, {
+  const sep = () => (moveItems.length ? [{ sep: true }] : []);
+  if (session.projectId) moveItems.push(...sep(), {
     label: `Remove from ${project ? project.name : 'project'}…`,
     icon: PICONS.x(13), hint: 'stays in the Sessions tab',
     onClick: () => {
       const name = project ? project.name : 'its project';
       if (!confirm(`Remove ${sessionTitle(session)} from ${name}?\n\nThe session stays in the Sessions tab under its folder.`)) return;
-      move(null, null);
+      move(null);
     },
   });
-  else if (info?.byCwd) moveItems.push({ sep: true }, { label: 'Filed by its folder', disabled: true });
+  else if (info?.byCwd) moveItems.push(...sep(), { label: 'Filed by its folder', disabled: true });
   return moveItems;
 }
 
@@ -3286,7 +3030,7 @@ function sessionMenuItems(session) {
   // the pane shows it straight away.
   const info = projectForSession(session);
   const forkTarget = info
-    ? { ...launchTargetFor(info.project, (info.project.tracks || []).find(t => t.id === session.trackId) || null), projectPath: session.projectPath }
+    ? { ...launchTargetFor(info.project), projectPath: session.projectPath }
     : folder;
   const sessionActions = [
     running ? { label: 'Stop', icon: '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>', onClick: () => confirmAndStopSession(session.sessionId) } : null,
@@ -3343,26 +3087,10 @@ function showPromptDialog({ title, label, value = '', placeholder = '', confirm 
   });
 }
 
-async function promptNewTrack(project) {
-  const name = await showPromptDialog({ title: 'New track', label: 'Name', placeholder: 'Build', confirm: 'Create', help: 'A track is one line of work inside the project, with its own sessions. It starts in the project folder unless you change it.' });
-  if (!name) return;
-  const result = await window.api.createTrack(project.id, { name, cwd: null });
-  if (result?.error) { alert(result.error); return; }
-  loadProjects();
-}
-
 async function renameProjectFlow(project) {
   const name = await showPromptDialog({ title: 'Rename project', label: 'Name', value: project.name, confirm: 'Rename', help: 'The folder on disk keeps its name.' });
   if (!name || name === project.name) return;
   const result = await window.api.updateProject(project.id, { name });
-  if (result?.error) { alert(result.error); return; }
-  loadProjects();
-}
-
-async function renameTrackFlow(project, track) {
-  const name = await showPromptDialog({ title: 'Rename track', label: 'Name', value: track.name, confirm: 'Rename' });
-  if (!name || name === track.name) return;
-  const result = await window.api.updateTrack(track.id, { name });
   if (result?.error) { alert(result.error); return; }
   loadProjects();
 }
@@ -3393,50 +3121,6 @@ async function detachFolderFlow(project, folder) {
   }
   if (result?.error) { alert(result.error); return; }
   loadProjects();
-}
-
-async function deleteTrackFlow(project, track) {
-  const choice = await new Promise(resolve => {
-    const overlay = document.createElement('div');
-    overlay.className = 'add-project-overlay';
-    const dialog = document.createElement('div');
-    dialog.className = 'add-project-dialog ws-prompt';
-    dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-labelledby', 'delete-track-title');
-    dialog.innerHTML = `
-      <h3 id="delete-track-title">Delete track ${escapeHtml(track.name)}?</h3>
-      <div class="add-project-hint">Sessions stay in ${escapeHtml(project.name)} and retain their former track name.</div>
-      <label class="new-project-label"><input type="checkbox" class="delete-track-archive"> Also archive all sessions in this track</label>
-      <div class="add-project-hint">If selected, running sessions will stop and raw terminals will close.</div>
-      <div class="add-project-actions">
-        <button class="add-project-cancel-btn" type="button">Cancel</button>
-        <button class="add-project-add-btn" type="button">Delete track</button>
-      </div>`;
-    const finish = value => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(value); };
-    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); finish(null); } };
-    dialog.querySelector('.add-project-cancel-btn').onclick = () => finish(null);
-    dialog.querySelector('.add-project-add-btn').onclick = () => finish({ archiveSessions: dialog.querySelector('input').checked });
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-    document.addEventListener('keydown', onKey);
-    dialog.querySelector('.add-project-cancel-btn').focus();
-  });
-  if (!choice) return;
-  const result = await window.api.deleteTrack(track.id, choice);
-  if (result?.error) { alert(result.error); return; }
-  for (const session of sessionMap.values()) {
-    if (session.trackId !== track.id && !result.sessionIds?.includes(session.sessionId)) continue;
-    session.trackId = null;
-    session.formerTrackName = result.formerTrackName;
-    if (choice.archiveSessions) {
-      session.archived = 1;
-      closeArchivedSession(session.sessionId);
-      if (session.type === 'terminal') forgetPersistedTerminalSession(session.sessionId);
-    } else if (session.type === 'terminal') persistTerminalSession(session);
-  }
-  if (projectsUi.trackByProject[project.id] === track.id) delete projectsUi.trackByProject[project.id];
-  await loadProjects();
 }
 
 /** A project's worktrees, each marked dirty when git reports uncommitted changes right now. */
@@ -3617,19 +3301,6 @@ function confirmMarkDone(project, { running, schedules, worktrees }) {
     document.addEventListener('keydown', onKey);
     dialog.querySelector('.add-project-cancel-btn').focus();
   });
-}
-
-/**
- * Marking a track done pauses its scheduled tasks until it is reopened; say
- * so before doing it. `patch` is the caller's updateTrack wrapper.
- */
-async function toggleTrackDone(project, track, patch) {
-  const toDone = track.status !== 'done';
-  if (toDone) {
-    const paused = schedulesForProject(project).filter(s => s.trackId === track.id && s.enabled);
-    if (paused.length && !confirm(`Mark “${track.name}” as done?\n\n${paused.length} scheduled task${paused.length === 1 ? '' : 's'} in it will pause until the track is reopened.`)) return;
-  }
-  await patch({ status: toDone ? 'done' : 'active' });
 }
 
 /**
