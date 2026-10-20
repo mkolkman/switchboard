@@ -566,8 +566,29 @@ function observabilityWaiting(components) {
 
 const obsFmt = (v) => (v < 10 ? v.toFixed(1) : String(Math.round(v)));
 
-/** One figure: a label, the value, a line under it, and how worried to be. */
-function obsFigure(label, value, sub = '', level = 'ok', title = '') {
+// What each figure means, shown when you hover it.
+const OBS_FIGURE_HELP = {
+  'Status': 'The worst signal right now: Grafana alerts firing or pending, new Bugsnag errors since the release, or errors that doubled against the version before. All clear when there is none.',
+  'Latest release': 'How long ago the newest version of any of its components reached production: a backend\'s deploy, or an app\'s promotion to production.',
+  'Errors': 'Bugsnag error events an hour since the production version came out, against the same span on the version before. Every event counts, also repeats of one error.',
+  'New errors': 'Distinct errors in Bugsnag first seen after the production version came out.',
+  'Requests': 'Requests a second to the backends, added up (Grafana, averaged over 5 minutes).',
+  '5xx': 'Share of requests answered with a server error (5xx), averaged over 5 minutes, for the worst backend.',
+  'p95': 'The response time 95% of requests stay under, over 5 minutes, for the slowest backend.',
+  'Rolling out': 'App targets on a staged rollout in production, so not yet at 100% of users.',
+  'Waiting': 'Done but not in production yet: merged changes on staging (backends) and versions in internal or beta testing (apps).',
+  'Active users': 'Unique users who used the product, meaning their app or the portal made a request as them to its backend, in the last 7 days. Each user counts once, however often they came. Below: the last 24 hours and the last 30 days. The arrow compares with the 7 days before.',
+  'Training users': 'Unique users who logged at least one workout in the last 7 days: the active users who actually trained, not only opened the app. Each user counts once, however often they trained. Below: 24 hours and 30 days. The arrow compares with the 7 days before.',
+  'Workouts': 'Workouts logged in the last 7 days, in the apps and on commercial machines. Below: 24 hours and 30 days. The arrow compares with the 7 days before.',
+  'New accounts': 'Accounts created in the window.',
+  'MRR': 'Monthly recurring revenue in euros, from RevenueCat. Below: the subscriptions active now.',
+  'Subscriptions': 'Subscriptions active now (RevenueCat).',
+  'Median duration': 'Half of the workouts were shorter than this, half longer. Per type, and for all workouts together; app workouts only.',
+  'Median distance': 'Half of the workouts covered less than this, half more. App workouts only.',
+};
+
+/** One figure: a label, the value, a line under it, and how worried to be; its meaning shows on hover. */
+function obsFigure(label, value, sub = '', level = 'ok', title = OBS_FIGURE_HELP[label.split(' · ')[0]] || '') {
   return `<div class="obs-kpi obs-kpi--${level}"${title ? ` title="${obsAttr(title)}"` : ''}><span class="obs-kpi-l">${escapeHtml(label)}</span><span class="obs-kpi-v">${value}</span><span class="obs-kpi-s">${sub}</span></div>`;
 }
 
@@ -590,13 +611,13 @@ function observabilityKeyFiguresHtml(components) {
 
   // The newest release of any component.
   const latest = components.map(c => ({ c, prod: c.error ? null : observabilityProductionTag(c) })).filter(x => x.prod).sort((a, b) => new Date(b.prod.date) - new Date(a.prod.date))[0];
-  if (latest) figures.push(obsFigure('Latest release', escapeHtml(obsAgo(latest.prod.date)), `${escapeHtml(components.length > 1 ? `${latest.c.label} ` : '')}${escapeHtml(latest.prod.tag)}`, 'ok', obsDay(latest.prod.date)));
+  if (latest) figures.push(obsFigure('Latest release', escapeHtml(obsAgo(latest.prod.date)), `${escapeHtml(components.length > 1 ? `${latest.c.label} ` : '')}${escapeHtml(latest.prod.tag)}`));
 
   if (components.some(c => c.bugsnag?.length)) {
     const rates = observabilityErrorRates(components);
     const ratio = rates && rates.before > 0 ? rates.now / rates.before : null;
     const level = ratio != null && ratio >= 2 && rates.now >= 5 ? 'bad' : ratio != null && ratio >= 1.3 && rates.now >= 2 ? 'warn' : 'ok';
-    figures.push(obsFigure('Errors', rates ? `${obsFmt(rates.now)}/h` : '…', rates ? `${obsFmt(rates.before)}/h before${ratio != null && Math.abs(ratio - 1) >= 0.1 ? ` · ×${ratio.toFixed(1)}` : ''}` : 'reading Bugsnag', level, 'Bugsnag events an hour since the production version came out, against the version before'));
+    figures.push(obsFigure('Errors', rates ? `${obsFmt(rates.now)}/h` : '…', rates ? `${obsFmt(rates.before)}/h before${ratio != null && Math.abs(ratio - 1) >= 0.1 ? ` · ×${ratio.toFixed(1)}` : ''}` : 'reading Bugsnag', level));
     figures.push(obsFigure('New errors', String(newErrors), 'since the release', newErrors ? 'warn' : 'ok'));
   }
 
@@ -742,10 +763,10 @@ function observabilityUsageRowHtml(p) {
   const w = (pair) => (pair ? obsCount(pair.now) : '–');
   const sub = (kind) => `1d ${w(b.users[kind]?.['1d'])} · 30d ${w(b.users[kind]?.['30d'])}`;
   const figures = [];
-  if (b.users.active) figures.push(obsFigure('Active users · 7d', `${w(b.users.active['7d'])} ${obsTrend(b.users.active['7d'])}`, sub('active'), 'ok', 'Users with an authenticated request in the last 7 days'));
-  if (b.users.training) figures.push(obsFigure('Training users · 7d', `${w(b.users.training['7d'])} ${obsTrend(b.users.training['7d'])}`, sub('training'), 'ok', 'Users who logged a workout in the last 7 days'));
-  if (b.workouts.all['7d']) figures.push(obsFigure('Workouts · 7d', `${w(b.workouts.all['7d'])} ${obsTrend(b.workouts.all['7d'])}`, `1d ${w(b.workouts.all['1d'])} · 30d ${w(b.workouts.all['30d'])}`, 'ok', 'Workouts in the last 7 days'));
-  if (b.mrr != null) figures.push(obsFigure('MRR', escapeHtml(obsEuros(b.mrr)), b.subscriptions != null ? `${obsCount(b.subscriptions)} subscriptions` : '', 'ok', 'Monthly recurring revenue (RevenueCat)'));
+  if (b.users.active) figures.push(obsFigure('Active users · 7d', `${w(b.users.active['7d'])} ${obsTrend(b.users.active['7d'])}`, sub('active')));
+  if (b.users.training) figures.push(obsFigure('Training users · 7d', `${w(b.users.training['7d'])} ${obsTrend(b.users.training['7d'])}`, sub('training')));
+  if (b.workouts.all['7d']) figures.push(obsFigure('Workouts · 7d', `${w(b.workouts.all['7d'])} ${obsTrend(b.workouts.all['7d'])}`, `1d ${w(b.workouts.all['1d'])} · 30d ${w(b.workouts.all['30d'])}`));
+  if (b.mrr != null) figures.push(obsFigure('MRR', escapeHtml(obsEuros(b.mrr)), b.subscriptions != null ? `${obsCount(b.subscriptions)} subscriptions` : ''));
   else if (b.subscriptions != null) figures.push(obsFigure('Subscriptions', obsCount(b.subscriptions), '', 'ok'));
   return figures.length ? `<div class="obs-kpis obs-kpis--usage">${figures.join('')}</div>` : '<div class="gh-muted">No usage figures yet.</div>';
 }
@@ -760,7 +781,7 @@ function observabilityUsageHtml(p) {
   const cell = (pair) => `<span>${pair ? `${escapeHtml(obsCount(pair.now))} ${obsTrend(pair)}` : '–'}</span>`;
   const table = (rows) => `<div class="obs-utable"><div class="obs-utr obs-utr--h"><span></span>${windows.map(x => `<span>${x}</span>`).join('')}</div>${rows.join('')}</div>`;
   const userRows = [['active', 'Active users'], ['training', 'Training users'], ['new', 'New accounts']]
-    .filter(([k]) => b.users[k]).map(([k, label]) => `<div class="obs-utr"><span>${label}</span>${windows.map(x => cell(b.users[k][x])).join('')}</div>`);
+    .filter(([k]) => b.users[k]).map(([k, label]) => `<div class="obs-utr"><span title="${obsAttr((OBS_FIGURE_HELP[label] || '').replace(/ in the last 7 days.*$/, ' in the window. Each user counts once.'))}">${label}</span>${windows.map(x => cell(b.users[k][x])).join('')}</div>`);
   const types = Object.entries(b.workouts.types).sort((a, c) => (c[1]['7d']?.now || 0) - (a[1]['7d']?.now || 0));
   const max = Math.max(1, ...types.map(([, v]) => v['7d']?.now || 0));
   const channels = Object.entries(b.workouts.channels);
@@ -781,8 +802,8 @@ function observabilityUsageHtml(p) {
       ${types.length ? `<div class="gfv-sec"><div class="gh-sec-h">Workouts by type, last 7 days</div>
         ${types.map(([type, v]) => `<div class="obs-bar"><span class="obs-bar-l">${escapeHtml(type)}</span><span class="obs-bar-t"><span class="obs-bar-f" style="width:${Math.round(((v['7d']?.now || 0) / max) * 100)}%"></span></span><span class="obs-bar-n">${escapeHtml(obsCount(v['7d']?.now))} ${obsTrend(v['7d'])}</span></div>`).join('')}
         ${channels.length > 1 ? `<div class="obs-feat-more gh-muted">${channels.map(([ch, v]) => `${escapeHtml(ch)} ${escapeHtml(obsCount(v['7d']?.now))}`).join(' · ')}</div>` : ''}</div>` : ''}
-      <div class="gfv-sec"><div class="gh-sec-h">Median duration</div>${medians('duration', obsMinutes)}</div>
-      ${Object.keys(b.distance).length ? `<div class="gfv-sec"><div class="gh-sec-h">Median distance</div>${medians('distance', obsMeters)}</div>` : ''}
+      <div class="gfv-sec"><div class="gh-sec-h" title="${obsAttr(OBS_FIGURE_HELP['Median duration'])}">Median duration</div>${medians('duration', obsMinutes)}</div>
+      ${Object.keys(b.distance).length ? `<div class="gfv-sec"><div class="gh-sec-h" title="${obsAttr(OBS_FIGURE_HELP['Median distance'])}">Median distance</div>${medians('distance', obsMeters)}</div>` : ''}
       ${b.strava != null ? `<div class="gfv-sec"><div class="gh-sec-h">Connections</div>${kv('Strava', `${obsCount(b.strava)} accounts${share}`)}</div>` : ''}
       ${training.length ? `<div class="gfv-sec"><div class="gh-sec-h">Training</div>${training.map(([kind, v]) => kv(kind.replace(/_/g, ' '), windowed(v))).join('')}</div>` : ''}
       ${b.subscriptions != null || b.mrr != null ? `<div class="gfv-sec"><div class="gh-sec-h">Subscriptions</div>${kv('Active', obsCount(b.subscriptions))}${b.mrr != null ? kv('Monthly recurring revenue', obsEuros(b.mrr)) : ''}</div>` : ''}
