@@ -60,6 +60,7 @@ const grafana = require('./grafana');
 const observability = require('./observability');
 const bugsnag = require('./bugsnag');
 const revenuecat = require('./revenuecat');
+const projectMaps = require('./project-maps');
 const sleepControl = require('./sleep-control');
 
 
@@ -648,6 +649,7 @@ const { refreshFolder, reconcileCacheFromFilesystem, buildProjectsFromCache,
 
 // --- Projects (a piece of work with a folder on disk) ---
 const projects = require('./projects');
+projectMaps.init({ db: dbModule, log });
 projects.init({
   db: dbModule,
   log,
@@ -1796,8 +1798,14 @@ ipcMain.handle('session-links', guarded(() => listSessionLinks()));
 ipcMain.handle('add-session-link', guarded((link) => {
   if (!link?.sessionId || !link?.kind || !link?.ref) throw new Error('A session link needs sessionId, kind and ref.');
   addSessionLink(link);
+  // A session on a map's ticket belongs to the map's project (project-maps.js).
+  projectMaps.assignLinkedSession(link.sessionId, link.kind, link.ref).catch(() => {});
   return {};
 }));
+
+// --- IPC: projects from wayfinder maps (project-maps.js) ---
+
+ipcMain.handle('sync-map-projects', () => projectMaps.asResult(projectMaps.syncMapProjects()));
 
 const NOT_A_PR_BRANCH = new Set(['main', 'master', 'develop', 'development', 'staging']);
 const branchPrCache = new Map(); // "owner/repo|branch" → { at, pr }

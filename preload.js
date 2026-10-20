@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('api', {
   getRevenueCatConfig: () => ipcRenderer.invoke('revenuecat-config'),
   saveRevenueCatConfig: (spec) => ipcRenderer.invoke('revenuecat-save-config', spec),
   getRevenueCatOverviews: (opts) => ipcRenderer.invoke('revenuecat-overviews', opts),
+  syncMapProjects: () => ipcRenderer.invoke('sync-map-projects'),
   getHelpscoutInbox: () => ipcRenderer.invoke('helpscout-inbox'),
   getHelpscoutConversation: (id) => ipcRenderer.invoke('helpscout-conversation', id),
   getHelpscoutStatuses: (ids) => ipcRenderer.invoke('helpscout-statuses', ids),
