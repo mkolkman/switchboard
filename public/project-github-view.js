@@ -1181,14 +1181,35 @@ async function startPrSession(project, pr, state, { prompt, label, focus }) {
 
 // --- Sessions linked to a PR: status and last message, a link to open it ---
 
-/** Sessions on a PR, newest first: started from this panel, and stored links. */
-function prSessionIds(project, prKey) {
+const prBranchSessions = new Map(); // "owner/repo|branch" → { at, ids } of sessions working on that branch
+const PR_BRANCH_SESSIONS_MS = 60 * 1000;
+
+/** The sessions whose last work was on a PR's branch (main reads their transcripts); repaints the panel when they come in. */
+function prBranchSessionIds(project, pr) {
+  if (!pr?.headRef) return [];
+  const key = `${pr.repo}|${pr.headRef}`;
+  const known = prBranchSessions.get(key);
+  if (!known || Date.now() - known.at > PR_BRANCH_SESSIONS_MS) {
+    prBranchSessions.set(key, { at: Date.now(), ids: known?.ids || [] });
+    window.api.getSessionsOnBranch(pr.repo, pr.headRef).then(result => {
+      const ids = result && !result.error ? result.sessions || [] : [];
+      const before = (known?.ids || []).join();
+      prBranchSessions.set(key, { at: Date.now(), ids });
+      if (ids.join() !== before && githubTabShown(project)) paintGithubPanel(project);
+    }).catch(() => {});
+  }
+  return known?.ids || [];
+}
+
+/** Sessions on a PR, newest first: started from this panel, stored links, and the ones working on its branch. */
+function prSessionIds(project, prKey, pr = null) {
   const state = githubTabState(project.id);
   const ids = [...(state.prSessions?.get(prKey) || [])];
   const data = typeof planState === 'function' ? planState(project).data : null;
   if (data) for (const { session } of linkedSessions(data, 'todos', prKey)) if (!ids.includes(session.sessionId)) ids.push(session.sessionId);
   // Started on this PR in an earlier run, also from the GitHub tab (session-context.js keeps those).
   if (typeof sessionsLinkedTo === 'function') for (const id of sessionsLinkedTo('pr', prKey)) if (!ids.includes(id)) ids.push(id);
+  for (const id of prBranchSessionIds(project, pr)) if (!ids.includes(id)) ids.push(id);
   return ids.filter(id => openSessions.has(id) || sessionMap.has(id));
 }
 
@@ -1217,7 +1238,7 @@ function currentSession(id) {
 /** What the session is for, as its heading: what it was started for, else its title. */
 function prSessionName(id) {
   const session = currentSession(id);
-  return prSessionLabels.get(id) || (session && cleanDisplayName(session.name || session.aiTitle)) || 'Claude on this PR';
+  return prSessionLabels.get(id) || (session && cleanDisplayName(session.name || session.aiTitle || session.summary)) || 'Claude on this PR';
 }
 
 function prSessionRowInner(id) {
@@ -1265,7 +1286,7 @@ function githubPrWalkthroughButton() {
 }
 
 function githubSessionsSection(project, pr) {
-  const ids = prSessionIds(project, `${pr.repo}#${pr.number}`);
+  const ids = prSessionIds(project, `${pr.repo}#${pr.number}`, pr);
   const open = pr.state === 'OPEN';
   // A walkthrough also reads well after the merge; the other sessions are for open PRs.
   const start = githubPrWalkthroughButton() + (open ? githubPrSessionButton(pr) : '');

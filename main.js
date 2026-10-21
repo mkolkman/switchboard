@@ -1803,6 +1803,51 @@ function sessionBranch(row) {
   return null;
 }
 
+// --- Sessions working on a branch (the PR panel's list) ---
+
+const SESSIONS_ON_BRANCH_DAYS = 30;
+const sessionWorkBranches = new Map(); // sessionId → { mtime, repo: "owner/name" | null, branch }
+
+/** Where a session last worked: its repo ("owner/name") and the branch of that folder; read again only when its transcript changed. */
+async function sessionWorkBranch(row) {
+  let mtime;
+  try { mtime = (await fs.promises.stat(transcriptPath(row))).mtimeMs; } catch { return null; }
+  const known = sessionWorkBranches.get(row.sessionId);
+  if (known && known.mtime === mtime) return known;
+  let found = null;
+  try { found = sessionBranch(row); } catch {}
+  let branch = found?.branch || null;
+  // A session that moved into a worktree says so only through its cwd: read that folder's own branch.
+  if (found?.cwd && fs.existsSync(found.cwd)) {
+    const own = await new Promise(resolve => execFile('git', ['-C', found.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 3000 }, (err, out) => resolve(err ? null : String(out).trim())));
+    if (own && own !== 'HEAD') branch = own;
+  }
+  const repo = found?.cwd ? repoInfoForPath(found.cwd) : null;
+  const entry = { mtime, repo: repo ? `${repo.owner}/${repo.name}` : null, branch };
+  sessionWorkBranches.set(row.sessionId, entry);
+  return entry;
+}
+
+// The Claude sessions of the last month whose last work was on this branch of
+// this repo, newest first: a PR's sessions also when nothing linked them to it.
+ipcMain.handle('sessions-on-branch', guarded(async (repo, branch) => {
+  if (!repo || !branch || NOT_A_PR_BRANCH.has(branch)) return { sessions: [] };
+  const want = String(repo).toLowerCase();
+  const since = Date.now() - SESSIONS_ON_BRANCH_DAYS * 86400000;
+  const rows = (getAllCached() || [])
+    .filter(r => (!r.runtime || r.runtime === 'claude') && Date.parse(r.modified || 0) >= since)
+    .sort((a, b) => Date.parse(b.modified || 0) - Date.parse(a.modified || 0));
+  const sessions = [];
+  for (const row of rows) {
+    // A session that started in another repo's folder is passed over without reading its transcript.
+    const started = row.projectPath ? repoInfoForPath(row.projectPath) : null;
+    if (started && `${started.owner}/${started.name}`.toLowerCase() !== want) continue;
+    const work = await sessionWorkBranch(row);
+    if (work?.repo && work.repo.toLowerCase() === want && work.branch === branch) sessions.push(row.sessionId);
+  }
+  return { sessions };
+}));
+
 // The pull request of the branch a session works on, if any: a session in a
 // worktree for a PR gets that PR as its context without being started from it.
 ipcMain.handle('session-branch-pr', guarded(async (sessionId) => {

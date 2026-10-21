@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   getSessionLinks: () => ipcRenderer.invoke('session-links'),
   addSessionLink: (link) => ipcRenderer.invoke('add-session-link', link),
   getSessionBranchPr: (sessionId) => ipcRenderer.invoke('session-branch-pr', sessionId),
+  getSessionsOnBranch: (repo, branch) => ipcRenderer.invoke('sessions-on-branch', repo, branch),
 
   // Settings
   getSetting: (key) => ipcRenderer.invoke('get-setting', key),
