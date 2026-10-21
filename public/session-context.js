@@ -502,7 +502,7 @@ function sessionContextStatus(ctx) {
     if (!pr) return null;
     const state = githubPrState(pr);
     const marks = githubPrMarks(pr);
-    const text = [`${SESSION_CTX_PR_STATE_TEXT[state]}${marks.review ? `, ${marks.review}` : ''}`, marks.requested, marks.mine, githubChecksText(pr.state === 'OPEN' ? pr.checks : null)].filter(Boolean).join('\n');
+    const text = [`${SESSION_CTX_PR_STATE_TEXT[state]}${marks.review ? `, ${marks.review}` : ''}`, marks.requested, marks.mine, githubChecksText(pr.state === 'OPEN' ? pr.checks : null, pr.checksFailed)].filter(Boolean).join('\n');
     return { state: `pr-${state}`, icon: SESSION_CONTEXT_STATE_ICONS[`pr-${state}`](), marks: marks.html, text };
   }
   if (ctx.kind === 'ticket') {

@@ -87,15 +87,19 @@ function githubChecksKind(state) {
   return state === 'SUCCESS' ? 'ok' : (state === 'FAILURE' || state === 'ERROR') ? 'fail' : 'pending';
 }
 
-/** The checks in words, for a tooltip; '' without checks. */
-function githubChecksText(state) {
+/** The checks in words, for a tooltip; '' without checks. failed: the checks failed so far while others run. */
+function githubChecksText(state, failed = 0) {
   if (!state) return '';
-  return { ok: 'Checks passed', fail: 'Checks failed', pending: 'Checks running' }[githubChecksKind(state)];
+  const kind = githubChecksKind(state);
+  if (kind === 'pending' && failed) return `Checks running, ${failed} failed already`;
+  return { ok: 'Checks passed', fail: 'Checks failed', pending: 'Checks running' }[kind];
 }
 
-function githubChecksDot(state) {
+/** The checks dot: running pulses, and has a red ring when a check failed already. */
+function githubChecksDot(state, failed = 0) {
   if (!state) return '';
-  return `<span class="gh-ci gh-ci--${githubChecksKind(state)}" title="${githubChecksText(state)}"></span>`;
+  const kind = githubChecksKind(state);
+  return `<span class="gh-ci gh-ci--${kind}${kind === 'pending' && failed ? ' gh-ci--failed-too' : ''}" title="${githubChecksText(state, failed)}"></span>`;
 }
 
 /** A PR's state for its colour and icon: merged, closed, draft or open. */
@@ -117,7 +121,7 @@ function githubPrMarks(pr) {
   const html = (mine ? `<span class="gh-mine gh-mine--${mine.kind}">${mine.kind === 'reviewed' ? GITHUB_MINE_REVIEWED_ICON : GITHUB_MINE_CHANGED_ICON}</span>` : '')
     + (review ? `<span class="gh-review gh-review--${review[0]}">${review[0] === 'approved' ? '✓' : '±'}</span>` : '')
     + (requested.length ? GITHUB_REQUESTED_ICON : '')
-    + githubChecksDot(pr.state === 'OPEN' ? pr.checks : null);
+    + githubChecksDot(pr.state === 'OPEN' ? pr.checks : null, pr.checksFailed);
   return { html, review: review ? review[1].toLowerCase() : '', requested: requested.length ? `Review requested from ${requested.join(', ')}` : '', mine: mine ? mine.text : '' };
 }
 
@@ -746,12 +750,32 @@ async function loadGithubDetail(project, { quiet = false } = {}) {
     const detail = kind === 'pr' ? await window.api.getGithubPullRequest(target) : await window.api.getGithubIssue(target);
     state.details.set(key, detail || { error: 'No answer from GitHub.' });
     if (detail?.merged) loadGithubReleases(project, [detail]);
+    if (kind === 'pr' && detail?.checks && !detail.error) syncGithubChipChecks(project, detail);
   } catch (err) {
     state.details.set(key, { error: err?.message || String(err) });
   }
   state.detailLoading.delete(key);
   if (selectedDetailKey(state) === key) paintGithubPanel(project);
   scheduleGithubPoll(project);
+}
+
+/** An open PR's live checks onto its chips in the lists, so they need not wait for the list's next fetch. */
+function syncGithubChipChecks(project, detail) {
+  const runs = detail.checks.runs || [];
+  const checks = runs.some(r => r.status !== 'COMPLETED') ? 'PENDING' : detail.checks.state || null;
+  const checksFailed = runs.filter(r => checkRunState(r)[0] === 'bad').length;
+  let changed = false;
+  for (const result of githubTabState(project.id).results.values()) {
+    for (const item of result?.items || []) {
+      for (const pr of item.pullRequests || []) {
+        if (pr.repo !== detail.repo || pr.number !== detail.number || (pr.checks === checks && pr.checksFailed === checksFailed)) continue;
+        pr.checks = checks;
+        pr.checksFailed = checksFailed;
+        changed = true;
+      }
+    }
+  }
+  if (changed && project.isGithubView && typeof renderGithubViewList === 'function') renderGithubViewList();
 }
 
 // Keep an open PR live while it is on screen: every 15 s while checks run or

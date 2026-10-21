@@ -185,3 +185,12 @@ test('planPrTypeLabels: the first of the type\'s labels the repo has, the other 
   // A repo without any: the type's first label, to be made.
   assert.deepEqual(planPrTypeLabels('documentation', [], onPr), { add: { name: 'documentation' }, remove: [{ id: 'P1', name: 'enhancement' }, { id: 'L2', name: 'type:correctness' }] });
 });
+
+test('checksSummary: running checks win over a failure so far, which is counted', () => {
+  const { checksSummary } = require('../github-tracker');
+  const run = (status, conclusion = null) => ({ __typename: 'CheckRun', status, conclusion });
+  assert.deepEqual(checksSummary({ state: 'FAILURE', contexts: { nodes: [run('COMPLETED', 'FAILURE'), run('IN_PROGRESS'), run('COMPLETED', 'SUCCESS')] } }), { checks: 'PENDING', checksFailed: 1 });
+  assert.deepEqual(checksSummary({ state: 'FAILURE', contexts: { nodes: [run('COMPLETED', 'FAILURE'), run('COMPLETED', 'SKIPPED')] } }), { checks: 'FAILURE', checksFailed: 1 });
+  assert.deepEqual(checksSummary({ state: 'SUCCESS', contexts: { nodes: [{ __typename: 'StatusContext', state: 'PENDING' }] } }), { checks: 'PENDING', checksFailed: 0 });
+  assert.deepEqual(checksSummary(null), { checks: null, checksFailed: 0 });
+});

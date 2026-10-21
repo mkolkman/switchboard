@@ -105,13 +105,39 @@ function isIgnoredReviewer(author) {
   return author.__typename === 'Bot' || login.endsWith('[bot]') || IGNORED_REVIEWERS.has(login);
 }
 
+const FAILED_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
+
+/**
+ * A PR's checks for its chip: { checks, checksFailed }. GitHub's own rollup
+ * says FAILURE as soon as one check fails, also while others still run; a
+ * PR with checks still running is PENDING here, with the ones failed so far
+ * counted.
+ */
+function checksSummary(rollup) {
+  if (!rollup) return { checks: null, checksFailed: 0 };
+  let running = 0;
+  let failed = 0;
+  for (const n of rollup.contexts?.nodes || []) {
+    if (n.__typename === 'CheckRun') {
+      if (n.status !== 'COMPLETED') running++;
+      else if (FAILED_CONCLUSIONS.has(n.conclusion)) failed++;
+    } else if (n.__typename === 'StatusContext') {
+      if (n.state === 'PENDING' || n.state === 'EXPECTED') running++;
+      else if (n.state === 'FAILURE' || n.state === 'ERROR') failed++;
+    }
+  }
+  return { checks: running ? 'PENDING' : rollup.state || null, checksFailed: failed };
+}
+
 const PR_FIELDS = `
   number title url state isDraft reviewDecision updatedAt mergedAt mergeCommit { oid } headRefOid
   mine: reviews(last: 20, author: $me) { nodes { state body submittedAt commit { oid } } }
   latestOpinionatedReviews(first: 20) { nodes { state author { __typename login } } }
   reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } ... on Bot { login } } } }
   repository { nameWithOwner }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
+  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
+    __typename ... on CheckRun { status conclusion } ... on StatusContext { state }
+  } } } } } }`;
 
 const ISSUE_FIELDS = `
   id number title url state stateReason updatedAt
@@ -158,7 +184,7 @@ function shapePr(node, link) {
       .map(n => n.requestedReviewer)
       .filter(r => r && !isIgnoredReviewer(r.__typename === 'Team' ? { login: r.name, __typename: 'Team' } : r))
       .map(r => r.login || r.name),
-    checks: node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state || null,
+    ...checksSummary(node.commits?.nodes?.[0]?.commit?.statusCheckRollup),
     updatedAt: node.updatedAt,
     mergedAt: node.mergedAt || null,
     mergeSha: node.mergeCommit?.oid || null, // what release status looks for in tags
@@ -1592,7 +1618,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, checksSummary, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed, graphql,

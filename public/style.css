@@ -7354,6 +7354,9 @@ body.fp-resizing webview { pointer-events: none; }
 .gh-ci--ok { background: #4cc479; }
 .gh-ci--fail { background: #e05a5a; }
 .gh-ci--pending { background: #e0b04a; }
+.gh-pr .gh-ci--pending { animation: gh-ci-pulse 1.6s ease-in-out infinite; }
+.gh-ci--failed-too { box-shadow: 0 0 0 1.5px #e05a5a; }
+@keyframes gh-ci-pulse { 50% { opacity: 0.35; } }
 
 
 /* ---- GitHub tab: list beside the review panel ---- */
