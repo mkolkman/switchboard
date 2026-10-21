@@ -149,7 +149,7 @@
         leave();
         const target = await targetPromise;
         if (disposed || !target) return;
-        if (target.url) await openExternal(target.url);
+        if (target.url) await openExternal(target.url, _event);
         else await openTarget(target, _event, { getSession, openFile, chooseFile });
       },
       async hover(event, uri) {

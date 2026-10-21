@@ -7,6 +7,23 @@
 // Depends on: toggleGridView, isSessionNavKey, handleSessionNavKey, focusGridCard,
 // wrapInGridCard, showGridView (grid-view.js)
 // Depends on: shellEscape (utils.js)
+// Depends on: openGithubViewPullRequest (github-view.js), showSession (app.js)
+
+// --- Links ---
+
+/**
+ * A link clicked in a terminal: a GitHub pull request opens in the GitHub
+ * tab's panel with the session it was clicked in beside it; anything else,
+ * or a PR with Cmd held, opens in the browser.
+ */
+function openTerminalUrl(uri, event, sessionId) {
+  const pr = String(uri).match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (!pr || event?.metaKey || typeof openGithubViewPullRequest !== 'function') return window.api.openExternal(uri);
+  openGithubViewPullRequest(`${pr[1]}/${pr[2]}#${pr[3]}`, { url: uri });
+  // In the GitHub tab a shown session sits beside the page (session-context.js).
+  if (sessionId && openSessions.has(sessionId)) setTimeout(() => showSession(sessionId), 0);
+  return Promise.resolve();
+}
 
 // --- Terminal font ---
 // Global font settings shared by every xterm instance. Mutated by applyTerminalFont
@@ -26,6 +43,7 @@ const TERMINAL_FONT = {
 // CSS: Chromium silently falls back to its default *proportional* font, which destroys
 // the terminal's column alignment. Keeping the default stack as a tail means an
 // unresolvable name degrades to the normal terminal font instead.
+
 function withMonospaceFallback(family) {
   if (family === DEFAULT_TERMINAL_FONT_FAMILY) return family;
   return family + ', ' + DEFAULT_TERMINAL_FONT_FAMILY;
@@ -513,7 +531,7 @@ function createTerminalEntry(session) {
     showTooltip: linkTooltip.show,
     hideTooltip: linkTooltip.hide,
     openFile: (...args) => openFileInPanel(...args),
-    openExternal: uri => window.api.openExternal(uri),
+    openExternal: (uri, event) => openTerminalUrl(uri, event, entry.session?.sessionId),
   };
   // Read the entry at click time: Codex replaces a provisional session ID
   // after launch, and a fork can re-key an existing terminal too.
