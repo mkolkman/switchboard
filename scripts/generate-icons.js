@@ -7,11 +7,22 @@ const { loadImage, createCanvas } = require('@napi-rs/canvas');
 
 const OUTPUT_DIR = path.join(__dirname, '..', 'build');
 const pngPath = path.join(OUTPUT_DIR, 'icon.png');
+const svgPath = path.join(OUTPUT_DIR, 'icon.svg');
 
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-// If icon.png already exists, use it; otherwise generate a placeholder
-if (!fs.existsSync(pngPath)) {
+(async () => {
+// icon.svg, when there, is the source: drawn on the macOS icon grid already
+// (the body at 80% with its shadow around it), so macOS takes it unpadded.
+const gridded = fs.existsSync(svgPath);
+if (gridded) {
+  const img = await loadImage(fs.readFileSync(svgPath));
+  const canvas = createCanvas(1024, 1024);
+  canvas.getContext('2d').drawImage(img, 0, 0, 1024, 1024);
+  fs.writeFileSync(pngPath, canvas.toBuffer('image/png'));
+  console.log(`Rendered ${pngPath} from icon.svg`);
+} else if (!fs.existsSync(pngPath)) {
+  // Otherwise icon.png is the source; without it, a placeholder.
   const SIZE = 1024;
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext('2d');
@@ -58,7 +69,7 @@ if (process.platform === 'darwin') {
   const paddedPath = path.join(OUTPUT_DIR, 'icon-padded.png');
   // Create a 1024x1024 transparent canvas with the icon at 80% centered
   const PADDED_SIZE = 1024;
-  const INSET = Math.round(PADDED_SIZE * 0.1); // 10% padding on each side = 80% content
+  const INSET = gridded ? 0 : Math.round(PADDED_SIZE * 0.1); // 10% padding on each side = 80% content
   const INNER = PADDED_SIZE - INSET * 2;
   execSync(`sips -z ${INNER} ${INNER} "${pngPath}" --out "${paddedPath}"`, { stdio: 'ignore' });
   // Use sips to pad: create blank canvas then composite
@@ -92,7 +103,7 @@ bg.save('${paddedPath}')
   // Clean up
   fs.rmSync(iconsetDir, { recursive: true });
   fs.unlinkSync(paddedPath);
-  console.log(`Created ${icnsPath} (with macOS padding)`);
+  console.log(`Created ${icnsPath}${gridded ? '' : ' (with macOS padding)'}`);
 } else {
   // Non-macOS fallback: use png2icons
   const pngBuffer = fs.readFileSync(pngPath);
@@ -114,7 +125,7 @@ if (icoBuffer) {
 
 // Linux: hicolor-sized PNGs for /usr/share/icons/hicolor/<size>x<size>/apps/
 // electron-builder picks these up when linux.icon points at the directory.
-(async () => {
+{
   const linuxDir = path.join(OUTPUT_DIR, 'icons');
   fs.mkdirSync(linuxDir, { recursive: true });
   const img = await loadImage(pngPath);
@@ -128,4 +139,5 @@ if (icoBuffer) {
   }
   console.log(`Created ${linuxDir} (Linux hicolor sizes)`);
   console.log('Icon generation complete.');
+}
 })();
