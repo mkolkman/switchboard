@@ -367,8 +367,9 @@ function businessQueries() {
 
 /**
  * The feature flags a backend service's production server reports
- * (feature_flag{key, value, source} from its own .env, never 1Password):
- * Map key → { value, source: 'env'|'default' }. Empty when it reports none.
+ * (feature_flag{key, value, source}, read by the server from its running
+ * config, never from 1Password or a .env file): Map key → { value, source }.
+ * Empty when it reports none.
  */
 async function serverFlags(platformId, app = '') {
   const platform = PLATFORMS.find(x => x.id === platformId);
