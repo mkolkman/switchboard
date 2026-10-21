@@ -7863,6 +7863,7 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gfv-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #55556a; }
 .gfv-dot--firing, .gfv-dot--alerting { background: #e05a5a; }
 .gfv-dot--pending { background: #e0a830; }
+.gfv-dot--unknown { background: none; box-shadow: inset 0 0 0 1.5px #8a8aa0; }
 .gfv-dot--normal, .gfv-dot--inactive { background: #4cc479; opacity: 0.7; }
 .gfv-plat { flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; color: #9aa2ff; background: rgba(120,130,255,0.12); border-radius: 4px; padding: 1px 5px; }
 

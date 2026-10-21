@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('api', {
   getGrafanaConfig: () => ipcRenderer.invoke('grafana-config'),
   saveGrafanaConfig: (spec) => ipcRenderer.invoke('grafana-save-config', spec),
   getGrafanaAlerts: () => ipcRenderer.invoke('grafana-alerts'),
+  getGrafanaTargets: () => ipcRenderer.invoke('grafana-targets'),
   getGrafanaDashboards: () => ipcRenderer.invoke('grafana-dashboards'),
   getGrafanaVitals: (platform, app) => ipcRenderer.invoke('grafana-vitals', platform, app),
   getGrafanaLogs: (spec) => ipcRenderer.invoke('grafana-logs', spec),

@@ -202,20 +202,75 @@ function observabilityStatus(alerts, error = null, newErrors = 0) {
   return error ? 'none' : 'normal';
 }
 
+/** A backend's production servers Prometheus cannot reach now: [{ job, instance, up, lastUp }]. */
+function observabilityDown(component) {
+  const g = component?.grafana;
+  if (!g || component.kind !== 'backend') return [];
+  return (grafanaViewState.targets?.[`${g.platform}|${g.app || ''}`] || []).filter(t => t.up === 0);
+}
+
+/**
+ * A backend Grafana answered for but Prometheus has no server of in
+ * production: it does not report at all, as bad as down. Not when Grafana
+ * itself is unreachable (that is "unreachable", not "no data").
+ */
+function observabilityNoData(component) {
+  const g = component?.grafana;
+  const targets = grafanaViewState.targets;
+  if (!g || component.kind !== 'backend' || !targets) return false;
+  return !(targets[`${g.platform}|${g.app || ''}`] || []).length;
+}
+
+/** Down or not reporting: the backend's own problem, never the network's. */
+const observabilityOut = (c) => observabilityDown(c).length > 0 || observabilityNoData(c);
+
+/**
+ * Why a component's signals cannot be trusted now: a source that could not
+ * be reached (Grafana, usually off the office network; Bugsnag). Quiet is
+ * then not "all clear" but "unreachable", a lesser thing than a backend
+ * with no data (observabilityNoData). [reason]
+ */
+function observabilityBlind(component) {
+  const g = grafanaViewState;
+  const out = [];
+  if (component?.grafana && g.config?.hasToken) {
+    if (g.alertsError) out.push(g.alertsError);
+    else if (component.kind === 'backend' && g.targetsError) out.push(g.targetsError);
+  }
+  const problems = component?.bugsnag?.length ? observabilityProductionProblems(component) : null;
+  if (problems?.error) out.push(`No errors from Bugsnag: ${problems.error}`);
+  return out;
+}
+
+/** Whether anything watches a component: its backend in Grafana, or a Bugsnag project. */
+const observabilityWatched = (c) => !!(c?.grafana || c?.bugsnag?.length);
+
+/** The reasons over some components, each once; also when nothing watches any of them. */
+function observabilityBlindAll(components) {
+  const watched = components.filter(observabilityWatched);
+  if (components.length && !watched.length) return [`Nothing watches ${components.map(c => c.label).join(', ')}: no backend in Grafana and no Bugsnag project.`];
+  return [...new Set(watched.flatMap(observabilityBlind))];
+}
+
 /** New errors in a component's production version (0 until read). */
 function observabilityNewErrors(component) {
   return (observabilityProductionProblems(component)?.errors || []).filter(e => e.isNew).length;
 }
 
-/** A component's dot. */
+/** A component's dot: down counts as firing, and no signal is never ok. */
 function observabilityComponentStatus(c) {
-  return observabilityStatus(observabilityAlerts(c), c.error, observabilityNewErrors(c));
+  if (observabilityOut(c)) return 'firing';
+  if (!observabilityWatched(c)) return 'unknown';
+  const status = observabilityStatus(observabilityAlerts(c), c.error, observabilityNewErrors(c));
+  return status === 'normal' && observabilityBlind(c).length ? 'unknown' : status;
 }
 
 /** A product's dot: the worst of its components. */
 function observabilityProductStatus(p) {
-  const order = ['firing', 'pending', 'none', 'normal'];
-  return (p?.components || []).map(observabilityComponentStatus).sort((a, b) => order.indexOf(a) - order.indexOf(b))[0] || 'normal';
+  const order = ['firing', 'pending', 'unknown', 'none', 'normal'];
+  const watched = (p?.components || []).filter(observabilityWatched);
+  if (!watched.length) return 'unknown';
+  return watched.map(observabilityComponentStatus).sort((a, b) => order.indexOf(a) - order.indexOf(b))[0] || 'normal';
 }
 
 /** The newest tag any of a component's targets runs in production, with its date. */
@@ -244,10 +299,10 @@ function renderObservabilityList() {
       <span class="gfv-dot gfv-dot--${obsAttr(dot)}"></span><span class="gfv-row-title">${escapeHtml(title)}</span>${extra}</button>`;
   const list = products.map(p => {
     const open = s.expanded.has(p.id) || (sel.kind === 'component' && observabilityComponent(sel.id)?.product === p.id);
-    const firing = observabilityProductAlerts(p).filter(OBS_ACTIVE).length + p.components.reduce((n, c) => n + observabilityNewErrors(c), 0);
+    const firing = observabilityProductAlerts(p).filter(OBS_ACTIVE).length + p.components.reduce((n, c) => n + observabilityNewErrors(c) + (observabilityOut(c) ? 1 : 0), 0);
     const active = s.business?.[p.id]?.users?.active?.['7d']?.now;
     const head = `<div class="obs-prod-row"><button type="button" class="obs-fold" data-obs-fold="${obsAttr(p.id)}" title="${open ? 'Fold' : 'Show the components'}"><span class="ghv-fold${open ? '' : ' shut'}">${PICONS.chevronDown(9)}</span></button>
-      ${row(`data-obs-product="${obsAttr(p.id)}"`, sel.kind === 'product' && sel.id === p.id, observabilityProductStatus(p), p.label, `${active != null ? `<span class="obs-side-users" title="Active users, last 7 days">${escapeHtml(obsCount(active))}</span>` : ''}${firing ? `<span class="ghv-count" title="Active alerts and new errors">${firing}</span>` : ''}`)}</div>`;
+      ${row(`data-obs-product="${obsAttr(p.id)}"`, sel.kind === 'product' && sel.id === p.id, observabilityProductStatus(p), p.label, `${active != null ? `<span class="obs-side-users" title="Active users, last 7 days">${escapeHtml(obsCount(active))}</span>` : ''}${firing ? `<span class="ghv-count" title="Servers down, active alerts and new errors">${firing}</span>` : ''}`)}</div>`;
     const comps = open ? p.components.map(c => {
       const prod = c.error ? null : observabilityProductionTag(c);
       const extra = `<span class="obs-ver" title="${obsAttr(c.error || (prod ? `In production since ${obsDay(prod.date)}` : 'Nothing in production'))}">${escapeHtml(c.error ? '!' : prod?.tag || '–')}</span>`;
@@ -582,7 +637,7 @@ const obsFmt = (v) => (v < 10 ? v.toFixed(1) : String(Math.round(v)));
 
 // What each figure means, shown when you hover it.
 const OBS_FIGURE_HELP = {
-  'Status': 'The worst signal right now: Grafana alerts firing or pending, new Bugsnag errors since the release, or errors that doubled against the version before. All clear when there is none.',
+  'Status': 'The worst signal right now: a backend server that is down or reports no data to Prometheus, Grafana alerts firing or pending, new Bugsnag errors since the release, or errors that doubled against the version before. All clear when there is none and every source answered. Unreachable when Grafana or Bugsnag cannot be reached from here (for Grafana usually: not on the office network); that says nothing about the servers.',
   'Latest release': 'How long ago the newest version of any of its components reached production: a backend\'s deploy, or an app\'s promotion to production.',
   'Errors': 'Bugsnag error events an hour since the production version came out, against the same span on the version before. Every event counts, also repeats of one error.',
   'New errors': 'Distinct errors in Bugsnag first seen after the production version came out.',
@@ -618,10 +673,15 @@ function observabilityKeyFiguresHtml(components) {
     const r = observabilityState.problems.get(`${c.id}|${observabilityProductionTag(c)?.tag}|1`)?.rates;
     return r && r.before > 0 && r.now / r.before >= 2 && r.now >= 5;
   }).length;
-  const status = firing ? ['bad', `${firing} firing`]
+  const down = components.filter(c => observabilityDown(c).length);
+  const silent = components.filter(c => !observabilityDown(c).length && observabilityNoData(c));
+  const blind = observabilityBlindAll(components);
+  const status = down.length || silent.length || firing ? ['bad', [down.length && `${down.map(c => c.label).join(', ')} down`, silent.length && `${silent.map(c => c.label).join(', ')}: no data`, firing && `${firing} firing`].filter(Boolean).join(', ')]
     : pending || newErrors || jumps ? ['warn', [pending && `${pending} pending`, newErrors && `${newErrors} new error${newErrors === 1 ? '' : 's'}`, jumps && 'errors up'].filter(Boolean).join(', ')]
+    : blind.length ? ['info', 'Unreachable']
     : ['ok', 'All clear'];
-  const figures = [obsFigure('Status', escapeHtml(status[1]), alerts.length ? `${alerts.length} alert rule${alerts.length === 1 ? '' : 's'}` : '', status[0])];
+  const statusSub = status[1] === 'Unreachable' ? (grafanaViewState.alertsError || grafanaViewState.targetsError ? 'Grafana: office network?' : 'a source does not answer') : alerts.length ? `${alerts.length} alert rule${alerts.length === 1 ? '' : 's'}` : '';
+  const figures = [obsFigure('Status', escapeHtml(status[1]), statusSub, status[0], blind.length ? `${OBS_FIGURE_HELP.Status}\n\n${blind.join('\n')}` : undefined)];
 
   // The newest release of any component.
   const latest = components.map(c => ({ c, prod: c.error ? null : observabilityProductionTag(c) })).filter(x => x.prod).sort((a, b) => new Date(b.prod.date) - new Date(a.prod.date))[0];
@@ -660,6 +720,20 @@ function observabilityKeyFiguresHtml(components) {
 /** What wants a look now: firing alerts, new errors, a jump in errors, rollouts under way. */
 function observabilityAttentionHtml(components) {
   const rows = [];
+  for (const c of components) {
+    for (const t of observabilityDown(c)) {
+      const minutes = t.lastUp ? Math.max(1, Math.round(Date.now() / 60000 - t.lastUp / 60)) : null;
+      const since = minutes == null ? 'for over a day'
+        : `since ${new Date(t.lastUp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (${minutes < 90 ? `${minutes} min` : obsAgo(new Date(t.lastUp * 1000))})`;
+      rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--firing"></span><span class="obs-att-t">${escapeHtml(c.label)} is down: Prometheus has not reached ${escapeHtml(t.instance)} ${escapeHtml(since)}</span><button type="button" class="obs-link" data-obs-component="${obsAttr(c.id)}">Figures</button></div>`);
+    }
+  }
+  for (const c of components.filter(x => !observabilityDown(x).length && observabilityNoData(x))) {
+    rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--firing"></span><span class="obs-att-t">${escapeHtml(c.label)} reports no data: Prometheus has no production server of it at all (not scraped, or gone)</span><button type="button" class="obs-link" data-obs-component="${obsAttr(c.id)}">Figures</button></div>`);
+  }
+  for (const reason of observabilityBlindAll(components)) {
+    rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--unknown"></span><span class="obs-att-t">${escapeHtml(reason)}</span></div>`);
+  }
   const alerts = [...new Map(components.flatMap(observabilityAlerts).filter(OBS_ACTIVE).map(a => [a.uid, a])).values()];
   rows.push(...alerts.map(grafanaAlertRow));
   const seenErrors = new Set();
@@ -772,7 +846,9 @@ function observabilityUsageRowHtml(p) {
   const b = observabilityState.business?.[p.id] || { users: {}, workouts: { all: {}, channels: {}, types: {} } };
   const rc = observabilityState.revenue?.[p.id];
   if (!observabilityState.business?.[p.id] && !rc) {
-    return `<div class="gh-muted">${observabilityState.business ? 'No usage figures for this product yet: they come once its backends export the business metrics.' : grafanaViewState.config?.hasToken ? 'Reading the usage figures…' : 'Usage figures come from Grafana, which is not connected.'}</div>`;
+    const down = (p.components || []).some(observabilityOut);
+    const unreachable = grafanaViewState.alertsError || grafanaViewState.targetsError;
+    return `<div class="gh-muted">${down ? 'No usage figures now: its backend is down or reports no data, so Prometheus has nothing recent to read.' : unreachable ? 'No usage figures: Grafana is unreachable from here (office network?).' : observabilityState.business ? 'No usage figures for this product yet: they come once its backends export the business metrics.' : grafanaViewState.config?.hasToken ? 'Reading the usage figures…' : 'Usage figures come from Grafana, which is not connected.'}</div>`;
   }
   const w = (pair) => (pair ? obsCount(pair.now) : '–');
   const sub = (kind) => `24h ${w(b.users[kind]?.['1d'])} · 30d ${w(b.users[kind]?.['30d'])}`;

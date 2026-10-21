@@ -73,11 +73,20 @@ async function saveConfig({ url, token }) {
 async function api(apiPath) {
   const { url, token } = await credentials();
   if (!token) throw new Error('No Grafana token yet.');
-  const res = await fetch(url + apiPath, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+  const unreachable = 'Grafana is unreachable from here: not on the office network or the VPN?';
+  let res;
+  try {
+    res = await fetch(url + apiPath, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+  } catch {
+    throw new Error(unreachable);
+  }
   const text = await res.text();
   if (!res.ok) {
     let message = text.slice(0, 300);
-    try { const j = JSON.parse(text); message = j.message || j.error || message; } catch {}
+    let json = false;
+    try { const j = JSON.parse(text); message = j.message || j.error || message; json = true; } catch {}
+    // A bare 403 comes from in front of Grafana (a firewall or allowlist), not from Grafana itself.
+    if (res.status === 403 && !json) throw new Error(unreachable);
     throw new Error(`Grafana: ${message || res.status}`);
   }
   return text ? JSON.parse(text) : null;
@@ -382,6 +391,29 @@ async function serverFlags(platformId, app = '') {
   return out;
 }
 
+/**
+ * Whether Prometheus reaches each backend's production servers, per service
+ * as the components name it ("platform|app", and "platform|" for all of a
+ * platform's): [{ job, instance, up, lastUp }], lastUp the last time it
+ * answered in the past day (epoch seconds, null when it did not).
+ */
+async function getTargets() {
+  const [now, last] = await Promise.all([
+    promInstant(`max by (job, instance) (up{env="${ENV}"})`),
+    promInstant(`max by (job, instance) (max_over_time((timestamp(up{env="${ENV}"} == 1))[1d:1m]))`),
+  ]);
+  const lastUp = new Map(last.map(s => [`${s.labels.job}|${s.labels.instance}`, s.value]));
+  const targets = now.map(s => ({ job: s.labels.job, instance: s.labels.instance, up: s.value, lastUp: lastUp.get(`${s.labels.job}|${s.labels.instance}`) ?? null }));
+  const services = {};
+  for (const platform of PLATFORMS) {
+    for (const app of ['', ...platform.apps]) {
+      const jobs = serviceOf(platform, app).jobs;
+      services[`${platform.id}|${app}`] = targets.filter(t => jobs.includes(t.job));
+    }
+  }
+  return { services };
+}
+
 /** Every product's business figures; empty until the backends export them. */
 async function getBusiness() {
   const queries = businessQueries();
@@ -410,7 +442,7 @@ function asResult(promise) {
 
 module.exports = {
   PLATFORMS, DEFAULT_URL, URL_SERVICE, TOKEN_SERVICE, ACCOUNT,
-  getConfig, saveConfig, getAlerts, getDashboards, getVitals, getLogs, getLogContext, getAlertSeries, getBusiness, serverFlags,
+  getConfig, saveConfig, getAlerts, getTargets, getDashboards, getVitals, getLogs, getLogContext, getAlertSeries, getBusiness, serverFlags,
   shapeBusiness, businessQueries,
   alertPlatform, alertApps, logQuery, serviceOf, sessionToolsNote, asResult,
 };

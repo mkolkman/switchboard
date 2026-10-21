@@ -27,6 +27,7 @@ const GRAFANA_RANGES = [['15m', 900], ['1h', 3600], ['6h', 21600], ['24h', 86400
 const grafanaViewState = {
   config: null, error: null,
   alerts: null, alertsError: null, dashboards: null,
+  targets: null, targetsError: null, // "platform|app" → its production servers as Prometheus reaches them (grafana.js getTargets)
   platform: 'mlc', // the logs' platform, set from the component they are opened on
   vitals: new Map(), // "platform|app" → a backend's figures
   // product, component or infra (observability-view.js); alert (uid), dashboard (uid) or logs (component id or null)
@@ -59,11 +60,23 @@ async function loadGrafanaConfig() {
   return grafanaViewState.config;
 }
 
-/** Alerts (and the badge, and notifications for newly firing ones). */
+/** Whether Prometheus reaches the backends' production servers; read with the alerts. */
+async function loadGrafanaTargets() {
+  const s = grafanaViewState;
+  const result = await window.api.getGrafanaTargets().catch(err => ({ error: err?.message || String(err) }));
+  if (result?.error) { s.targetsError = result.error; s.targets = null; return; }
+  s.targetsError = null;
+  s.targets = result.services || {};
+}
+
+/** Alerts (and the badge, and notifications for newly firing ones), and which servers are down. */
 async function loadGrafanaAlerts() {
   const s = grafanaViewState;
-  const result = await window.api.getGrafanaAlerts().catch(err => ({ error: err?.message || String(err) }));
-  if (result?.error) { s.alertsError = result.error; return; }
+  const [result] = await Promise.all([
+    window.api.getGrafanaAlerts().catch(err => ({ error: err?.message || String(err) })),
+    loadGrafanaTargets(),
+  ]);
+  if (result?.error) { s.alertsError = result.error; paintGrafanaBadge(); return; }
   s.alertsError = null;
   s.alerts = result.alerts || [];
   const firing = new Set(s.alerts.filter(a => a.state === 'firing').map(a => a.uid));
@@ -126,7 +139,8 @@ function paintGrafanaBadge() {
   if (!tab) return;
   document.querySelectorAll('.gfv-tab-badge').forEach(b => b.remove());
   const alerts = grafanaViewState.alerts || [];
-  const kind = alerts.some(a => a.state === 'firing') ? 'firing' : alerts.some(a => a.state === 'pending') ? 'pending' : null;
+  const down = (observabilityState.overview?.products || []).some(p => p.components.some(observabilityOut));
+  const kind = down || alerts.some(a => a.state === 'firing') ? 'firing' : alerts.some(a => a.state === 'pending') ? 'pending' : null;
   if (!kind) return;
   const host = tab.style.display === 'none' && more ? more : tab;
   const badge = document.createElement('span');

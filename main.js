@@ -856,6 +856,7 @@ ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisa
 ipcMain.handle('grafana-config', () => grafana.asResult(grafana.getConfig()));
 ipcMain.handle('grafana-save-config', (_e, spec) => grafana.asResult(grafana.saveConfig(spec || {})));
 ipcMain.handle('grafana-alerts', () => grafana.asResult(grafana.getAlerts()));
+ipcMain.handle('grafana-targets', () => grafana.asResult(grafana.getTargets()));
 ipcMain.handle('grafana-dashboards', () => grafana.asResult(grafana.getDashboards()));
 ipcMain.handle('grafana-vitals', (_e, platform, app) => grafana.asResult(grafana.getVitals(String(platform || ''), String(app || ''))));
 ipcMain.handle('grafana-logs', (_e, spec) => grafana.asResult(grafana.getLogs(spec || {})));
