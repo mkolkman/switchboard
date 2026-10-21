@@ -892,7 +892,7 @@ async function getPullRequest(owner, repo, number) {
         reviewThreads(last: 50) { nodes { id isResolved isOutdated path line comments(first: 20) { nodes { databaseId ${COMMENT_FIELDS} } } } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
-          ... on CheckRun { name status conclusion detailsUrl isRequired(pullRequestNumber: $number) }
+          ... on CheckRun { databaseId name status conclusion detailsUrl isRequired(pullRequestNumber: $number) checkSuite { workflowRun { databaseId } } }
           ... on StatusContext { context state targetUrl isRequired(pullRequestNumber: $number) }
         } } } } } }
       }
@@ -950,7 +950,8 @@ async function getPullRequest(owner, repo, number) {
     checks: {
       state: commit?.statusCheckRollup?.state || null,
       runs: (commit?.statusCheckRollup?.contexts?.nodes || []).map(n => n.__typename === 'CheckRun'
-        ? { name: n.name, status: n.status, conclusion: n.conclusion, url: n.detailsUrl, required: !!n.isRequired }
+        // jobId and runId only for GitHub Actions: what Re-run needs.
+        ? { name: n.name, status: n.status, conclusion: n.conclusion, url: n.detailsUrl, required: !!n.isRequired, jobId: n.checkSuite?.workflowRun ? n.databaseId : null, runId: n.checkSuite?.workflowRun?.databaseId || null }
         : { name: n.context, status: n.state === 'PENDING' || n.state === 'EXPECTED' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: n.state === 'SUCCESS' ? 'SUCCESS' : n.state === 'PENDING' || n.state === 'EXPECTED' ? null : 'FAILURE', url: n.targetUrl, required: !!n.isRequired }),
     },
   };
@@ -1058,6 +1059,25 @@ async function mergePullRequest(owner, repo, number, { method, expectedHeadOid }
 }
 
 /** Turn GitHub's auto-merge on (with a merge method) or off for a PR. */
+/**
+ * Run GitHub Actions checks of a PR again: one job (`jobId`), or whole
+ * workflow runs (`runIds`), each all its jobs or only the failed ones
+ * (`failed`). GitHub takes a run only once it has finished.
+ */
+async function rerunChecks(owner, repo, { jobId = null, runIds = [], failed = false } = {}) {
+  const base = `/repos/${owner}/${repo}/actions`;
+  if (jobId) {
+    await rest('POST', `${base}/jobs/${Number(jobId)}/rerun`);
+    return { rerun: 1 };
+  }
+  const ids = [...new Set(runIds.map(Number).filter(Boolean))];
+  if (!ids.length) throw new Error('Nothing to run again.');
+  const results = await Promise.allSettled(ids.map(id => rest('POST', `${base}/runs/${id}/${failed ? 'rerun-failed-jobs' : 'rerun'}`)));
+  const errors = results.filter(r => r.status === 'rejected').map(r => r.reason?.message || String(r.reason));
+  if (errors.length === ids.length) throw new Error(errors[0]);
+  return { rerun: ids.length - errors.length, errors };
+}
+
 async function setAutoMerge(owner, repo, number, { on, method }) {
   if (on && !MERGE_METHODS.has(method)) throw new Error(`Unknown merge method: ${method}`);
   const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
@@ -1618,7 +1638,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, checksSummary, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, rerunChecks, checksSummary, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed, graphql,

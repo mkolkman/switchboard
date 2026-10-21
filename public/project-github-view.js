@@ -894,12 +894,24 @@ function githubChecksRow(pr, state) {
   const sorted = [...runs].sort((a, b) => rank[checkRunState(a)[0]] - rank[checkRunState(b)[0]] || (b.required - a.required) || a.name.localeCompare(b.name));
   const openKey = `checks:${pr.repo}#${pr.number}`;
   const open = state.open.has(openKey) ? state.open.get(openKey) : kind !== 'ok';
+  // Re-run: GitHub Actions only, and GitHub takes a workflow run only once all of it has finished.
+  const finished = (runId) => runs.every(r => r.runId !== runId || r.status === 'COMPLETED');
+  const failedRuns = [...new Set(runs.filter(r => r.runId && checkRunState(r)[0] === 'bad' && finished(r.runId)).map(r => r.runId))];
+  const allRuns = [...new Set(runs.filter(r => r.runId && finished(r.runId)).map(r => r.runId))];
+  const busy = state.busy ? 'disabled' : '';
+  const rerunning = state.busy === 'rerun';
+  const actions = pr.state === 'OPEN' && allRuns.length ? `<div class="gh-check-actions">
+      ${failedRuns.length ? `<button type="button" class="ws-ghost ws-ghost--sm" data-rerun="failed" data-runs="${failedRuns.join(',')}" ${busy} title="Run the failed jobs again, in ${failedRuns.length} workflow run${failedRuns.length === 1 ? '' : 's'}">${PICONS.refresh(11)}<span>${rerunning ? 'Starting…' : 'Re-run failed'}</span></button>` : ''}
+      <button type="button" class="ws-ghost ws-ghost--sm" data-rerun="all" data-runs="${allRuns.join(',')}" ${busy} title="Run every job again, in ${allRuns.length} workflow run${allRuns.length === 1 ? '' : 's'}${allRuns.length < new Set(runs.filter(r => r.runId).map(r => r.runId)).size ? ' (runs still going are left out)' : ''}">${PICONS.refresh(11)}<span>${rerunning && !failedRuns.length ? 'Starting…' : 'Re-run all'}</span></button>
+    </div>` : '';
   return `<div class="gh-srow"><span class="gh-srow-label">CI</span><div class="gh-srow-main gh-fold${open ? '' : ' collapsed'}" data-key="${escapeHtml(openKey)}">
     <button type="button" class="gh-srow-line gh-fold-h"><span class="gh-state gh-state--${kind}">${escapeHtml(summary)}</span><span class="arrow">&#9660;</span>
       <span class="gh-muted gh-live" title="Refreshed automatically while this PR is open">live</span></button>
-    <div class="gh-fold-body">${sorted.map(r => {
+    <div class="gh-fold-body">${actions}${sorted.map(r => {
       const [k, text] = checkRunState(r);
-      return `<a class="gh-check" href="${escapeHtml(r.url || pr.url)}" title="${escapeHtml(r.name)}: ${text}${r.required ? ' (required)' : ''}"><span class="gh-ci gh-ci--${k === 'bad' ? 'fail' : k === 'pending' ? 'pending' : k === 'ok' ? 'ok' : 'skip'}"></span><span class="gh-check-name">${escapeHtml(r.name)}</span>${r.required ? '<span class="gh-req">required</span>' : ''}<span class="gh-check-state">${text}</span></a>`;
+      const rerun = pr.state === 'OPEN' && r.jobId && finished(r.runId)
+        ? `<button type="button" class="gh-check-rerun" data-rerun="job" data-job="${escapeHtml(String(r.jobId))}" ${busy} title="Run ${escapeHtml(r.name)} again">${PICONS.refresh(11)}</button>` : '';
+      return `<div class="gh-check-row"><a class="gh-check" href="${escapeHtml(r.url || pr.url)}" title="${escapeHtml(r.name)}: ${text}${r.required ? ' (required)' : ''}"><span class="gh-ci gh-ci--${k === 'bad' ? 'fail' : k === 'pending' ? 'pending' : k === 'ok' ? 'ok' : 'skip'}"></span><span class="gh-check-name">${escapeHtml(r.name)}</span>${r.required ? '<span class="gh-req">required</span>' : ''}<span class="gh-check-state">${text}</span></a>${rerun}</div>`;
     }).join('')}</div></div></div>`;
 }
 
@@ -1656,6 +1668,22 @@ function githubPrTypeButton(item, pr, state) {
 function bindGithubPrActions(project, panel, pr) {
   const state = githubTabState(project.id);
   const target = githubTarget(`${pr.repo}#${pr.number}`);
+  panel.querySelectorAll('[data-rerun]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const kind = btn.dataset.rerun;
+      const spec = kind === 'job' ? { jobId: Number(btn.dataset.job) } : { runIds: btn.dataset.runs.split(',').map(Number), failed: kind === 'failed' };
+      state.busy = 'rerun';
+      paintGithubPanel(project);
+      const result = await window.api.rerunGithubChecks(target, spec);
+      state.busy = null;
+      state.notice = result?.error ? { kind: 'bad', text: result.error }
+        : { kind: 'ok', text: `${kind === 'job' ? 'The job runs' : kind === 'failed' ? 'The failed jobs run' : 'All jobs run'} again${result.errors?.length ? `; ${result.errors.length} run${result.errors.length === 1 ? '' : 's'} could not start: ${result.errors[0]}` : ''}. The checks update here.` };
+      await loadGithubDetail(project, { quiet: true });
+      paintGithubPanel(project);
+    };
+  });
   const typeBtn = panel.querySelector('#gh-pr-type');
   if (typeBtn) {
     typeBtn.onclick = (e) => {

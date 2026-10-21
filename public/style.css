@@ -7467,6 +7467,14 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-notice--bad { color: #e08a8a; }
 .gh-notice--ok { color: #6fcf8f; }
 
+.gh-check-row { display: flex; align-items: center; gap: 4px; }
+.gh-check-row .gh-check { flex: 1; min-width: 0; }
+.gh-check-rerun { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: none; color: #7a7a92; cursor: pointer; opacity: 0; }
+.gh-check-row:hover .gh-check-rerun, .gh-check-rerun:focus-visible { opacity: 1; }
+.gh-check-rerun:hover:not(:disabled) { color: #e2e2f2; background: rgba(255,255,255,0.08); }
+.gh-check-rerun:disabled { cursor: default; }
+.gh-check-actions { display: flex; gap: 6px; padding: 2px 0 6px; }
+.gh-check-actions .ws-ghost { display: inline-flex; align-items: center; gap: 5px; }
 .gh-check { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: #b8b8cc; text-decoration: none; }
 .gh-check:hover .gh-check-name { color: #e2e2f2; text-decoration: underline; }
 .gh-check-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
