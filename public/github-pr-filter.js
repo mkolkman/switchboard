@@ -8,6 +8,18 @@
 (function (root) {
   const PR_TYPES = ['security', 'bugfix', 'feature', 'upkeep'];
   const PR_TYPE_LABELS = { security: 'Security', bugfix: 'Bugfix', feature: 'Feature', upkeep: 'Upkeep' };
+  // An icon per type (24-unit paths, stroked in the type's colour): shield, bug, sparkles, wrench.
+  const PR_TYPE_PATHS = {
+    security: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    bugfix: '<path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9M6.5 13H3M21 13h-3.5M6 9 3.5 7M18 9l2.5-2M6 17l-2.5 2M18 17l2.5 2"/>',
+    feature: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+    upkeep: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+  };
+
+  /** A type's icon as inline SVG. */
+  function prTypeIcon(type, size = 12) {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PR_TYPE_PATHS[type] || ''}</svg>`;
+  }
 
   const SECURITY_LABEL = /^(security-scan|severity:.+|security)$/i;
   const BUG_LABEL = /^(type:broken|type:correctness|crash|bug)$/i;
@@ -106,7 +118,7 @@
     return !!(String(filter.q || '').trim() || filter.product || filter.repo || filter.plan || filter.types?.length);
   }
 
-  const api = { PR_TYPES, PR_TYPE_LABELS, PRODUCT_LABELS, REPO_PRODUCTS, prType, prProducts, prPlans, prMatches, filterActive };
+  const api = { PR_TYPES, PR_TYPE_LABELS, prTypeIcon, PRODUCT_LABELS, REPO_PRODUCTS, prType, prProducts, prPlans, prMatches, filterActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else Object.assign(root, api);
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -8112,7 +8112,8 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .ghv-types { display: flex; flex-wrap: wrap; gap: 4px; }
 .ghv-type-btn { padding: 1px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); background: none; font: inherit; font-size: 11px; color: #8a8aa0; cursor: pointer; }
 .ghv-type-btn.on { color: #e0e0f0; background: rgba(120,130,255,0.18); border-color: rgba(120,130,255,0.4); }
-.ghv-type { flex: none; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 5px; border-radius: 4px; }
+.ghv-type { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 16px; border-radius: 4px; }
+.ghv-type-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 22px; padding: 0; }
 .ghv-type--security { color: #ff9a9a; background: rgba(224,90,90,0.14); }
 .ghv-type--bugfix { color: #e0b860; background: rgba(224,176,74,0.13); }
 .ghv-type--feature { color: #9aa2ff; background: rgba(120,130,255,0.12); }

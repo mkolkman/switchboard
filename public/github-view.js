@@ -9,7 +9,7 @@
 // Depends on: project-github-view.js (GITHUB_VIEW_PROJECT, githubTabState,
 // githubPrChip, githubItemKey, selectGithubItem, paintGithubPanel,
 // renderProjectGithubTab), utils.js (escapeHtml, formatDate), PICONS,
-// github-pr-filter.js (prType, prProducts, prPlans, prMatches, filterActive).
+// github-pr-filter.js (prType, prTypeIcon, prProducts, prPlans, prMatches, filterActive).
 
 const githubViewContent = document.getElementById('github-content');
 const githubViewer = document.getElementById('github-viewer');
@@ -98,7 +98,7 @@ function githubViewRow(item, selectedKey) {
   const type = prType(item);
   return `<div class="ghv-row${key === selectedKey ? ' selected' : ''}" data-item="${escapeHtml(key)}" title="${escapeHtml(`${item.repo}#${item.number}: ${item.title}`)}">
       <div class="ghv-row-title">${escapeHtml(item.title)}</div>
-      <div class="ghv-row-meta"><span class="ghv-type ghv-type--${type.type}" title="${escapeHtml(`${PR_TYPE_LABELS[type.type]}: ${type.reason}`)}">${escapeHtml(PR_TYPE_LABELS[type.type])}</span><span class="ghv-row-ref">${escapeHtml(githubRepoName(item.repo))}</span>
+      <div class="ghv-row-meta"><span class="ghv-type ghv-type--${type.type}" title="${escapeHtml(`${PR_TYPE_LABELS[type.type]}: ${type.reason}`)}" aria-label="${escapeHtml(PR_TYPE_LABELS[type.type])}">${prTypeIcon(type.type)}</span><span class="ghv-row-ref">${escapeHtml(githubRepoName(item.repo))}</span>
         ${item.author && item.author !== 'ghost' ? `<span class="ghv-row-author">${escapeHtml(item.author)}</span>` : ''}
         <span class="ws-flex"></span>${githubPrChip(pr, key)}</div>
     </div>`;
@@ -182,7 +182,7 @@ function githubViewFilterHtml() {
         <select id="ghv-repo" class="gfv-select" title="Repository">${option('', 'All repos', f.repo)}${repos.map(r => option(r, githubRepoName(r), f.repo)).join('')}</select>
         <select id="ghv-plan" class="gfv-select" title="Plan: the pitch or wayfinder map the PR's issue belongs to">${option('', 'All plans', f.plan)}${planList.map(p => option(p.key, p.title, f.plan)).join('')}</select>
       </div>
-      <div class="ghv-types">${PR_TYPES.map(t => `<button type="button" class="ghv-type-btn ghv-type--${t}${f.types.includes(t) ? ' on' : ''}" data-type="${t}">${escapeHtml(PR_TYPE_LABELS[t])}</button>`).join('')}</div>
+      <div class="ghv-types">${PR_TYPES.map(t => `<button type="button" class="ghv-type-btn ghv-type--${t}${f.types.includes(t) ? ' on' : ''}" data-type="${t}" title="${escapeHtml(PR_TYPE_LABELS[t])}" aria-label="${escapeHtml(PR_TYPE_LABELS[t])}">${prTypeIcon(t, 13)}</button>`).join('')}</div>
     </div>`;
 }
 
