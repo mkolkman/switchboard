@@ -3,18 +3,17 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Flags for the Observability tab: which switches decide whether a feature is
+// Flags for the Production tab: which switches decide whether a feature is
 // there at all in a production version, and how they stand now. Backends:
-// the env() switches in config/ at the production tag, valued from the
-// production .env in 1Password (the item deploy.yml names at that tag; only
-// the flag keys are kept, the rest of the file is dropped at once). Apps: the
-// flag functions in their flag files at the production tag (remote, debug
-// builds only, or fixed), valued from Firebase Remote Config, read with the
-// gcloud Application Default Credentials. Insider and premium rules are left
-// out. Each flag points at the PR that added it, found with `git log -S` in
-// the local clone. Read-only.
+// the env() switches in config/ at the production tag, valued by what the
+// production server itself reports (feature_flag in Prometheus, read through
+// grafana.js; no .env or secret ever reaches Switchboard). Apps: the flag
+// functions in their flag files at the production tag (remote, debug builds
+// only, or fixed), valued from Firebase Remote Config, read with the gcloud
+// Application Default Credentials. Insider and premium rules are left out.
+// Each flag points at the PR that added it, found with `git log -S` in the
+// local clone. Read-only.
 
-const OP_ACCOUNT = 'movelabstudio.1password.com';
 const CACHE_MS = 10 * 60 * 1000;
 
 // Env keys that are flags by their name; a component can name more.
@@ -41,17 +40,6 @@ function envFlagsInConfig(files, extra = []) {
       seen.add(key);
       out.push({ key, fallback: m[2] != null ? m[2].trim().replace(/^['"]|['"]$/g, '') : null, file });
     }
-  }
-  return out;
-}
-
-/** KEY=VALUE lines of a .env, as a Map (quotes taken off, comments skipped). */
-function parseDotenv(text) {
-  const out = new Map();
-  for (const line of String(text || '').split('\n')) {
-    const m = line.match(/^\s*(?:export\s+)?([A-Za-z0-9_.]+)\s*=\s*(.*?)\s*$/);
-    if (!m || line.trim().startsWith('#')) continue;
-    out.set(m[1], m[2].replace(/^(['"])(.*)\1$/, '$2'));
   }
   return out;
 }
@@ -158,46 +146,6 @@ function readRemoteConfig(project, { force = false } = {}) {
   return promise;
 }
 
-// --- 1Password ---
-
-/** The op:// reference a deploy workflow reads the production .env from (the tag side of its ternary). */
-function productionEnvRef(workflow) {
-  const line = String(workflow || '').split('\n').find(l => /LOCATION_1PASSWORD_ENV\s*:/.test(l));
-  const m = line?.match(/refs\/tags\/'\)\s*&&\s*'(op:\/\/[^']+)'/) || line?.match(/(op:\/\/[^'"\s]+)/);
-  return m ? m[1] : null;
-}
-
-const envCache = new Map(); // op ref → { at, promise }
-
-/**
- * The flag keys (and only those) of a 1Password .env item, and when the item
- * last changed: { values: Map, title, updated }.
- */
-function readEnvItem(ref, keys, { force = false } = {}) {
-  const cacheKey = `${ref}|${keys.join(',')}`;
-  const hit = envCache.get(cacheKey);
-  if (!force && hit && Date.now() - hit.at < CACHE_MS) return hit.promise;
-  const [, vault, item] = ref.match(/^op:\/\/([^/]+)\/([^/]+)\//) || [];
-  if (!vault) return Promise.reject(new Error(`Not a 1Password reference: ${ref}`));
-  const promise = new Promise((resolve, reject) => {
-    execFile('op', ['item', 'get', item, '--vault', vault, '--account', OP_ACCOUNT, '--format', 'json'], {
-      timeout: 120000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}` },
-    }, (err, stdout, stderr) => {
-      if (err) { reject(new Error(`1Password: ${String(stderr || err.message).trim().split('\n')[0]}`)); return; }
-      try {
-        const json = JSON.parse(stdout);
-        const notes = (json.fields || []).find(f => f.id === 'notesPlain' || f.purpose === 'NOTES')?.value || '';
-        const all = parseDotenv(notes);
-        resolve({ values: new Map(keys.filter(k => all.has(k)).map(k => [k, all.get(k)])), title: json.title || '', updated: json.updated_at || null });
-      } catch (e) {
-        reject(new Error(`1Password answered something unexpected: ${e.message}`));
-      }
-    });
-  }).catch(err => { envCache.delete(cacheKey); throw err; });
-  envCache.set(cacheKey, { at: Date.now(), promise });
-  return promise;
-}
-
 // --- Where a flag came from ---
 
 const addedCache = new Map(); // "repo|needle" → Promise<sha|null>
@@ -225,6 +173,6 @@ function commitThatAdded(repo, needle, paths) {
 }
 
 module.exports = {
-  OP_ACCOUNT, isTechnical, envFlagsInConfig, parseDotenv, flagValue, appFlagsInFile, remoteValue,
-  readRemoteConfig, productionEnvRef, readEnvItem, commitThatAdded,
+  isTechnical, envFlagsInConfig, flagValue, appFlagsInFile, remoteValue,
+  readRemoteConfig, commitThatAdded,
 };

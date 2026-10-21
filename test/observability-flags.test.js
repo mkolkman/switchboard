@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isTechnical, envFlagsInConfig, parseDotenv, flagValue, appFlagsInFile, remoteValue, productionEnvRef } = require('../observability-flags');
+const { isTechnical, envFlagsInConfig, flagValue, appFlagsInFile, remoteValue } = require('../observability-flags');
 
 test('envFlagsInConfig: flag-like env keys with their default, and the ones a component names', () => {
   const files = [
@@ -15,9 +15,7 @@ test('envFlagsInConfig: flag-like env keys with their default, and the ones a co
   ]);
 });
 
-test('parseDotenv and flagValue: the .env\'s values as on, off or themselves', () => {
-  const env = parseDotenv('# comment\nA_ENABLED=true\nB_ENABLED="false"\nexport C=wna\nD=\n');
-  assert.deepEqual([...env], [['A_ENABLED', 'true'], ['B_ENABLED', 'false'], ['C', 'wna'], ['D', '']]);
+test('flagValue: a value as on, off or itself', () => {
   assert.equal(flagValue('true'), 'on');
   assert.equal(flagValue('0'), 'off');
   assert.equal(flagValue(null), 'off');
@@ -99,8 +97,3 @@ test('remoteValue: the value for everyone, and per condition by name with its ro
   assert.equal(remoteValue(undefined), null);
 });
 
-test('productionEnvRef: the tag side of deploy.yml\'s 1Password reference', () => {
-  const yml = "env:\n  LOCATION_1PASSWORD_ENV: ${{ startsWith(github.ref, 'refs/tags/') && 'op://vault/prod/notesPlain' || 'op://vault/dev/notesPlain' }}\n";
-  assert.equal(productionEnvRef(yml), 'op://vault/prod/notesPlain');
-  assert.equal(productionEnvRef('nothing'), null);
-});

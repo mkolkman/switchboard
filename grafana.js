@@ -19,11 +19,12 @@ const ENV = 'prod';
 const ERROR_LEVELS = 'error|critical|emergency|alert';
 
 // What tells the platforms apart: the Prometheus job, the Loki app, the metric
-// prefix, and the repo a Claude session looks in. RP3 only ships logs.
+// prefix, and the repo a Claude session looks in. RP3 ships logs, and its
+// /metrics only the business figures and flags (no request metrics).
 const PLATFORMS = [
   { id: 'mlc', label: 'MLC', jobs: ['movelab-connect'], apps: ['MoveLabConnect'], prefix: 'mlc', repos: { MoveLabConnect: 'MoveLab-Connect-Web' } },
   { id: 'nohrd', label: 'NOHRD', jobs: ['nohrd-account', 'nohrd-data'], apps: ['nohrd-account', 'nohrd-data'], prefix: 'wna|wnd', repos: { 'nohrd-account': 'NOHRD-Account', 'nohrd-data': 'NOHRD-Data' } },
-  { id: 'rp3', label: 'RP3', jobs: [], apps: ['rp3'], prefix: null, repos: { rp3: 'RP3-Rowing-Web' } },
+  { id: 'rp3', label: 'RP3', jobs: ['rp3'], apps: ['rp3'], prefix: null, repos: { rp3: 'RP3-Rowing-Web' } },
 ];
 
 // --- Credentials ---
@@ -364,6 +365,22 @@ function businessQueries() {
   return q;
 }
 
+/**
+ * The feature flags a backend service's production server reports
+ * (feature_flag{key, value, source} from its own .env, never 1Password):
+ * Map key → { value, source: 'env'|'default' }. Empty when it reports none.
+ */
+async function serverFlags(platformId, app = '') {
+  const platform = PLATFORMS.find(x => x.id === platformId);
+  if (!platform) throw new Error(`Unknown platform: ${platformId}`);
+  const p = serviceOf(platform, app);
+  if (!p.jobs.length) return new Map();
+  const series = await promInstant(`max by (key, value, source) (feature_flag{job=~"${regexOf(p.jobs)}", env="${ENV}"})`);
+  const out = new Map();
+  for (const s of series) if (s.labels.key) out.set(s.labels.key, { value: s.labels.value ?? '', source: s.labels.source || 'env' });
+  return out;
+}
+
 /** Every product's business figures; empty until the backends export them. */
 async function getBusiness() {
   const queries = businessQueries();
@@ -392,7 +409,7 @@ function asResult(promise) {
 
 module.exports = {
   PLATFORMS, DEFAULT_URL, URL_SERVICE, TOKEN_SERVICE, ACCOUNT,
-  getConfig, saveConfig, getAlerts, getDashboards, getVitals, getLogs, getLogContext, getAlertSeries, getBusiness,
+  getConfig, saveConfig, getAlerts, getDashboards, getVitals, getLogs, getLogContext, getAlertSeries, getBusiness, serverFlags,
   shapeBusiness, businessQueries,
   alertPlatform, alertApps, logQuery, serviceOf, sessionToolsNote, asResult,
 };

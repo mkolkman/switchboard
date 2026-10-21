@@ -12,8 +12,9 @@
 // Releases and errors come through observability.js (main); everything
 // Grafana from grafana-view.js, which draws the alert, dashboard and logs
 // pages and calls in here for the rest. Flags: what the production version
-// switches on or off, from its code and the live values (1Password .env for
-// a backend, Remote Config for an app), features apart from technical ones.
+// switches on or off, from its code and the live values (what the server
+// reports for a backend, Remote Config for an app), features apart from
+// technical ones.
 // Usage: the business figures each backend exports as business_* gauges
 // (users, workouts, training), with subscriptions and revenue read from
 // RevenueCat directly (revenuecat.js); a row on the product's page and a
@@ -100,7 +101,7 @@ async function loadObservabilityBusiness() {
   await revenue;
 }
 
-/** A component's production flags, read once (1Password may ask to unlock). */
+/** A component's production flags, read once. */
 function loadObservabilityFlags(componentId) {
   const s = observabilityState;
   if (s.flags.has(componentId)) return;
@@ -445,7 +446,7 @@ function observabilityFlagRow(f) {
         <div class="obs-flag-states">${platforms.map(([p, e]) => `<div class="obs-flag-state">${platforms.length > 1 || p === 'iOS' ? `<span class="obs-flag-plat">${escapeHtml(p)}</span>` : ''}${observabilityFlagState(e)}</div>`).join('')}</div>${pr}</div>`;
   }
   return `<div class="obs-flag-row"><span class="obs-flag-name" title="${obsAttr(f.file || '')}">${escapeHtml(f.name)}</span>
-      <div class="obs-flag-states"><div class="obs-flag-state">${obsPill(f.value)}${f.from === 'default' ? '<span class="gh-muted">default, not set in the .env</span>' : ''}</div></div>${pr}</div>`;
+      <div class="obs-flag-states"><div class="obs-flag-state">${obsPill(f.value)}${f.from === 'default' ? '<span class="gh-muted">default, not set on the server</span>' : f.from === 'code' ? '<span class="gh-muted">code default</span>' : ''}</div></div>${pr}</div>`;
 }
 
 /** A component's flags: the features, the technical ones folded (or both open on its own page). */
@@ -459,10 +460,12 @@ function observabilityFlagsHtml(c, { compact = false } = {}) {
   const techOpen = observabilityState.unfolded.has(techKey);
   const remoteOnlyKey = `rconly:${c.id}`;
   const notes = [];
-  if (r.env) notes.push(`<span>Values from 1Password "${escapeHtml(r.env.title)}", last changed ${escapeHtml(obsDay(r.env.updated))}</span>`);
-  const late = r.env?.changedAfterDeploy ? `<span class="obs-flag-warn">changed after the deploy of ${escapeHtml(obsDay(r.env.deployed))}: the server may still run the values before it</span>` : '';
-  if (late) notes.push(late);
-  if (r.envError) notes.push(`<span class="gh-error">${escapeHtml(r.envError)}</span>`);
+  if (r.source === 'server') {
+    notes.push(r.reported ? '<span>Values as the production server reports them</span>'
+      : '<span class="obs-flag-warn">The production server does not report its flags yet: these are the code\'s defaults</span>');
+  }
+  if (r.reportError) notes.push(`<span class="gh-error">${escapeHtml(r.reportError)}</span>`);
+  const late = !r.reported && r.source === 'server' ? notes[0] : '';
   if (r.remote) notes.push(`<span>Remote Config of ${escapeHtml(r.remote.project)}${r.remote.updated ? `, last changed ${escapeHtml(obsDay(r.remote.updated))}` : ''}</span>`);
   if (r.remoteError) notes.push(`<span class="gh-error">${escapeHtml(r.remoteError)}</span>`);
   if (compact) {
@@ -654,7 +657,7 @@ function observabilityKeyFiguresHtml(components) {
   return `<div class="obs-kpis">${figures.join('')}</div>`;
 }
 
-/** What wants a look now: firing alerts, new errors, a jump in errors, rollouts under way, an .env changed after its deploy. */
+/** What wants a look now: firing alerts, new errors, a jump in errors, rollouts under way. */
 function observabilityAttentionHtml(components) {
   const rows = [];
   const alerts = [...new Map(components.flatMap(observabilityAlerts).filter(OBS_ACTIVE).map(a => [a.uid, a])).values()];
@@ -678,10 +681,6 @@ function observabilityAttentionHtml(components) {
   }
   for (const r of observabilityRollouts(components)) {
     rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--info"></span><span class="obs-att-t">${escapeHtml(r.component.label)} ${escapeHtml(r.target)}: ${escapeHtml(r.tag)} rolled out to ${r.rollout}%, started ${escapeHtml(obsAgo(r.date))}</span><button type="button" class="obs-link" data-obs-component="${obsAttr(r.component.id)}">Where it runs</button></div>`);
-  }
-  for (const c of components) {
-    const f = observabilityState.flags.get(c.id);
-    if (f?.env?.changedAfterDeploy) rows.push(`<div class="obs-att"><span class="gfv-dot gfv-dot--pending"></span><span class="obs-att-t">${escapeHtml(c.label)}: the production .env changed ${escapeHtml(obsAgo(f.env.updated))}, after the deploy; the server may still run the values before it</span><button type="button" class="obs-link" data-obs-component="${obsAttr(c.id)}">Flags</button></div>`);
   }
   if (!grafanaViewState.config?.hasToken && components.some(c => c.grafana)) rows.push('<div class="gh-muted">Grafana is not connected. <button type="button" class="obs-link" data-obs-connect="1">Connect</button></div>');
   return rows.length ? rows.join('') : '<div class="obs-clear">All clear: no alerts firing, no new errors.</div>';

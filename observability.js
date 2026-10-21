@@ -12,6 +12,7 @@
 const { graphql, parseReleaseTargets, releaseModel } = require('./github-tracker');
 const bugsnag = require('./bugsnag');
 const flagsSource = require('./observability-flags');
+const grafana = require('./grafana');
 
 const OWNER = 'MoveLab-Studio';
 const STAGES = ['internal', 'beta', 'production'];
@@ -572,8 +573,8 @@ function remoteKeyBase(key) {
 
 /**
  * The flags of a component's production version and how they stand now.
- * A backend: { source: 'env', tag, flags: [{ name, kind, value, from: 'env'|'default', file, pr }],
- * env: { title, updated, deployed, changedAfterDeploy } }. An app: { source: 'app', tag,
+ * A backend: { source: 'server', tag, flags: [{ name, kind, value, from: 'server'|'default'|'code', file, pr }],
+ * reported, reportError }: the values its production server reports, else the code's defaults. An app: { source: 'app', tag,
  * flags: [{ name, kind, platforms: { Android|iOS: { how, key, value, conditions, missing } }, pr }],
  * remoteOnly: [{ key, value, conditions }], remote: { project, updated } }.
  */
@@ -586,28 +587,21 @@ async function getFlags({ component: id, force = false }) {
   if (!tag) return { source: null, flags: [] };
 
   if (component.kind === 'backend') {
-    const [config, workflow] = await Promise.all([
-      configAt(component.repo, tag),
-      filesAt(component.repo, tag, ['.github/workflows/deploy.yml']).then(f => f['.github/workflows/deploy.yml']),
-    ]);
-    const found = flagsSource.envFlagsInConfig(config, component.envFlags || []);
-    const ref = flagsSource.productionEnvRef(workflow);
-    let env = null;
-    let envError = null;
-    if (ref) {
-      try {
-        const item = await flagsSource.readEnvItem(ref, found.map(f => f.key), { force });
-        const deployed = prod?.date || null;
-        env = { title: item.title, updated: item.updated, deployed, changedAfterDeploy: !!(deployed && item.updated && new Date(item.updated) > new Date(deployed)), values: item.values };
-      } catch (err) { envError = err.message; }
-    }
+    const found = flagsSource.envFlagsInConfig(await configAt(component.repo, tag), component.envFlags || []);
+    let reported = new Map();
+    let reportError = null;
+    try { reported = await grafana.serverFlags(component.grafana.platform, component.grafana.app); } catch (err) { reportError = err.message; }
+    const fromServer = (r) => (r.source === 'default' ? 'default' : 'server');
     const flags = found.map(f => {
-      const set = env?.values.has(f.key);
-      return { name: f.key, kind: flagKind(f.key), value: flagsSource.flagValue(set ? env.values.get(f.key) : f.fallback), from: set ? 'env' : 'default', file: f.file };
+      const r = reported.get(f.key);
+      return { name: f.key, kind: flagKind(f.key), value: flagsSource.flagValue(r ? r.value : f.fallback), from: r ? fromServer(r) : 'code', file: f.file };
     });
+    // A switch the server reports that this tag's config scan did not find.
+    for (const [key, r] of reported) {
+      if (!found.some(f => f.key === key)) flags.push({ name: key, kind: flagKind(key), value: flagsSource.flagValue(r.value), from: fromServer(r), file: null });
+    }
     await addPrs(component.repo, flags, f => f.name, ['config']);
-    if (env) delete env.values;
-    return { source: 'env', tag, flags, env, envError: envError || (ref ? null : 'deploy.yml names no 1Password item for production.') };
+    return { source: 'server', tag, flags, reported: reported.size > 0, reportError };
   }
 
   const files = await filesAt(component.repo, tag, component.flagFiles || []);
