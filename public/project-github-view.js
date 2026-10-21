@@ -1512,7 +1512,7 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
     const ref = `${githubRepoName(detail.repo)}#${detail.number}`;
     body = `
       <div class="gh-sec gh-pr-head">
-        <div class="gh-pr-meta"><span class="gh-pr-ref">${escapeHtml(ref)}</span><span class="gh-who">${escapeHtml(detail.author)}</span>
+        <div class="gh-pr-meta">${githubPrTypeButton(item, detail, state)}<span class="gh-pr-ref">${escapeHtml(ref)}</span><span class="gh-who">${escapeHtml(detail.author)}</span>
           <span><code>${escapeHtml(detail.headRef)}</code> → <code>${escapeHtml(detail.baseRef)}</code></span>
           <span><span class="gh-plus">+${detail.additions}</span> <span class="gh-minus">−${detail.deletions}</span></span>
           <button type="button" class="gh-files-link" id="gh-files-changed" title="Review the changes file by file">${PICONS.file(12)}<span>${detail.changedFiles} file${detail.changedFiles === 1 ? '' : 's'}</span>${PICONS.chevronRight(10)}</button></div>
@@ -1618,9 +1618,44 @@ function paintGithubPanel(project, { resetScroll = false } = {}) {
   }
 }
 
+/** A PR's type as the list knows it (github-pr-filter.js), with the PR's own labels as GitHub has them now. */
+function githubPanelPrType(item, pr) {
+  return prType({ repo: pr.repo, title: pr.title, branch: pr.headRef, author: pr.author, labels: pr.labels, issues: item?.isPullRequest ? item.issues || [] : [] });
+}
+
+function githubPrTypeButton(item, pr, state) {
+  const type = githubPanelPrType(item, pr);
+  const busy = state.busy === 'type';
+  return `<button type="button" class="gh-pr-type ghv-type ghv-type--${type.type}" id="gh-pr-type" ${busy ? 'disabled' : ''} title="${escapeHtml(`${PR_TYPE_LABELS[type.type]}: ${type.reason}. Click to change it; that sets the label on GitHub.`)}">${prTypeIcon(type.type)}<span>${escapeHtml(PR_TYPE_LABELS[type.type])}</span></button>`;
+}
+
 function bindGithubPrActions(project, panel, pr) {
   const state = githubTabState(project.id);
   const target = githubTarget(`${pr.repo}#${pr.number}`);
+  const typeBtn = panel.querySelector('#gh-pr-type');
+  if (typeBtn) {
+    typeBtn.onclick = (e) => {
+      const current = githubPanelPrType(findGithubItem(state, state.selection?.itemKey), pr).type;
+      const setType = async (type) => {
+        state.busy = 'type';
+        paintGithubPanel(project);
+        const result = await window.api.setGithubPrType(target, type);
+        state.busy = null;
+        state.notice = result?.error ? { kind: 'bad', text: result.error }
+          : result?.made ? { kind: 'ok', text: `Made the ${result.label} label in ${githubRepoName(pr.repo)} and put it on this PR.` } : null;
+        await loadGithubDetail(project, { quiet: true });
+        if (project.isGithubView && typeof loadGithubView === 'function') loadGithubView({ quiet: true });
+        paintGithubPanel(project);
+      };
+      showContextMenu([{ head: 'Type (sets the label on GitHub)' }, ...PR_TYPES.map(t => ({
+        icon: `<span class="ghv-type ghv-type--${t}">${prTypeIcon(t)}</span>`,
+        label: PR_TYPE_LABELS[t],
+        hint: t === current ? 'now' : '',
+        disabled: t === current,
+        onClick: () => setType(t),
+      }))], { anchor: e.currentTarget });
+    };
+  }
   const toggle = panel.querySelector('#gh-autorebase');
   if (toggle) {
     toggle.onchange = async () => {

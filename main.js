@@ -821,6 +821,7 @@ ipcMain.handle('github-mark-reviewed', (_e, t, headOid) => githubTracker.asResul
 ipcMain.handle('github-review-candidates', (_e, t) => githubTracker.asResult(githubTracker.getReviewCandidates(...ghTarget(t))));
 ipcMain.handle('github-set-review-request', (_e, t, login, on) => githubTracker.asResult(githubTracker.setReviewRequest(...ghTarget(t), String(login || ''), !!on)));
 ipcMain.handle('github-set-autorebase', (_e, t, on) => githubTracker.asResult(githubTracker.setAutorebase(...ghTarget(t), !!on)));
+ipcMain.handle('github-set-pr-type', (_e, t, type) => githubTracker.asResult(githubTracker.setPrType(...ghTarget(t), String(type || ''))));
 // A GitHub-backed project writes its todos and plan back to GitHub.
 ipcMain.handle('github-set-issue-closed', (_e, t, closed) => githubTracker.asResult(githubTracker.setIssueClosed(...ghTarget(t), !!closed)));
 ipcMain.handle('github-rename-issue', (_e, t, title) => githubTracker.asResult(githubTracker.renameIssue(...ghTarget(t), String(title || ''))));

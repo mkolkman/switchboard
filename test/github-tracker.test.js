@@ -176,3 +176,12 @@ test('Project fields are keyed per Project and preferred when named Wave', () =>
   const phases = phasesFrom([{ status: 'todo', fields }], by, source.issueFields[0]);
   assert.deepEqual(phases.map(p => [p.title, p.items.length]), [['Wave 3', 0], ['Wave 4', 1]]);
 });
+
+test('planPrTypeLabels: the first of the type\'s labels the repo has, the other types\' off the PR', () => {
+  const { planPrTypeLabels } = require('../github-tracker');
+  const repo = [{ id: 'L2', name: 'type:correctness' }, { id: 'L3', name: 'type:bugfix' }];
+  const onPr = [{ id: 'P1', name: 'enhancement' }, { id: 'P2', name: 'severity:high' }, { id: 'P3', name: 'autorebase:opt-in' }, { id: 'L2', name: 'type:correctness' }];
+  assert.deepEqual(planPrTypeLabels('bugfix', repo, onPr), { add: { id: 'L2', name: 'type:correctness' }, remove: [{ id: 'P1', name: 'enhancement' }] });
+  // A repo without any: the type's first label, to be made.
+  assert.deepEqual(planPrTypeLabels('documentation', [], onPr), { add: { name: 'documentation' }, remove: [{ id: 'P1', name: 'enhancement' }, { id: 'L2', name: 'type:correctness' }] });
+});

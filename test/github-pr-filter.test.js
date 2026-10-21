@@ -23,6 +23,23 @@ test('prType: the issue decides first, then the PR, else a feature', () => {
   assert.match(prType(pr({ branch: 'fix/x' })).reason, /branch/);
 });
 
+test('prType: a type label on the PR itself wins over its issue and its title', () => {
+  assert.deepEqual(prType(pr({ labels: ['enhancement'], issues: [issue({ labels: ['severity:high'] })] })), { type: 'feature', reason: 'its label enhancement' });
+  assert.equal(prType(pr({ labels: ['type:maintenance'], title: 'Fix the debrief' })).type, 'upkeep');
+  assert.equal(prType(pr({ labels: ['Documentation'] })).type, 'documentation');
+  // Labels that are not a type's leave the guessing as it was.
+  assert.equal(prType(pr({ labels: ['autorebase:opt-in'], title: 'Fix the debrief' })).type, 'bugfix');
+});
+
+test('prType: documentation by its issue label, its title or its branch', () => {
+  assert.equal(prType(pr({ issues: [issue({ labels: ['documentation'] })] })).type, 'documentation');
+  assert.equal(prType(pr({ title: '[Docs] Explain the release flow' })).type, 'documentation');
+  assert.equal(prType(pr({ title: 'Docs: describe the metrics endpoint' })).type, 'documentation');
+  assert.equal(prType(pr({ title: 'Update the README for the new setup' })).type, 'documentation');
+  assert.equal(prType(pr({ branch: 'docs/release-flow', title: 'Release flow' })).type, 'documentation');
+  assert.equal(prType(pr({ title: 'Show the documents list' })).type, 'feature');
+});
+
 test('prProducts: a shared repo by its title prefixes, else all it serves; other repos none', () => {
   assert.deepEqual(prProducts(pr({ title: '[WRA] Filter duplicate entries' })), ['waterrower']);
   assert.deepEqual(prProducts(pr({ title: '[NCI] Show the heart rate' })), ['nohrd']);

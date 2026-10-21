@@ -8118,6 +8118,12 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .ghv-type--bugfix { color: #e0b860; background: rgba(224,176,74,0.13); }
 .ghv-type--feature { color: #9aa2ff; background: rgba(120,130,255,0.12); }
 .ghv-type--upkeep { color: #9a9ab0; background: rgba(154,154,176,0.1); }
+.ghv-type--documentation { color: #7cc4e8; background: rgba(90,170,220,0.12); }
+.ghv-type-btn.on.ghv-type--documentation { color: #7cc4e8; }
+.gh-pr-type { width: auto; height: 18px; gap: 4px; padding: 0 6px; border: none; font: inherit; font-size: 11px; cursor: pointer; }
+.gh-pr-type:hover:not(:disabled) { filter: brightness(1.25); }
+.gh-pr-type:disabled { opacity: 0.6; cursor: default; }
+.ctx-icon .ghv-type { width: 16px; height: 14px; }
 .ghv-type-btn.on.ghv-type--security { color: #ff9a9a; }
 .ghv-type-btn.on.ghv-type--bugfix { color: #e0b860; }
 .ghv-type-btn.on.ghv-type--upkeep { color: #c8c8dc; }

@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
+const { PR_TYPES, PR_TYPE_GITHUB_LABELS, PR_TYPE_COLORS } = require('./public/github-pr-filter');
 
 // Live view of GitHub work tracked from a project: a tracking issue with the
 // issues it links (and their PRs), or a GitHub Project's items. Nothing is
@@ -1057,6 +1058,46 @@ async function getFileContent(owner, repo, filePath, ref) {
   return { ok: true, text: Buffer.from(file.content, 'base64').toString('utf8') };
 }
 
+/**
+ * The labels that set a PR's type: { add, remove } where add is the first of
+ * the type's labels the repo has ({ name, id }, or { name } to make) and
+ * remove the other types' labels on the PR ({ name, id }).
+ */
+function planPrTypeLabels(type, repoLabels, prLabels) {
+  const wanted = PR_TYPE_GITHUB_LABELS[type];
+  const add = wanted.map(name => repoLabels.find(l => l.name.toLowerCase() === name)).find(Boolean) || { name: wanted[0] };
+  const others = new Set(PR_TYPES.filter(t => t !== type).flatMap(t => PR_TYPE_GITHUB_LABELS[t]));
+  const remove = prLabels.filter(l => others.has(l.name.toLowerCase()));
+  return { add, remove };
+}
+
+/** Set a PR's type: put the type's label on it (made in the repo when it has none), take the other types' off. */
+async function setPrType(owner, repo, number, type) {
+  if (!PR_TYPES.includes(type)) throw new Error(`Unknown type: ${type}`);
+  const candidates = PR_TYPE_GITHUB_LABELS[type];
+  const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      ${candidates.map((name, i) => `l${i}: label(name: ${JSON.stringify(name)}) { id name }`).join('\n      ')}
+      pullRequest(number: $number) { id labels(first: 50) { nodes { id name } } }
+    }
+  }`, { owner, repo, number });
+  const r = data?.repository;
+  const pr = r?.pullRequest;
+  if (!pr) throw new Error(`${owner}/${repo}#${number} was not found.`);
+  const repoLabels = candidates.map((_, i) => r[`l${i}`]).filter(Boolean);
+  const { add, remove } = planPrTypeLabels(type, repoLabels, pr.labels?.nodes || []);
+  let addId = add.id;
+  if (!addId) {
+    const made = await rest('POST', `/repos/${owner}/${repo}/labels`, { name: add.name, color: PR_TYPE_COLORS[type] });
+    addId = made?.node_id;
+    if (!addId) throw new Error(`Could not make the ${add.name} label in ${owner}/${repo}.`);
+  }
+  const mutate = (mutation, ids) => graphql(`mutation($id: ID!, $labels: [ID!]!) { ${mutation}(input: { labelableId: $id, labelIds: $labels }) { clientMutationId } }`, { id: pr.id, labels: ids });
+  await mutate('addLabelsToLabelable', [addId]);
+  if (remove.length) await mutate('removeLabelsFromLabelable', remove.map(l => l.id));
+  return { label: add.name, made: !add.id, removed: remove.map(l => l.name) };
+}
+
 // --- Writing back: the project's todos and plan live on GitHub ---
 
 async function rest(method, apiPath, body) {
@@ -1551,7 +1592,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed, graphql,

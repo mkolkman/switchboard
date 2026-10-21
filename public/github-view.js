@@ -112,7 +112,8 @@ function githubViewSection(title, hint, items, selectedKey, empty, { foldKey = n
   const filter = githubViewFilter();
   if (items && filterActive(filter)) {
     items = items.filter(i => prMatches(i, filter));
-    if (!githubViewState.foldedByHand.has(foldKey)) open = open || items.length > 0;
+    // Merged or closed stays as it was: old PRs only show when you open them.
+    if (!githubViewState.foldedByHand.has(foldKey) && foldKey !== 'closed') open = open || items.length > 0;
     empty = 'Nothing matches.';
   }
   const fold = foldKey ? ` ghv-section-h--fold" data-fold="${foldKey}` : '';
