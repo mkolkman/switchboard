@@ -15,7 +15,7 @@ const githubViewContent = document.getElementById('github-content');
 const githubViewer = document.getElementById('github-viewer');
 const GITHUB_VIEW_REFRESH_MS = 2 * 60 * 1000;
 
-const githubViewState = { mine: null, review: null, closed: null, error: null, loading: false, fetchedAt: null, timer: null, filter: null };
+const githubViewState = { mine: null, review: null, closed: null, error: null, loading: false, fetchedAt: null, timer: null, filter: null, foldedByHand: new Set() };
 const GITHUB_VIEW_FOLDS_KEY = 'githubViewFolds';
 const GITHUB_VIEW_FILTER_KEY = 'githubViewFilter';
 
@@ -31,6 +31,8 @@ function githubViewFilter() {
 
 function setGithubViewFilter(change) {
   const f = Object.assign(githubViewFilter(), change);
+  // A new filter opens the sections with matches again, also ones folded by hand.
+  githubViewState.foldedByHand.clear();
   // A repo that is not the product's goes when the product changes.
   if ('product' in change && f.repo && f.product && !githubViewItems().some(i => i.repo === f.repo && prProducts(i).includes(f.product))) f.repo = '';
   try { localStorage.setItem(GITHUB_VIEW_FILTER_KEY, JSON.stringify({ product: f.product, repo: f.repo, plan: f.plan, types: f.types })); } catch {}
@@ -105,11 +107,12 @@ function githubViewRow(item, selectedKey) {
 }
 
 function githubViewSection(title, hint, items, selectedKey, empty, { foldKey = null, open = true } = {}) {
-  // While filtering, a section shows only what passes, and opens when something does.
+  // While filtering, a section shows only what passes, and opens when something
+  // does, unless you folded or unfolded it yourself since the filter changed.
   const filter = githubViewFilter();
   if (items && filterActive(filter)) {
     items = items.filter(i => prMatches(i, filter));
-    open = open || items.length > 0;
+    if (!githubViewState.foldedByHand.has(foldKey)) open = open || items.length > 0;
     empty = 'Nothing matches.';
   }
   const fold = foldKey ? ` ghv-section-h--fold" data-fold="${foldKey}` : '';
@@ -127,9 +130,12 @@ function githubViewFoldOpen(key) {
 }
 
 function toggleGithubViewFold(key) {
+  // While filtering the section may show open only because it has matches: fold what you see.
+  const shown = !!githubViewContent?.querySelector(`[data-fold="${key}"] .ghv-fold:not(.shut)`);
+  githubViewState.foldedByHand.add(key);
   try {
     const saved = JSON.parse(localStorage.getItem(GITHUB_VIEW_FOLDS_KEY) || '{}');
-    saved[key] = !githubViewFoldOpen(key);
+    saved[key] = !shown;
     localStorage.setItem(GITHUB_VIEW_FOLDS_KEY, JSON.stringify(saved));
   } catch {}
 }
