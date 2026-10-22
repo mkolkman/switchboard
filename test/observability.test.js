@@ -59,8 +59,8 @@ test('componentState: a staged app per target and stage; a tagged backend from i
     ],
   });
   assert.deepEqual(staged.targets, [
-    { name: 'wra', stages: { internal: { tag: '2.41.8', date: '2026-10-11', rollout: 100 }, production: { tag: '2.41.8', date: '2026-10-12', rollout: 50 } } },
-    { name: 'wri', stages: { internal: { tag: '2.41.8', date: '2026-10-11', rollout: 100 } } },
+    { name: 'wra', label: 'Android', stages: { internal: { tag: '2.41.8', date: '2026-10-11', rollout: 100 }, production: { tag: '2.41.8', date: '2026-10-12', rollout: 50 } } },
+    { name: 'wri', label: 'iOS', stages: { internal: { tag: '2.41.8', date: '2026-10-11', rollout: 100 } } },
   ]);
   // Only the tags of these targets, newest first, with the stages they reached.
   assert.deepEqual(staged.tags.map(x => [x.name, x.stages]), [['2.41.8', ['internal', 'production']], ['2.41.7', ['production']]]);

@@ -399,7 +399,7 @@ function observabilityInstallsTargetHtml(c, t) {
   const s = observabilityState;
   const result = s.installs.get(t.name);
   const store = s.storesConfig?.targets?.[t.name];
-  const head = `<div class="obs-sub">${escapeHtml(t.name)} <span class="gh-muted">· ${escapeHtml(OBS_STORE_LABELS[store] || store)}${result?.date ? ` · ${escapeHtml(obsDay(result.date))}, ${escapeHtml(result.metric)}` : ''}</span></div>`;
+  const head = `<div class="obs-sub" title="${obsAttr(t.name)}">${escapeHtml(t.label || t.name)} <span class="gh-muted">· ${escapeHtml(OBS_STORE_LABELS[store] || store)}${result?.date ? ` · ${escapeHtml(obsDay(result.date))}, ${escapeHtml(result.metric)}` : ''}</span></div>`;
   if (!result || result.loading) return `${head}<div class="gh-muted">Reading ${escapeHtml(OBS_STORE_LABELS[store] || 'the store')}…</div>`;
   if (result.error) return `${head}<div class="gh-error obs-err">${escapeHtml(result.error)}</div>`;
   if (result.notConnected) return `${head}<div class="gh-muted">${escapeHtml(OBS_STORE_LABELS[store])} is not connected yet; see below.</div>`;
@@ -471,7 +471,7 @@ function observabilityRunsHtml(component) {
   }
   if (!component.targets.length) return '<div class="gh-muted">No targets in its releases.</div>';
   return `<div class="obs-runs"><div class="obs-run obs-run--h"><span class="obs-target"></span>${['internal', 'beta', 'production'].map(x => `<span class="obs-stage">${x}</span>`).join('')}</div>
-      ${component.targets.map(t => `<div class="obs-run"><span class="obs-target" title="${obsAttr(t.name)}">${escapeHtml(t.name)}</span>${cells(t)}</div>`).join('')}</div>`;
+      ${component.targets.map(t => `<div class="obs-run"><span class="obs-target" title="${obsAttr(t.name)}">${escapeHtml(t.label || t.name)}</span>${cells(t)}</div>`).join('')}</div>`;
 }
 
 /** A product page's short form: one line per production tag with the targets on it, then those without one. */
@@ -482,10 +482,10 @@ function observabilityProductionHtml(component) {
   const none = [];
   for (const t of component.targets) {
     const prod = t.stages?.production;
-    if (!prod) { none.push(t.name); continue; }
+    if (!prod) { none.push(t.label || t.name); continue; }
     const key = `${prod.tag}|${prod.rollout}`;
     if (!byTag.has(key)) byTag.set(key, { ...prod, names: [] });
-    byTag.get(key).names.push(t.name);
+    byTag.get(key).names.push(t.label || t.name);
   }
   const lines = [...byTag.values()].sort((a, b) => order.indexOf(a.tag) - order.indexOf(b.tag));
   return `<div class="obs-runs">${lines.map(l => `<div class="obs-prod"><span class="obs-stage"><b>${escapeHtml(l.tag)}</b>${obsRollout(l)} <span class="gh-muted">${escapeHtml(obsDay(l.date))}</span></span><span class="obs-names">${escapeHtml(l.names.join(', '))}</span></div>`).join('')}
@@ -510,7 +510,7 @@ function observabilityComingHtml(component) {
       const at = t.stages?.[stage];
       if (at && newer(at.tag, prod) && !lines.some(l => l.tag === at.tag && l.stage === stage)) lines.push({ tag: at.tag, stage, date: at.date, targets: [] });
       const line = lines.find(l => l.tag === at?.tag && l.stage === stage);
-      if (line && at && newer(at.tag, prod)) line.targets.push(t.name);
+      if (line && at && newer(at.tag, prod)) line.targets.push(t.label || t.name);
     }
   }
   return lines.map(l => `<button type="button" class="obs-coming" data-obs-version="${obsAttr(component.id)}|${obsAttr(l.tag)}"><b>${escapeHtml(l.tag)}</b> on ${escapeHtml(l.stage)} <span class="gh-muted">${escapeHtml(obsDay(l.date))} · ${escapeHtml(l.targets.join(', '))}</span></button>`).join('');
@@ -719,7 +719,7 @@ function observabilityRollouts(components) {
   for (const c of components) {
     for (const t of c.error ? [] : c.targets || []) {
       const prod = t.stages?.production;
-      if (prod && prod.rollout < 100) out.push({ component: c, target: t.name, tag: prod.tag, rollout: prod.rollout, date: prod.date });
+      if (prod && prod.rollout < 100) out.push({ component: c, target: t.label || t.name, tag: prod.tag, rollout: prod.rollout, date: prod.date });
     }
   }
   return out;

@@ -41,6 +41,22 @@ const COMMERCIAL_ELSEWHERE = /^(rp3|nohrd|waterrower|dr_wolff)[-_]/;
  * own part of the code: the NOHRD backends serve NOHRD and WaterRower, MLC
  * Web serves MLC and CITYROW.
  */
+// How a target shows on the pages: a store app by its platform, a machine
+// app by what it is. Unlisted: its name without the product prefix, spaced.
+const TARGET_LABELS = {
+  nca: 'Android', nci: 'iOS', wra: 'Android', wri: 'iOS',
+  cityrow_android: 'Android', cityrow_ios: 'iOS', cityrow_max: 'MAX (tablet)',
+  'rp3-rowing': 'Android', 'rp3-rowing-ios': 'iOS', 'rp3-racing': 'Racing (Android)',
+  'movelab-connect': 'MoveLab Connect', rp3_run_row_run: 'Run Row Run', waterrower_commercial: 'WaterRower', watergrinder: 'WaterGrinder',
+};
+
+function targetLabel(name) {
+  if (!name) return null;
+  if (TARGET_LABELS[name]) return TARGET_LABELS[name];
+  const rest = name.replace(/^(nohrd_commercial|nohrd|waterrower|dr_wolff|rp3|movelab-connect)[-_]/, '').replace(/[-_]+/g, ' ').trim();
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
 const PRODUCTS = [
   { id: 'mlc', label: 'MLC', short: 'MLC', components: [
     { id: 'mlc-web', label: 'Web', kind: 'backend', repo: 'MoveLab-Connect-Web', grafana: { platform: 'mlc', app: 'MoveLabConnect' }, bugsnag: ['movelab-connect-production'], envFlags: ['CITYROW_IDENTITY_PROVIDER'], files: { not: CITYROW_FILES } },
@@ -222,7 +238,7 @@ function componentState(component, info) {
         const tag = [...tagList].reverse().find(t => t.targets?.[name]?.[stage] !== undefined);
         if (tag) stages[stage] = { tag: tag.name, date: tag.promotions?.[name]?.[stage] || tag.date, rollout: tag.targets[name][stage] };
       }
-      return { name, stages };
+      return { name, label: targetLabel(name), stages };
     });
   }
   const names = targets.map(t => t.name);
