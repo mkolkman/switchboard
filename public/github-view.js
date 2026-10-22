@@ -10,7 +10,7 @@
 // githubPrChip, githubItemKey, selectGithubItem, paintGithubPanel,
 // renderProjectGithubTab), utils.js (escapeHtml, formatDate), PICONS,
 // session-context.js (sessionContexts, leaveSessionSplit),
-// github-pr-filter.js (prType, prTypeIcon, prProducts, prPlans, prMatches, filterActive).
+// github-pr-filter.js (prType, prTypeIcon, prProducts, prPlans, prMatches, filterActive, REPO_PRODUCTS).
 
 const githubViewContent = document.getElementById('github-content');
 const githubViewer = document.getElementById('github-viewer');
@@ -95,11 +95,7 @@ async function loadGithubView({ quiet = false } = {}) {
   if (githubViewState.loading) return;
   githubViewState.loading = true;
   if (!quiet) renderGithubViewList();
-  // The maps' PRs come alongside: their plan for a PR its own links do not show.
-  const mapPlans = window.api.getGithubMapPlans().catch(() => null);
   const result = await window.api.getMyGithubPullRequests().catch(err => ({ error: err?.message || String(err) }));
-  const plans = await mapPlans;
-  if (plans && !plans.error) githubViewState.mapPlans = plans.plans || {};
   githubViewState.loading = false;
   if (result?.error) githubViewState.error = result.error;
   else {
@@ -110,12 +106,33 @@ async function loadGithubView({ quiet = false } = {}) {
     if (!missing.includes('Review requested') || !githubViewState.review) githubViewState.review = withoutJustReviewed(result.review || []);
     if (!missing.includes('Merged or closed') || !githubViewState.closed) githubViewState.closed = result.closed || [];
     githubViewState.fetchedAt = result.fetchedAt;
-    for (const item of githubViewItems()) item.mapPlans = githubViewState.mapPlans?.[`${item.repo}#${item.number}`.toLowerCase()] || [];
+    applyGithubMapPlans();
     syncGithubViewResults();
+    loadGithubMapPlans();
   }
   renderGithubViewList();
   // A PR on screen is refreshed with the list.
   if (activeTab === 'github' && !githubTabState(GITHUB_VIEW_PROJECT.id).review) paintGithubPanel(GITHUB_VIEW_PROJECT);
+}
+
+/**
+ * The plans for the filter: every open wayfinder map in the repos of the
+ * lists, and per PR the maps whose tickets it works on (project-maps.js).
+ * Read after the lists, as it takes a while; the filter fills in when it is there.
+ */
+async function loadGithubMapPlans() {
+  // The product repos always, so every map shows, also one with no PR in the lists yet.
+  const repos = [...new Set([...Object.keys(REPO_PRODUCTS).map(r => `MoveLab-Studio/${r}`), ...githubViewItems().map(i => i.repo)])];
+  const result = await window.api.getGithubMapPlans({ repos }).catch(() => null);
+  if (!result || result.error) return;
+  githubViewState.maps = result.maps || [];
+  githubViewState.mapPlans = result.plans || {};
+  applyGithubMapPlans();
+  renderGithubViewList();
+}
+
+function applyGithubMapPlans() {
+  for (const item of githubViewItems()) item.mapPlans = githubViewState.mapPlans?.[`${item.repo}#${item.number}`.toLowerCase()] || [];
 }
 
 function githubViewRow(item, selectedKey) {
@@ -203,6 +220,7 @@ function githubViewFilterHtml() {
   const products = [...new Set(items.flatMap(prProducts))].sort((a, b) => (PRODUCT_LABELS[a] || a).localeCompare(PRODUCT_LABELS[b] || b));
   const repos = [...new Set(items.filter(i => !f.product || prProducts(i).includes(f.product)).map(i => i.repo))].sort();
   const plans = new Map();
+  for (const p of githubViewState.maps || []) plans.set(p.key, p);
   for (const i of items) for (const p of prPlans(i)) plans.set(p.key, p);
   const planList = [...plans.values()].sort((a, b) => a.title.localeCompare(b.title));
   return `<div class="ghv-filter">

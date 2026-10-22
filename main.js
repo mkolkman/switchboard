@@ -1784,7 +1784,7 @@ ipcMain.handle('add-session-link', guarded((link) => {
 // --- IPC: projects from wayfinder maps (project-maps.js) ---
 
 ipcMain.handle('sync-map-projects', () => projectMaps.asResult(projectMaps.syncMapProjects()));
-ipcMain.handle('github-map-plans', (_e, opts) => projectMaps.asResult(projectMaps.getMapPlans({ force: !!opts?.force })));
+ipcMain.handle('github-map-plans', (_e, opts) => projectMaps.asResult(projectMaps.getMapPlans({ repos: Array.isArray(opts?.repos) ? opts.repos.map(String) : [], force: !!opts?.force })));
 
 const NOT_A_PR_BRANCH = new Set(['main', 'master', 'develop', 'development', 'staging']);
 const branchPrCache = new Map(); // "owner/repo|branch" → { at, pr }

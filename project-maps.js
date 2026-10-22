@@ -179,38 +179,65 @@ function assign(sessionId, projectId) {
 }
 
 const MAP_PLANS_MS = 10 * 60 * 1000;
-let mapPlansCache = null; // { at, promise }
+const mapPlansCache = new Map(); // repos asked → { at, promise }
 
 /**
- * The PRs of your open maps' tickets, for the GitHub tab's plan filter:
- * { "owner/repo#n" (lower case): [{ key, number, title, url }] }. A map
- * lists its tickets in its text rather than as sub-issues, and its PRs
- * often close no issue, so a PR's own links do not lead to it.
+ * Every open map in some repos, by the label on the repo itself (GitHub's
+ * search drops some now and then): [{ key, number, title, url }].
  */
-function getMapPlans({ force = false } = {}) {
-  if (!force && mapPlansCache && Date.now() - mapPlansCache.at < MAP_PLANS_MS) return mapPlansCache.promise;
+async function openMapsIn(repos) {
+  const list = [...new Set(repos.map(r => String(r)))].filter(r => /^[\w.-]+\/[\w.-]+$/.test(r));
+  if (!list.length) return [];
+  const data = await graphqlRetrying(`query {\n${list.map((r, i) => {
+    const [owner, name] = r.split('/');
+    return `  r${i}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { nameWithOwner issues(first: 50, states: OPEN, labels: ["${MAP_LABEL}"]) { nodes { number title url } } }`;
+  }).join('\n')}\n}`);
+  const out = [];
+  list.forEach((_, i) => {
+    const repo = data?.[`r${i}`];
+    for (const n of repo?.issues?.nodes || []) out.push({ key: `${repo.nameWithOwner}#${n.number}`, number: n.number, title: n.title, url: n.url, repo: repo.nameWithOwner });
+  });
+  return out;
+}
+
+/**
+ * The GitHub tab's plans: every open map in the repos of its PRs, and per PR
+ * the maps whose tickets it works on: { maps: [plan], plans: { "owner/repo#n"
+ * (lower case): [plan] } }. A map lists its tickets in its text rather than
+ * as sub-issues, and its PRs often close no issue, so a PR's own links do not
+ * lead to it; the map's tracker does.
+ */
+function getMapPlans({ repos = [], force = false } = {}) {
+  const cacheKey = [...new Set(repos)].sort().join(',').toLowerCase();
+  const hit = mapPlansCache.get(cacheKey);
+  if (!force && hit && Date.now() - hit.at < MAP_PLANS_MS) return hit.promise;
   const promise = (async () => {
-    const maps = (await getMyMaps()).filter(m => m.state === 'OPEN');
+    const maps = await openMapsIn(repos);
     const plans = {};
     let missed = false;
-    await Promise.all(maps.map(async (map) => {
-      const read = (force) => getTracker(`${map.repo}#${map.number}`, { force }).catch(err => ({ error: err.message }));
-      let tracker = await read(false);
-      // GitHub times out now and then: once more, and a map still missing is read again next time.
-      if (!tracker || tracker.error) tracker = await read(true);
-      if (!tracker || tracker.error) { missed = true; return; }
-      const plan = { key: `${map.repo}#${map.number}`, number: map.number, title: map.title, url: map.url };
-      for (const item of tracker.items || []) {
-        for (const pr of item.pullRequests || []) {
-          const key = `${pr.repo}#${pr.number}`.toLowerCase();
-          if (!(plans[key] || []).some(p => p.key === plan.key)) plans[key] = [...(plans[key] || []), plan];
+    // A few trackers at a time: each reads all of its map's tickets.
+    const queue = [...maps];
+    const worker = async () => {
+      for (let map = queue.shift(); map; map = queue.shift()) {
+        const read = (again) => getTracker(map.key, { force: again }).catch(err => ({ error: err.message }));
+        let tracker = await read(false);
+        // GitHub times out now and then: once more, and a map still missing is read again next time.
+        if (!tracker || tracker.error) tracker = await read(true);
+        if (!tracker || tracker.error) { missed = true; continue; }
+        const plan = { key: map.key, number: map.number, title: map.title, url: map.url };
+        for (const item of tracker.items || []) {
+          for (const pr of item.pullRequests || []) {
+            const key = `${pr.repo}#${pr.number}`.toLowerCase();
+            if (!(plans[key] || []).some(p => p.key === plan.key)) plans[key] = [...(plans[key] || []), plan];
+          }
         }
       }
-    }));
-    if (missed) mapPlansCache = null;
-    return { plans };
-  })().catch(err => { mapPlansCache = null; throw err; });
-  mapPlansCache = { at: Date.now(), promise };
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    if (missed) mapPlansCache.delete(cacheKey);
+    return { maps: maps.map(({ key, number, title, url }) => ({ key, number, title, url })), plans };
+  })().catch(err => { mapPlansCache.delete(cacheKey); throw err; });
+  mapPlansCache.set(cacheKey, { at: Date.now(), promise });
   return promise;
 }
 
