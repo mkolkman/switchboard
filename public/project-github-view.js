@@ -1741,7 +1741,19 @@ function bindGithubPrActions(project, panel, pr) {
         }
         state.reviewDraft = null;
         state.notice = { kind: 'ok', text: { APPROVE: 'Approved.', COMMENT: 'Review comment sent.', REQUEST_CHANGES: 'Changes requested.' }[event] };
+        // GitHub drops the request for your review a moment after the review: not yet in a read right after.
+        const dropRequest = () => {
+          const fresh = state.details.get(`pr:${prKey}`);
+          if (fresh?.requested) fresh.requested = fresh.requested.filter(who => who !== pr.me);
+        };
+        if (project.isGithubView && typeof noteGithubReviewedByMe === 'function') noteGithubReviewedByMe(prKey);
         await loadGithubDetail(project, { quiet: true });
+        dropRequest();
+        setTimeout(async () => {
+          if (selectedDetailKey(state) !== `pr:${prKey}`) return;
+          await loadGithubDetail(project, { quiet: true });
+          paintGithubPanel(project);
+        }, 5000);
         // The list's chips and groups show it too.
         for (const ref of project.githubRefs || []) loadGithubTracker(project, ref, { force: true });
         if (project.isGithubView && typeof loadGithubView === 'function') loadGithubView({ quiet: true });

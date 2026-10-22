@@ -15,7 +15,10 @@ const githubViewContent = document.getElementById('github-content');
 const githubViewer = document.getElementById('github-viewer');
 const GITHUB_VIEW_REFRESH_MS = 2 * 60 * 1000;
 
-const githubViewState = { mine: null, review: null, closed: null, error: null, loading: false, fetchedAt: null, timer: null, filter: null, foldedByHand: new Set() };
+const githubViewState = { mine: null, review: null, closed: null, error: null, loading: false, fetchedAt: null, timer: null, filter: null, foldedByHand: new Set(), reviewedByMe: new Map() };
+// GitHub's search lags a review behind: a PR you just reviewed stays out of
+// Review requested this long, unless asked again since.
+const GITHUB_VIEW_REVIEWED_MS = 10 * 60 * 1000;
 const GITHUB_VIEW_FOLDS_KEY = 'githubViewFolds';
 const GITHUB_VIEW_FILTER_KEY = 'githubViewFilter';
 
@@ -37,6 +40,21 @@ function setGithubViewFilter(change) {
   if ('product' in change && f.repo && f.product && !githubViewItems().some(i => i.repo === f.repo && prProducts(i).includes(f.product))) f.repo = '';
   try { localStorage.setItem(GITHUB_VIEW_FILTER_KEY, JSON.stringify({ product: f.product, repo: f.repo, plan: f.plan, types: f.types })); } catch {}
   renderGithubViewList();
+}
+
+/** A review you just submitted: out of Review requested now, and for a while after (see GITHUB_VIEW_REVIEWED_MS). */
+function noteGithubReviewedByMe(prKey) {
+  const s = githubViewState;
+  s.reviewedByMe.set(prKey, Date.now());
+  if (s.review) s.review = withoutJustReviewed(s.review);
+  syncGithubViewResults();
+  renderGithubViewList();
+}
+
+function withoutJustReviewed(items) {
+  const s = githubViewState;
+  for (const [key, at] of s.reviewedByMe) if (Date.now() - at > GITHUB_VIEW_REVIEWED_MS) s.reviewedByMe.delete(key);
+  return items.filter(i => !s.reviewedByMe.has(`${i.repo}#${i.number}`));
 }
 
 function githubViewItems() {
@@ -84,7 +102,7 @@ async function loadGithubView({ quiet = false } = {}) {
     const missing = result.missing || [];
     githubViewState.error = missing.length ? `GitHub did not answer for ${missing.join(' and ')}; showing the last list.` : null;
     if (!missing.includes('My pull requests') || !githubViewState.mine) githubViewState.mine = result.mine || [];
-    if (!missing.includes('Review requested') || !githubViewState.review) githubViewState.review = result.review || [];
+    if (!missing.includes('Review requested') || !githubViewState.review) githubViewState.review = withoutJustReviewed(result.review || []);
     if (!missing.includes('Merged or closed') || !githubViewState.closed) githubViewState.closed = result.closed || [];
     githubViewState.fetchedAt = result.fetchedAt;
     syncGithubViewResults();
