@@ -3024,7 +3024,7 @@ function sessionMenuItems(session) {
     ? { ...launchTargetFor(info.project), projectPath: session.projectPath }
     : folder;
   const sessionActions = [
-    running ? { label: 'Stop', icon: '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>', onClick: () => confirmAndStopSession(session.sessionId) } : null,
+    running ? { label: 'Stop', icon: '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1"/></svg>', onClick: () => stopSessionNow(session.sessionId) } : null,
     session.type !== 'terminal' && !running ? { label: 'Resume with config…', icon: ICONS.launchConfig(14), onClick: () => showResumeSessionDialog(session) } : null,
     session.type !== 'terminal' ? { label: 'Fork', icon: PICONS.fork(14), onClick: () => forkSession(session, forkTarget) } : null,
     session.type !== 'terminal' ? { label: unread ? 'Mark as read' : 'Mark as unread', icon: unread ? ICONS.markRead(14) : ICONS.markUnread(14), onClick: () => { if (unread) clearUnread(session.sessionId); else markUnread(session.sessionId); refreshSidebar(); } } : null,

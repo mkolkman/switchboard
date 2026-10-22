@@ -812,8 +812,8 @@ function closeArchivedSession(sessionId) {
   }
 }
 
-async function confirmAndStopSession(sessionId) {
-  if (!confirm('Stop this session?')) return;
+/** Stop a session at once: its process ends, the conversation is kept. */
+async function stopSessionNow(sessionId) {
   await window.api.stopSession(sessionId);
   activePtyIds.delete(sessionId);
   if (!gridViewActive && activeSessionId === sessionId) {
@@ -829,7 +829,7 @@ async function confirmAndStopSession(sessionId) {
 // --- Terminal header controls ---
 terminalStopBtn.addEventListener('click', () => {
   if (activeTaskView) return;
-  if (activeSessionId) confirmAndStopSession(activeSessionId);
+  if (activeSessionId) stopSessionNow(activeSessionId);
 });
 
 

@@ -46,7 +46,7 @@ function wrapInGridCard(sessionId) {
   stopBtn.style.display = activePtyIds.has(sessionId) ? '' : 'none';
   stopBtn.onclick = (e) => {
     e.stopPropagation();
-    confirmAndStopSession(sessionId);
+    stopSessionNow(sessionId);
   };
   header.appendChild(stopBtn);
 

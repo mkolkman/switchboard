@@ -5,7 +5,7 @@
 // visibleSessionCount, sessionMaxAgeDays, attentionSessions, responseReadySessions,
 // sessionBusyState, cachedProjects, cachedAllProjects, gridCards, gridViewActive (app.js)
 // Depends on: cleanDisplayName, formatDate, escapeHtml (utils.js), ICONS (icons.js),
-// showSession (terminal-manager.js), confirmAndStopSession, pollActiveSessions,
+// showSession (terminal-manager.js), stopSessionNow, pollActiveSessions,
 // showNewSessionPopover, openSettingsViewer, showResumeSessionDialog,
 // showJsonlViewer, forkSession, openSession, loadProjects, markUnread,
 // clearUnread, refreshSidebar (app.js/dialogs.js)
@@ -947,7 +947,7 @@ function bindSessionListEvents(container) {
         // Nothing to stop on a session that never started: the same control
         // clears the row instead, which is otherwise unremovable.
         if (isDismissibleSession(session.sessionId)) dismissSession(session.sessionId);
-        else confirmAndStopSession(session.sessionId);
+        else stopSessionNow(session.sessionId);
       };
     }
 
@@ -1155,10 +1155,11 @@ function buildSessionItem(session) {
   moreBtn.setAttribute('aria-haspopup', 'menu');
   moreBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
 
-  if (session.type !== 'terminal') {
-    actions.append(archiveBtn, forkBtn);
-  }
-  actions.append(unreadBtn, stopBtn, moreBtn);
+  // Archive sits after Stop: stop it, or put it away.
+  if (session.type !== 'terminal') actions.append(forkBtn);
+  actions.append(unreadBtn, stopBtn);
+  if (session.type !== 'terminal') actions.append(archiveBtn);
+  actions.append(moreBtn);
   for (const button of actions.children) {
     button.type = 'button';
     button.setAttribute('aria-label', button.title);
