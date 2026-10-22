@@ -929,9 +929,30 @@ function githubMyReviewRow(pr, state) {
     if (kind === 'reviewed') text = `${when}${mine.sha !== pr.headOid ? '<span class="gh-muted">rebased since, its files are unchanged</span>' : ''}`;
     else text = `${when}${mine.changedFiles ? `<span class="gh-muted">${mine.changedFiles} of its files changed</span>` : ''}`;
   }
-  const button = kind === 'reviewed' ? '' : `<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm gh-mark-reviewed" id="gh-mark-reviewed" ${state.busy ? 'disabled' : ''}
+  // Someone else's PR: a real review (approve, comment, request changes). Your own: GitHub allows only a comment, so Mark reviewed.
+  const others = !!pr.me && pr.author !== pr.me;
+  const prKey = `${pr.repo}#${pr.number}`;
+  const drafting = state.reviewDraft?.key === prKey;
+  const button = others
+    ? (drafting ? '' : `<span class="ws-flex"></span><button type="button" class="ws-btn ws-btn--sm" id="gh-review-open" ${state.busy ? 'disabled' : ''} title="Approve, comment or request changes at ${escapeHtml(pr.headOid.slice(0, 7))}, the commit shown here">${kind === 'none' ? 'Review' : 'Review again'}</button>`)
+    : kind === 'reviewed' ? '' : `<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm gh-mark-reviewed" id="gh-mark-reviewed" ${state.busy ? 'disabled' : ''}
       title="Leaves a comment review on GitHub at ${escapeHtml(pr.headOid.slice(0, 7))}, the commit shown here. Collaborators see it.">${state.busy === 'mark' ? 'Marking…' : kind === 'changed' ? 'Mark reviewed again' : 'Mark reviewed'}</button>`;
-  return `<div class="gh-review-row gh-myrev-row"><span class="gh-who">you</span>${text}${button}</div>`;
+  return `<div class="gh-review-row gh-myrev-row"><span class="gh-who">you</span>${text}${button}</div>${others && drafting ? githubReviewComposerHtml(pr, state) : ''}`;
+}
+
+/** Your review of someone else's PR: a comment, then Comment, Request changes or Approve. */
+function githubReviewComposerHtml(pr, state) {
+  const d = state.reviewDraft;
+  const sending = state.busy === 'review';
+  return `<div class="gh-composer gh-composer--review" data-reply="review">
+    <textarea class="ws-input gh-composer-input" rows="3" placeholder="Your review: needed to comment or request changes, optional when approving">${escapeHtml(d.draft || '')}</textarea>
+    ${d.error ? `<div class="gh-error gh-composer-error">${escapeHtml(d.error)}</div>` : ''}
+    <div class="gh-composer-acts"><span class="gh-muted">Markdown · at ${escapeHtml(pr.headOid.slice(0, 7))} · on GitHub right away</span><span class="ws-flex"></span>
+      <button type="button" class="ws-ghost ws-ghost--sm" data-review="cancel">Cancel</button>
+      <button type="button" class="ws-btn ws-btn--sm" data-review="COMMENT" ${sending ? 'disabled' : ''}>${sending && d.event === 'COMMENT' ? 'Sending…' : 'Comment'}</button>
+      <button type="button" class="ws-btn ws-btn--sm gh-review-changes" data-review="REQUEST_CHANGES" ${sending ? 'disabled' : ''}>${sending && d.event === 'REQUEST_CHANGES' ? 'Sending…' : 'Request changes'}</button>
+      <button type="button" class="ws-btn ws-btn--primary ws-btn--sm" data-review="APPROVE" ${sending ? 'disabled' : ''}>${sending && d.event === 'APPROVE' ? 'Sending…' : 'Approve'}</button></div>
+  </div>`;
 }
 
 function githubReviewsRow(pr, state) {
@@ -1684,6 +1705,50 @@ function bindGithubPrActions(project, panel, pr) {
       paintGithubPanel(project);
     };
   });
+  // Your review of someone else's PR; the draft outlives the live repaints.
+  const prKey = `${pr.repo}#${pr.number}`;
+  const reviewOpen = panel.querySelector('#gh-review-open');
+  if (reviewOpen) {
+    reviewOpen.onclick = () => {
+      state.reviewDraft = { key: prKey, draft: '', error: null, event: null };
+      paintGithubPanel(project);
+      panel.querySelector('.gh-composer--review .gh-composer-input')?.focus();
+    };
+  }
+  const reviewBox = panel.querySelector('.gh-composer--review');
+  if (reviewBox && state.reviewDraft?.key === prKey) {
+    const input = reviewBox.querySelector('.gh-composer-input');
+    input.oninput = () => { state.reviewDraft.draft = input.value; };
+    input.onkeydown = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); state.reviewDraft = null; paintGithubPanel(project); }
+    };
+    reviewBox.querySelectorAll('[data-review]').forEach(btn => {
+      btn.onclick = async () => {
+        const event = btn.dataset.review;
+        if (event === 'cancel') { state.reviewDraft = null; paintGithubPanel(project); return; }
+        const draft = state.reviewDraft;
+        draft.draft = input.value;
+        draft.event = event;
+        draft.error = null;
+        state.busy = 'review';
+        paintGithubPanel(project);
+        const result = await window.api.submitGithubReview(target, { event, body: draft.draft, headOid: pr.headOid });
+        state.busy = null;
+        if (result?.error) {
+          draft.error = result.error;
+          paintGithubPanel(project);
+          return;
+        }
+        state.reviewDraft = null;
+        state.notice = { kind: 'ok', text: { APPROVE: 'Approved.', COMMENT: 'Review comment sent.', REQUEST_CHANGES: 'Changes requested.' }[event] };
+        await loadGithubDetail(project, { quiet: true });
+        // The list's chips and groups show it too.
+        for (const ref of project.githubRefs || []) loadGithubTracker(project, ref, { force: true });
+        if (project.isGithubView && typeof loadGithubView === 'function') loadGithubView({ quiet: true });
+        paintGithubPanel(project);
+      };
+    });
+  }
   const typeBtn = panel.querySelector('#gh-pr-type');
   if (typeBtn) {
     typeBtn.onclick = (e) => {

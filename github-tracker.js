@@ -806,6 +806,30 @@ async function markReviewed(owner, repo, number, headOid) {
   return { ok: true };
 }
 
+const REVIEW_EVENTS = ['APPROVE', 'COMMENT', 'REQUEST_CHANGES'];
+
+/**
+ * Submit your review of someone else's PR at the commit you looked at:
+ * approve (a comment optional), comment or request changes (a comment
+ * needed). New commits since then stop it, as with Mark reviewed.
+ */
+async function submitReview(owner, repo, number, { event, body = '', headOid = null } = {}) {
+  if (!REVIEW_EVENTS.includes(event)) throw new Error(`Unknown review: ${event}`);
+  const text = String(body || '').trim();
+  if (event !== 'APPROVE' && !text) throw new Error(event === 'COMMENT' ? 'Write the comment first.' : 'Say what should change first.');
+  const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id headRefOid } }
+  }`, { owner, repo, number });
+  const pr = data?.repository?.pullRequest;
+  if (!pr) throw new Error(`${owner}/${repo}#${number} was not found.`);
+  if (headOid && pr.headRefOid !== headOid) throw new Error('New commits came in after this panel loaded. Refresh and look at those first.');
+  await graphql(`mutation($id: ID!, $oid: GitObjectID!, $event: PullRequestReviewEvent!, $body: String) {
+    addPullRequestReview(input: { pullRequestId: $id, commitOID: $oid, event: $event, body: $body }) { pullRequestReview { id } }
+  }`, { id: pr.id, oid: pr.headRefOid, event, body: text || null });
+  cache.clear();
+  return { ok: true };
+}
+
 // --- Review requests ---
 
 /**
@@ -898,6 +922,7 @@ async function getPullRequest(owner, repo, number) {
       }
     }
   }`, { owner, repo, number, me: await ghLogin() });
+  const me = await ghLogin();
   const r = data?.repository;
   const pr = r?.pullRequest;
   if (!pr) throw new Error(`${owner}/${repo}#${number} was not found, or your GitHub login cannot see it.`);
@@ -907,6 +932,7 @@ async function getPullRequest(owner, repo, number) {
   await addReviewChanges([mine]);
   return {
     kind: 'pr',
+    me, // your login: a PR of someone else's can be approved or sent back
     id: pr.id, repo: r.nameWithOwner, number: pr.number, title: pr.title, url: pr.url,
     state: pr.state, isDraft: pr.isDraft, merged: pr.merged, mergedAt: pr.mergedAt, mergeSha: pr.mergeCommit?.oid || null,
     body: pr.body || '', author: pr.author?.login || 'ghost', createdAt: pr.createdAt, updatedAt: pr.updatedAt,
@@ -1638,7 +1664,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, rerunChecks, checksSummary, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, submitReview, rerunChecks, checksSummary, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed, graphql,

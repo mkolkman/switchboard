@@ -129,6 +129,7 @@ contextBridge.exposeInMainWorld('api', {
   setGithubReviewRequest: (target, login, on) => ipcRenderer.invoke('github-set-review-request', target, login, on),
   setGithubAutorebase: (target, on) => ipcRenderer.invoke('github-set-autorebase', target, on),
   setGithubPrType: (target, type) => ipcRenderer.invoke('github-set-pr-type', target, type),
+  submitGithubReview: (target, spec) => ipcRenderer.invoke('github-submit-review', target, spec),
   rerunGithubChecks: (target, spec) => ipcRenderer.invoke('github-rerun-checks', target, spec),
   mergeGithubPullRequest: (target, opts) => ipcRenderer.invoke('github-merge', target, opts),
   setGithubIssueClosed: (target, closed) => ipcRenderer.invoke('github-set-issue-closed', target, closed),

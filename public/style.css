@@ -7467,6 +7467,9 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .gh-notice--bad { color: #e08a8a; }
 .gh-notice--ok { color: #6fcf8f; }
 
+.gh-composer--review { margin: 6px 0 4px; }
+.gh-composer--review .gh-composer-acts { gap: 6px; }
+.gh-review-changes { color: #ff9a9a; }
 .gh-check-row { display: flex; align-items: center; gap: 4px; }
 .gh-check-row .gh-check { flex: 1; min-width: 0; }
 .gh-check-rerun { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: none; color: #7a7a92; cursor: pointer; opacity: 0; }
