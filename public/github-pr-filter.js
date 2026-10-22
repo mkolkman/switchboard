@@ -116,9 +116,14 @@
     return named.length ? named : served;
   }
 
-  /** The plans (parent issues: a pitch or wayfinder map) a PR falls under: [{ key, number, title, url }]. */
+  /**
+   * The plans (parent issues: a pitch or wayfinder map) a PR falls under:
+   * [{ key, number, title, url }], from its issues' parents and from the maps
+   * whose tickets it works on (item.mapPlans, set by the GitHub tab).
+   */
   function prPlans(item) {
     const seen = new Map();
+    for (const p of item.mapPlans || []) if (!seen.has(p.key)) seen.set(p.key, p);
     for (const issue of item.issues || []) {
       const p = issue.parent;
       if (!p?.number) continue;

@@ -95,7 +95,11 @@ async function loadGithubView({ quiet = false } = {}) {
   if (githubViewState.loading) return;
   githubViewState.loading = true;
   if (!quiet) renderGithubViewList();
+  // The maps' PRs come alongside: their plan for a PR its own links do not show.
+  const mapPlans = window.api.getGithubMapPlans().catch(() => null);
   const result = await window.api.getMyGithubPullRequests().catch(err => ({ error: err?.message || String(err) }));
+  const plans = await mapPlans;
+  if (plans && !plans.error) githubViewState.mapPlans = plans.plans || {};
   githubViewState.loading = false;
   if (result?.error) githubViewState.error = result.error;
   else {
@@ -106,6 +110,7 @@ async function loadGithubView({ quiet = false } = {}) {
     if (!missing.includes('Review requested') || !githubViewState.review) githubViewState.review = withoutJustReviewed(result.review || []);
     if (!missing.includes('Merged or closed') || !githubViewState.closed) githubViewState.closed = result.closed || [];
     githubViewState.fetchedAt = result.fetchedAt;
+    for (const item of githubViewItems()) item.mapPlans = githubViewState.mapPlans?.[`${item.repo}#${item.number}`.toLowerCase()] || [];
     syncGithubViewResults();
   }
   renderGithubViewList();

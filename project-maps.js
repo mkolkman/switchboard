@@ -178,8 +178,44 @@ function assign(sessionId, projectId) {
   return result?.error ? null : projectId;
 }
 
+const MAP_PLANS_MS = 10 * 60 * 1000;
+let mapPlansCache = null; // { at, promise }
+
+/**
+ * The PRs of your open maps' tickets, for the GitHub tab's plan filter:
+ * { "owner/repo#n" (lower case): [{ key, number, title, url }] }. A map
+ * lists its tickets in its text rather than as sub-issues, and its PRs
+ * often close no issue, so a PR's own links do not lead to it.
+ */
+function getMapPlans({ force = false } = {}) {
+  if (!force && mapPlansCache && Date.now() - mapPlansCache.at < MAP_PLANS_MS) return mapPlansCache.promise;
+  const promise = (async () => {
+    const maps = (await getMyMaps()).filter(m => m.state === 'OPEN');
+    const plans = {};
+    let missed = false;
+    await Promise.all(maps.map(async (map) => {
+      const read = (force) => getTracker(`${map.repo}#${map.number}`, { force }).catch(err => ({ error: err.message }));
+      let tracker = await read(false);
+      // GitHub times out now and then: once more, and a map still missing is read again next time.
+      if (!tracker || tracker.error) tracker = await read(true);
+      if (!tracker || tracker.error) { missed = true; return; }
+      const plan = { key: `${map.repo}#${map.number}`, number: map.number, title: map.title, url: map.url };
+      for (const item of tracker.items || []) {
+        for (const pr of item.pullRequests || []) {
+          const key = `${pr.repo}#${pr.number}`.toLowerCase();
+          if (!(plans[key] || []).some(p => p.key === plan.key)) plans[key] = [...(plans[key] || []), plan];
+        }
+      }
+    }));
+    if (missed) mapPlansCache = null;
+    return { plans };
+  })().catch(err => { mapPlansCache = null; throw err; });
+  mapPlansCache = { at: Date.now(), promise };
+  return promise;
+}
+
 function asResult(promise) {
   return Promise.resolve(promise).then(v => ({ ok: true, ...v })).catch(err => ({ error: err.message || String(err) }));
 }
 
-module.exports = { init, getMyMaps, syncMapProjects, planMapSync, assignLinkedSession, projectName, asResult };
+module.exports = { init, getMyMaps, getMapPlans, syncMapProjects, planMapSync, assignLinkedSession, projectName, asResult };

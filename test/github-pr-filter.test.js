@@ -69,3 +69,10 @@ test('prMatches: every word somewhere, and each filter as an and', () => {
   assert.equal(filterActive({ q: '  ', types: [] }), false);
   assert.equal(filterActive({ types: ['bugfix'] }), true);
 });
+
+test('prPlans: also the maps whose tickets it works on, once each', () => {
+  const map = { key: 'MoveLab-Studio/MoveLab-Connect-Web#2201', number: 2201, title: '[CityRow→WNA] Build plan', url: 'm' };
+  const item = pr({ repo: 'MoveLab-Studio/MoveLab-Connect-Web', mapPlans: [map], issues: [issue({ parent: { ...map, repo: 'MoveLab-Studio/MoveLab-Connect-Web' } })] });
+  assert.deepEqual(prPlans(item).map(p => p.key), ['MoveLab-Studio/MoveLab-Connect-Web#2201']);
+  assert.ok(prMatches(item, { plan: 'MoveLab-Studio/MoveLab-Connect-Web#2201' }));
+});

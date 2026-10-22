@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('api', {
   getChatFolder: () => ipcRenderer.invoke('get-chat-folder'),
   getRepoInfo: (paths) => ipcRenderer.invoke('get-repo-info', paths),
   getGithubTracker: (ref, opts) => ipcRenderer.invoke('get-github-tracker', ref, opts),
+  getGithubMapPlans: (opts) => ipcRenderer.invoke('github-map-plans', opts),
   getGithubPullRequest: (target) => ipcRenderer.invoke('github-pull-request', target),
   getGithubPrSummaries: (keys) => ipcRenderer.invoke('github-pr-summaries', keys),
   getGithubIssue: (target) => ipcRenderer.invoke('github-issue', target),
