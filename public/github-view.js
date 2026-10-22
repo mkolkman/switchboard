@@ -9,6 +9,7 @@
 // Depends on: project-github-view.js (GITHUB_VIEW_PROJECT, githubTabState,
 // githubPrChip, githubItemKey, selectGithubItem, paintGithubPanel,
 // renderProjectGithubTab), utils.js (escapeHtml, formatDate), PICONS,
+// session-context.js (sessionContexts, leaveSessionSplit),
 // github-pr-filter.js (prType, prTypeIcon, prProducts, prPlans, prMatches, filterActive).
 
 const githubViewContent = document.getElementById('github-content');
@@ -231,6 +232,11 @@ function bindGithubViewFilter(caret) {
 }
 
 function openGithubViewItem(itemKey, prKey) {
+  // The session beside the panel goes when another PR is picked; it stays for its own PR.
+  if ((mainEl.classList.contains('ghv-split') || mainEl.classList.contains('pr-walk')) && activeSessionId && typeof sessionContexts === 'function') {
+    const own = sessionContexts(activeSessionId).filter(c => c.kind === 'pr').map(c => c.key);
+    if (!own.includes(String(prKey || itemKey).toLowerCase())) leaveSessionSplit();
+  }
   const state = githubTabState(GITHUB_VIEW_PROJECT.id);
   state.review = null;
   renderGithubViewMain();
