@@ -36,6 +36,10 @@ const observabilityState = {
   revenue: null, // product id → its RevenueCat overview (revenuecat.js), or { error }
   revenueConfig: null, // { connected: { product: { projectId } | null }, known }
   revenueForm: { error: null, saving: false },
+  installs: new Map(), // store target → { loading } | its installs per version (appstores.js) | { error }
+  storesConfig: null, // { play: [{ bucket, account }], appStore: { keyId } | null, targets: { target: 'play' | 'appStore' } }
+  storesForm: { error: null, saving: false },
+  storesConfigLoading: null,
   versions: new Map(), // component id → the tag picked on its page ("staging" for main)
   unfolded: new Set(), // folded-by-default parts opened: "chores:<feature key>", "quiet:<page>", "dash:<component>"
   timer: null,
@@ -99,6 +103,28 @@ async function loadObservabilityBusiness() {
     if (result && !result.error) s.business = result.products || {};
   }
   await revenue;
+}
+
+/** The store targets of an app component (those appstores.js knows). */
+function observabilityStoreTargets(c) {
+  const known = observabilityState.storesConfig?.targets || {};
+  return (c?.targets || []).filter(t => known[t.name]);
+}
+
+/** Installs per version of a component's store apps, read once (main keeps them six hours). */
+async function loadObservabilityInstalls(c, { force = false } = {}) {
+  const s = observabilityState;
+  if (!s.storesConfig) {
+    s.storesConfigLoading = s.storesConfigLoading || window.api.getAppStoresConfig().then(config => { if (config && !config.error) s.storesConfig = config; }).catch(() => {}).finally(() => { s.storesConfigLoading = null; });
+    await s.storesConfigLoading;
+    if (!s.storesConfig) return;
+  }
+  const targets = observabilityStoreTargets(c).map(t => t.name).filter(t => force || !s.installs.has(t));
+  if (!targets.length) return;
+  for (const t of targets) s.installs.set(t, { loading: true });
+  const result = await window.api.getAppStoreInstalls({ targets, force }).catch(err => ({ error: err?.message || String(err) }));
+  for (const t of targets) s.installs.set(t, result?.error ? { error: result.error } : result.targets?.[t] || { error: 'No answer.' });
+  if (activeTab === 'grafana' && grafanaViewState.selected.kind === 'component' && grafanaViewState.selected.id === c.id) renderGrafanaMain();
 }
 
 /** A component's production flags, read once. */
@@ -337,6 +363,95 @@ function renderObservabilityList() {
 
 // --- Pieces of the pages ---
 
+// --- Installs per version (appstores.js) ---
+
+const OBS_STORE_LABELS = { play: 'Google Play', appStore: 'App Store' };
+
+/** An Android version code as its version (major·10⁷ + minor·10⁴ + patch·100 + commits), when one of the tags has that name. */
+function obsVersionOfCode(code, c) {
+  const name = `${Math.floor(code / 1e7)}.${Math.floor((code % 1e7) / 1e4)}.${Math.floor((code % 1e4) / 100)}`;
+  return (c.tags || []).some(t => t.name === name) ? name : null;
+}
+
+/** One target's versions, newest share first, merged by name: [{ name, count, share }] and the total. */
+function obsInstallRows(result, c) {
+  const byName = new Map();
+  for (const v of result.versions || []) {
+    const name = v.name || obsVersionOfCode(v.code, c) || `code ${v.code}`;
+    byName.set(name, (byName.get(name) || 0) + v.count);
+  }
+  const total = [...byName.values()].reduce((a, b) => a + b, 0);
+  return { total, rows: [...byName].map(([name, count]) => ({ name, count, share: total ? count / total : 0 })).sort((a, b) => b.count - a.count) };
+}
+
+const obsShare = (share) => (share >= 0.995 ? '100%' : share >= 0.1 ? `${Math.round(share * 100)}%` : share >= 0.001 ? `${(share * 100).toFixed(1)}%` : '<0.1%');
+
+/** The share of a target's installs on its production version, or null before it is read. */
+function observabilityProductionShare(c, t) {
+  const result = observabilityState.installs.get(t.name);
+  const prod = t.stages?.production?.tag;
+  if (!prod || !result?.versions) return null;
+  const { rows } = obsInstallRows(result, c);
+  return rows.find(r => r.name === prod)?.share ?? 0;
+}
+
+function observabilityInstallsTargetHtml(c, t) {
+  const s = observabilityState;
+  const result = s.installs.get(t.name);
+  const store = s.storesConfig?.targets?.[t.name];
+  const head = `<div class="obs-sub">${escapeHtml(t.name)} <span class="gh-muted">· ${escapeHtml(OBS_STORE_LABELS[store] || store)}${result?.date ? ` · ${escapeHtml(obsDay(result.date))}, ${escapeHtml(result.metric)}` : ''}</span></div>`;
+  if (!result || result.loading) return `${head}<div class="gh-muted">Reading ${escapeHtml(OBS_STORE_LABELS[store] || 'the store')}…</div>`;
+  if (result.error) return `${head}<div class="gh-error obs-err">${escapeHtml(result.error)}</div>`;
+  if (result.notConnected) return `${head}<div class="gh-muted">${escapeHtml(OBS_STORE_LABELS[store])} is not connected yet; see below.</div>`;
+  if (result.needsRequest) return `${head}<div class="gh-muted">App Store Connect keeps no usage reports for ${escapeHtml(result.appName || t.name)} yet. Asking for them is a one-time change in App Store Connect; the first report follows in a day or two.</div>
+      <button type="button" class="ws-ghost ws-ghost--sm" data-obs-asc-start="${obsAttr(t.name)}">Start collecting reports</button>`;
+  if (result.waiting) return `${head}<div class="gh-muted">App Store Connect is preparing the first report; it shows here once it is there (a day or two after asking).</div>`;
+  const { total, rows } = obsInstallRows(result, c);
+  if (!rows.length) return `${head}<div class="gh-muted">No installs in the latest report.</div>`;
+  const prod = t.stages?.production?.tag;
+  const shown = rows.slice(0, 6);
+  const rest = rows.slice(6);
+  const restCount = rest.reduce((n, r) => n + r.count, 0);
+  const line = (name, count, share, cls = '') => `<div class="obs-inst${cls}"><span class="obs-inst-v">${escapeHtml(name)}${name === prod ? ' <span class="obs-inst-prod">production</span>' : ''}</span>
+      <span class="obs-inst-bar"><span style="width:${Math.max(1, Math.round(share * 100))}%"></span></span><span class="obs-inst-n">${escapeHtml(obsCount(count))}</span><span class="obs-inst-p">${escapeHtml(obsShare(share))}</span></div>`;
+  return `${head}<div class="obs-insts">${shown.map(r => line(r.name, r.count, r.share, r.name === prod ? ' obs-inst--prod' : '')).join('')}
+      ${rest.length ? line(`${rest.length} older`, restCount, total ? restCount / total : 0, ' obs-inst--rest') : ''}
+      <div class="obs-inst obs-inst--total"><span class="obs-inst-v">Total</span><span class="obs-inst-bar"></span><span class="obs-inst-n">${escapeHtml(obsCount(total))}</span><span class="obs-inst-p"></span></div></div>`;
+}
+
+/** The connect form for a store that is not connected yet. */
+function observabilityStoreFormHtml(store) {
+  const f = observabilityState.storesForm;
+  const error = f.error && f.store === store ? `<div class="gh-error">${escapeHtml(f.error)}</div>` : '';
+  const saving = f.saving && f.store === store;
+  if (store === 'play') {
+    return `<div class="gfv-setup obs-rc-form">
+      <p><b>Google Play.</b> Play Console writes its install reports to a Cloud Storage bucket; a service account reads them. In Play Console: Download reports, Statistics, <b>Copy Cloud Storage URI</b> (the bucket). In Google Cloud: a service account with a JSON key. In Play Console: Users and permissions, invite its e-mail with only <b>View app information and download bulk reports</b>. One per developer account; kept in the keychain.</p>
+      <label class="gfv-field">Bucket <input type="text" class="ws-input" id="obs-play-bucket" placeholder="pubsite_prod_rev_0123456789" spellcheck="false"></label>
+      <label class="gfv-field">Service account JSON <textarea class="ws-input obs-key" id="obs-play-sa" rows="4" placeholder='{"type": "service_account", ...}' spellcheck="false"></textarea></label>
+      ${error}<button type="button" class="ws-btn ws-btn--primary" data-obs-store-save="play">${saving ? 'Checking…' : 'Connect Google Play'}</button></div>`;
+  }
+  return `<div class="gfv-setup obs-rc-form">
+      <p><b>App Store.</b> In App Store Connect: Users and Access, Integrations, App Store Connect API, a team key with the <b>Sales</b> role (it reads analytics reports; asking for them the first time needs <b>Admin</b>). Kept in the keychain.</p>
+      <label class="gfv-field">Issuer id <input type="text" class="ws-input" id="obs-asc-issuer" spellcheck="false"></label>
+      <label class="gfv-field">Key id <input type="text" class="ws-input" id="obs-asc-key-id" spellcheck="false"></label>
+      <label class="gfv-field">The .p8 key's text <textarea class="ws-input obs-key" id="obs-asc-key" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" spellcheck="false"></textarea></label>
+      ${error}<button type="button" class="ws-btn ws-btn--primary" data-obs-store-save="appStore">${saving ? 'Checking…' : 'Connect App Store Connect'}</button></div>`;
+}
+
+/** An app's installs per version, per store target, and the forms for stores still to connect. */
+function observabilityInstallsHtml(c) {
+  const s = observabilityState;
+  if (!s.storesConfig) { loadObservabilityInstalls(c); return ''; }
+  const targets = observabilityStoreTargets(c);
+  if (!targets.length) return '';
+  loadObservabilityInstalls(c);
+  const missing = [...new Set(targets.filter(t => s.installs.get(t.name)?.notConnected).map(t => s.storesConfig.targets[t.name]))];
+  return `<div class="gfv-sec"><div class="gh-sec-h">Installs per version <button type="button" class="obs-link" data-obs-installs-refresh="${obsAttr(c.id)}" title="Read the stores again">${PICONS.refresh(11)}</button></div>
+      ${targets.map(t => observabilityInstallsTargetHtml(c, t)).join('')}
+      ${missing.map(observabilityStoreFormHtml).join('')}</div>`;
+}
+
 /** "50%" for a rollout under way; nothing at 100. */
 const obsRollout = (stage) => (stage && stage.rollout < 100 ? ` <span class="obs-rollout" title="Rolled out to ${stage.rollout}%">${stage.rollout}%</span>` : '');
 
@@ -345,7 +460,9 @@ function observabilityRunsHtml(component) {
   if (component.error) return `<div class="gh-error obs-err">${escapeHtml(component.error)}</div>`;
   const cells = (t) => ['internal', 'beta', 'production'].map(stage => {
     const at = t.stages?.[stage];
-    return `<span class="obs-stage${at ? '' : ' obs-stage--none'}">${at ? `<b>${escapeHtml(at.tag)}</b>${obsRollout(at)} <span class="gh-muted">${escapeHtml(obsDay(at.date))}</span>` : '–'}</span>`;
+    // On production, the share of the store installs it has (when read).
+    const share = stage === 'production' ? observabilityProductionShare(component, t) : null;
+    return `<span class="obs-stage${at ? '' : ' obs-stage--none'}">${at ? `<b>${escapeHtml(at.tag)}</b>${obsRollout(at)} <span class="gh-muted">${escapeHtml(obsDay(at.date))}</span>${share != null ? `<span class="obs-run-share" title="Share of its installs on this version">${escapeHtml(obsShare(share))} of installs</span>` : ''}` : '–'}</span>`;
   }).join('');
   if (component.model === 'tagged') {
     const prod = component.targets[0]?.stages?.production;
@@ -680,7 +797,11 @@ function observabilityKeyFiguresHtml(components) {
     : pending || newErrors || jumps ? ['warn', [pending && `${pending} pending`, newErrors && `${newErrors} new error${newErrors === 1 ? '' : 's'}`, jumps && 'errors up'].filter(Boolean).join(', ')]
     : blind.length ? ['info', 'Unreachable']
     : ['ok', 'All clear'];
-  const statusSub = status[1] === 'Unreachable' ? (grafanaViewState.alertsError || grafanaViewState.targetsError ? 'Grafana: office network?' : 'a source does not answer') : alerts.length ? `${alerts.length} alert rule${alerts.length === 1 ? '' : 's'}` : '';
+  // Nothing watching at all is not a source that failed to answer.
+  if (status[1] === 'Unreachable' && !components.some(observabilityWatched)) status[1] = 'Not watched';
+  const statusSub = status[1] === 'Not watched' ? 'no Grafana, no Bugsnag'
+    : status[1] === 'Unreachable' ? (grafanaViewState.alertsError || grafanaViewState.targetsError ? 'Grafana: office network?' : 'a source does not answer')
+    : alerts.length ? `${alerts.length} alert rule${alerts.length === 1 ? '' : 's'}` : '';
   const figures = [obsFigure('Status', escapeHtml(status[1]), statusSub, status[0], blind.length ? `${OBS_FIGURE_HELP.Status}\n\n${blind.join('\n')}` : undefined)];
 
   // The newest release of any component.
@@ -987,6 +1108,7 @@ function observabilityComponentHtml(c) {
       ${observabilityKeyFiguresHtml([c])}
       <div class="gfv-sec"><div class="gh-sec-h">Needs attention</div>${observabilityAttentionHtml([c])}</div>
       <div class="gfv-sec"><div class="gh-sec-h">Where it runs</div>${observabilityRunsHtml(c)}</div>
+      ${c.kind === 'app' ? observabilityInstallsHtml(c) : ''}
       <div class="gfv-sec"><div class="gh-sec-h obs-ver-h">Version <select class="gfv-select" id="obs-version">${options}</select>
           ${tag?.url ? obsLink(tag.url, 'Release on GitHub') : ''}</div>
         ${tag?.summary ? `<div class="obs-summary">${escapeHtml(tag.summary)}</div>` : ''}
@@ -1086,6 +1208,40 @@ function bindObservabilityPage() {
   root.querySelectorAll('[data-obs-dashboard]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'dashboard', id: b.dataset.obsDashboard }); });
   root.querySelectorAll('[data-obs-logs]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'logs', id: b.dataset.obsLogs }); });
   root.querySelectorAll('[data-obs-connect]').forEach(b => { b.onclick = () => selectGrafana({ kind: 'setup', id: null }); });
+  root.querySelectorAll('[data-obs-installs-refresh]').forEach(b => {
+    b.onclick = () => { const c = observabilityComponent(b.dataset.obsInstallsRefresh); if (c) loadObservabilityInstalls(c, { force: true }); renderGrafanaMain(); };
+  });
+  root.querySelectorAll('[data-obs-asc-start]').forEach(b => {
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = 'Asking…';
+      const result = await window.api.startAppStoreReports(b.dataset.obsAscStart).catch(err => ({ error: err?.message || String(err) }));
+      const c = observabilityComponent(grafanaViewState.selected.id);
+      if (result?.error) s.installs.set(b.dataset.obsAscStart, { error: result.error });
+      else if (c) await loadObservabilityInstalls(c, { force: true });
+      renderGrafanaMain();
+    };
+  });
+  root.querySelectorAll('[data-obs-store-save]').forEach(b => {
+    b.onclick = async () => {
+      const store = b.dataset.obsStoreSave;
+      const val = (id) => root.querySelector(id)?.value || '';
+      const spec = store === 'play'
+        ? { store, bucket: val('#obs-play-bucket'), serviceAccount: val('#obs-play-sa') }
+        : { store, issuerId: val('#obs-asc-issuer'), keyId: val('#obs-asc-key-id'), privateKey: val('#obs-asc-key') };
+      s.storesForm = { store, error: null, saving: true };
+      renderGrafanaMain();
+      const result = await window.api.saveAppStoresConfig(spec).catch(err => ({ error: err?.message || String(err) }));
+      s.storesForm = { store, error: result?.error || null, saving: false };
+      if (!result?.error) {
+        s.storesConfig = null;
+        s.installs.clear();
+        const c = observabilityComponent(grafanaViewState.selected.id);
+        if (c) await loadObservabilityInstalls(c, { force: true });
+      }
+      renderGrafanaMain();
+    };
+  });
   root.querySelectorAll('[data-obs-rc-edit]').forEach(b => { b.onclick = () => { s.unfolded.add(`rc-edit:${b.dataset.obsRcEdit}`); renderGrafanaMain(); }; });
   const rcSave = root.querySelector('#obs-rc-save');
   if (rcSave) {

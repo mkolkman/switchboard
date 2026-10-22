@@ -60,6 +60,7 @@ const grafana = require('./grafana');
 const observability = require('./observability');
 const bugsnag = require('./bugsnag');
 const revenuecat = require('./revenuecat');
+const appstores = require('./appstores');
 const projectMaps = require('./project-maps');
 const sleepControl = require('./sleep-control');
 
@@ -877,6 +878,10 @@ ipcMain.handle('bugsnag-session-note', () => bugsnag.sessionToolsNote());
 ipcMain.handle('revenuecat-config', () => revenuecat.asResult(revenuecat.getConfig()));
 ipcMain.handle('revenuecat-save-config', (_e, spec) => revenuecat.asResult(revenuecat.saveConfig(spec || {})));
 ipcMain.handle('revenuecat-overviews', (_e, opts) => revenuecat.asResult(revenuecat.getOverviews({ force: !!opts?.force })));
+ipcMain.handle('appstores-config', () => appstores.asResult(appstores.getConfig()));
+ipcMain.handle('appstores-save-config', (_e, spec) => appstores.asResult(appstores.saveConfig(spec || {})));
+ipcMain.handle('appstores-installs', (_e, opts) => appstores.asResult(appstores.getInstalls({ targets: Array.isArray(opts?.targets) ? opts.targets.map(String) : undefined, force: !!opts?.force })));
+ipcMain.handle('appstores-start-reports', (_e, target) => appstores.asResult(appstores.startAppStoreReports(String(target || ''))));
 
 // --- IPC: Help Scout (helpscout.js) ---
 // Each write is a click in the Help Scout tab. A reply is always a draft:
