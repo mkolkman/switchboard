@@ -3,7 +3,7 @@
 // whose body links the work items, or a GitHub Project. Their content comes
 // from github-tracker.js on every visit and is held in memory, never written.
 // Clicking an item opens a review panel beside the list: the PR's description,
-// reviews, comments and checks, the auto-rebase label and a merge button.
+// reviews, comments and checks, the merge queue and a merge button.
 // Depends on: escapeHtml (utils.js), PICONS, selectedProject, projectTab,
 // renderOverview, projectViewer, showContextMenu (projects-view.js),
 // formatDate (utils.js), window.marked (codemirror bundle), releaseText,
@@ -978,11 +978,21 @@ function githubReviewsRow(pr, state) {
 }
 
 /**
- * GitHub's auto-merge: on, with who turned it on and how it merges, or a
- * button to turn it on while the PR cannot merge yet (checks running, review
- * pending). GitHub refuses it on a PR that can merge right now.
+ * Auto-merge. A repo with the merge queue's labels gets a button that puts
+ * the PR in the queue (automerge:opt-in), and Disable to take it out; a
+ * failed PR can try again. Other repos keep GitHub's own auto-merge: on,
+ * with who turned it on and how it merges, or a button to turn it on while
+ * the PR cannot merge yet (GitHub refuses it on a PR that can merge now).
  */
 function githubAutoMergeHtml(pr, state, method, canMergeNow) {
+  const busy = state.busy ? 'disabled' : '';
+  if (pr.queue?.available) {
+    if (!pr.queue.on) {
+      return `<button type="button" class="ws-btn ws-btn--sm" id="gh-queue-on" ${busy} title="${githubAttr(`Adds the ${pr.queue.label} label: the merge queue rebases it onto ${pr.baseRef} and merges it once it is approved, no review is still requested and CI passes`)}">${state.busy === 'queue' ? 'Enabling…' : 'Enable auto-merge'}</button>`;
+    }
+    return (pr.queue.failed ? `<button type="button" class="ws-ghost ws-ghost--sm" id="gh-queue-retry" ${busy} title="Removes automerge:failed, so the queue tries this PR again">Try again</button>` : '')
+      + `<button type="button" class="ws-ghost ws-ghost--sm" id="gh-queue-off" ${busy} title="Take it out of the merge queue: removes ${githubAttr(pr.queue.label)}">${state.busy === 'queue' ? 'Turning off…' : 'Disable'}</button>`;
+  }
   const auto = pr.autoMerge;
   if (!auto?.allowed || pr.isDraft) return '';
   if (auto.on) {
@@ -1004,23 +1014,29 @@ function githubMergeRow(pr, state, project) {
   }
   if (pr.state !== 'OPEN') return githubStatusRow('Merge', '<div class="gh-srow-line"><span class="gh-state gh-state--bad">Closed without merging</span></div>');
   const [kind, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
-  const resolve = pr.mergeState === 'DIRTY' || pr.autorebase.failed
+  const resolve = pr.mergeState === 'DIRTY' || pr.rebaseFailed
     ? `<span class="ws-flex"></span><button type="button" class="ws-ghost ws-ghost--sm" id="gh-resolve" ${resolving ? 'disabled' : ''} title="${resolving ? 'A Claude session is already working on this PR; see below' : `Start a Claude session in your local clone that rebases ${escapeHtml(pr.headRef)} onto ${escapeHtml(pr.baseRef)} in a worktree, resolves the conflicts, runs the tests and force-pushes with lease`}">${ICONS.claude(11)}<span>${resolving ? 'Resolving with Claude…' : 'Resolve conflicts with Claude'}</span></button>`
     : '';
   return githubStatusRow('Merge', `<div class="gh-srow-line"><span class="gh-state gh-state--${kind}">${escapeHtml(text)}</span>${resolve}</div>`
     + (pr.defaultBranch && pr.baseRef !== pr.defaultBranch ? `<div class="gh-srow-line"><span class="gh-state gh-state--warn" title="This PR is stacked: merging lands it in ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}">Merges into ${escapeHtml(pr.baseRef)}, not ${escapeHtml(pr.defaultBranch)}</span></div>` : ''));
 }
 
-function githubAutorebaseHtml(pr, state) {
-  if (!pr.autorebase.available) return '<span class="gh-muted" title="This repository has no autorebase:opt-in label">No auto-rebase in this repo</span>';
-  return `<label class="gh-toggle" title="Adds or removes the ${escapeHtml(pr.autorebase.label)} label; the AutoRebase workflow keeps the branch on top of ${escapeHtml(pr.baseRef)}">
-      <span class="settings-toggle gh-switch"><input type="checkbox" id="gh-autorebase" ${pr.autorebase.on ? 'checked' : ''} ${state.busy === 'autorebase' ? 'disabled' : ''}><span class="settings-toggle-slider"></span></span><span>Auto-rebase</span>
-    </label>${pr.autorebase.failed ? '<span class="gh-state gh-state--bad" title="The bot added autorebase:non-rebaseable: the last rebase hit conflicts">rebase failed</span>' : ''}`;
+/**
+ * Where a queued PR stands, as the merge queue's own status says it
+ * ("Number 2 in the merge queue", "Waits for an approval"), or failed.
+ */
+function githubQueueStateHtml(pr) {
+  const q = pr.queue;
+  if (!q?.available || !q.on) return '';
+  if (q.failed) return '<span class="gh-state gh-state--bad" title="The merge queue skips this PR; its comment on the PR says why. A new commit, or Try again, puts it back in its old place">Merge queue failed</span>';
+  if (q.head) return `<span class="gh-state gh-state--ok" title="${githubAttr(q.status?.text || 'First in the merge queue')}">Merges next</span>`;
+  const text = q.status?.text || 'In the merge queue';
+  return `<span class="gh-state gh-state--pending" title="${githubAttr(`${q.next ? 'Ahead of the queue (automerge:next). ' : ''}${text}`)}">${escapeHtml(text)}</span>`;
 }
 
 /**
- * The card's last line, on an open PR: auto-rebase on the left, auto-merge
- * and the merge button on the right. The right pair wraps as one, so in a
+ * The card's last line, on an open PR: the merge queue's state on the left,
+ * auto-merge and the merge button on the right. The right pair wraps as one, so in a
  * narrow panel the merge button never drops below auto-merge on its own.
  */
 function githubMergeButtons(pr, state) {
@@ -1029,7 +1045,7 @@ function githubMergeButtons(pr, state) {
   const can = !pr.isDraft && MERGEABLE_STATES.has(pr.mergeState) && !!method && state.busy !== 'merge';
   const [, text] = MERGE_STATE_TEXT[pr.isDraft ? 'DRAFT' : pr.mergeState] || ['warn', pr.mergeState];
   return `<div class="gh-merge-row">
-      ${githubAutorebaseHtml(pr, state)}
+      ${githubQueueStateHtml(pr)}
       <div class="gh-merge-acts">
       ${githubAutoMergeHtml(pr, state, method, can)}
       <div class="gh-merge-btns">
@@ -1089,7 +1105,7 @@ function conflictPrompt(pr) {
     `2. Rebase it onto \`origin/${pr.baseRef}\`. For each conflict, read what both sides meant (this PR's description via \`gh pr view ${pr.number}\`, and the commits on the base that touched the file) and keep the intent of both. Do not drop changes from either side to make a conflict go away.`,
     '3. Run the tests and checks that cover the files you touched, and fix what the rebase broke.',
     `4. Push with \`git push --force-with-lease origin HEAD:${pr.headRef}\`.`,
-    pr.autorebase.failed ? `5. Remove the \`autorebase:non-rebaseable\` label: \`gh pr edit ${pr.number} --remove-label autorebase:non-rebaseable\`.` : null,
+    pr.rebaseFailed ? `5. Remove the \`autorebase:non-rebaseable\` label: \`gh pr edit ${pr.number} --remove-label autorebase:non-rebaseable\`.` : null,
     '',
     'Finish with a short list of the files that conflicted and how you resolved each one. If a conflict needs a product or design decision, stop and ask me instead of guessing.',
   ].filter(l => l !== null).join('\n');
@@ -1785,18 +1801,6 @@ function bindGithubPrActions(project, panel, pr) {
       }))], { anchor: e.currentTarget });
     };
   }
-  const toggle = panel.querySelector('#gh-autorebase');
-  if (toggle) {
-    toggle.onchange = async () => {
-      state.busy = 'autorebase';
-      paintGithubPanel(project);
-      const result = await window.api.setGithubAutorebase(target, toggle.checked);
-      state.busy = null;
-      state.notice = result?.error ? { kind: 'bad', text: result.error } : null;
-      await loadGithubDetail(project, { quiet: true });
-      paintGithubPanel(project);
-    };
-  }
   // Review requests: a change shows in the panel and in the list's chips.
   const setRequest = async (login, on) => {
     state.busy = 'request';
@@ -1875,6 +1879,21 @@ function bindGithubPrActions(project, panel, pr) {
     await loadGithubDetail(project, { quiet: true });
     paintGithubPanel(project);
   };
+  const setQueue = async (on) => {
+    const stacked = pr.defaultBranch && pr.baseRef !== pr.defaultBranch ? `\nIt waits until ${pr.baseRef} merges: a stacked PR is not queued.` : '';
+    if (on && !pr.queue.failed && !confirm(`Enable auto-merge?\n\n${pr.repo}#${pr.number}: ${pr.title}\nThe merge queue rebases it onto ${pr.baseRef} and merges it once it is approved, no review is still requested and CI passes.${stacked}`)) return;
+    state.busy = 'queue';
+    paintGithubPanel(project);
+    const result = await window.api.setGithubMergeQueue(target, on);
+    state.busy = null;
+    state.notice = result?.error ? { kind: 'bad', text: result.error } : { kind: 'ok', text: on ? 'Auto-merge is on: the PR is in the merge queue.' : 'Auto-merge is off.' };
+    await loadGithubDetail(project, { quiet: true });
+    paintGithubPanel(project);
+  };
+  for (const [id, on] of [['#gh-queue-on', true], ['#gh-queue-retry', true], ['#gh-queue-off', false]]) {
+    const btn = panel.querySelector(id);
+    if (btn) btn.onclick = () => setQueue(on);
+  }
   const autoOn = panel.querySelector('#gh-automerge');
   if (autoOn) autoOn.onclick = () => setAutoMerge(true);
   const autoOff = panel.querySelector('#gh-automerge-off');

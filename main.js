@@ -804,7 +804,7 @@ ipcMain.handle('get-chat-folder', guarded(() => {
 ipcMain.handle('get-repo-info', guarded((paths) => repoInfoForPaths(Array.isArray(paths) ? paths : [])));
 // A project's GitHub tracking, fetched live (github-tracker.js keeps it in memory only).
 ipcMain.handle('get-github-tracker', guarded((ref, opts) => githubTracker.getTracker(String(ref || ''), { force: !!opts?.force })));
-// The review panel: read a PR or issue, toggle auto-rebase, merge. Each acts
+// The review panel: read a PR or issue, queue it for merging, merge. Each acts
 // with the user's own gh login, only when they click in the panel.
 const ghTarget = (t) => [String(t?.owner || ''), String(t?.repo || ''), Number(t?.number)];
 ipcMain.handle('github-pull-request', (_e, t) => githubTracker.asResult(githubTracker.getPullRequest(...ghTarget(t))));
@@ -821,7 +821,7 @@ ipcMain.handle('github-set-thread-resolved', (_e, threadId, resolved) => githubT
 ipcMain.handle('github-mark-reviewed', (_e, t, headOid) => githubTracker.asResult(githubTracker.markReviewed(...ghTarget(t), headOid ? String(headOid) : null)));
 ipcMain.handle('github-review-candidates', (_e, t) => githubTracker.asResult(githubTracker.getReviewCandidates(...ghTarget(t))));
 ipcMain.handle('github-set-review-request', (_e, t, login, on) => githubTracker.asResult(githubTracker.setReviewRequest(...ghTarget(t), String(login || ''), !!on)));
-ipcMain.handle('github-set-autorebase', (_e, t, on) => githubTracker.asResult(githubTracker.setAutorebase(...ghTarget(t), !!on)));
+ipcMain.handle('github-set-merge-queue', (_e, t, on) => githubTracker.asResult(githubTracker.setMergeQueue(...ghTarget(t), !!on)));
 ipcMain.handle('github-rerun-checks', (_e, t, spec) => githubTracker.asResult(githubTracker.rerunChecks(...ghTarget(t).slice(0, 2), spec || {})));
 ipcMain.handle('github-submit-review', (_e, t, spec) => githubTracker.asResult(githubTracker.submitReview(...ghTarget(t), { event: String(spec?.event || ''), body: String(spec?.body || ''), headOid: spec?.headOid ? String(spec.headOid) : null })));
 ipcMain.handle('github-set-pr-type', (_e, t, type) => githubTracker.asResult(githubTracker.setPrType(...ghTarget(t), String(type || ''))));

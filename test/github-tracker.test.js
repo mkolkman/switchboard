@@ -194,3 +194,13 @@ test('checksSummary: running checks win over a failure so far, which is counted'
   assert.deepEqual(checksSummary({ state: 'SUCCESS', contexts: { nodes: [{ __typename: 'StatusContext', state: 'PENDING' }] } }), { checks: 'PENDING', checksFailed: 0 });
   assert.deepEqual(checksSummary(null), { checks: null, checksFailed: 0 });
 });
+
+test('checksSummary: the merge queue\'s automerge status is a place in the queue, not CI', () => {
+  const { checksSummary } = require('../github-tracker');
+  const run = (status, conclusion = null) => ({ __typename: 'CheckRun', status, conclusion });
+  const queue = (state) => ({ __typename: 'StatusContext', context: 'automerge', state });
+  assert.deepEqual(checksSummary({ state: 'PENDING', contexts: { nodes: [run('COMPLETED', 'SUCCESS'), queue('PENDING')] } }), { checks: 'SUCCESS', checksFailed: 0 });
+  assert.deepEqual(checksSummary({ state: 'FAILURE', contexts: { nodes: [run('COMPLETED', 'SUCCESS'), queue('FAILURE')] } }), { checks: 'SUCCESS', checksFailed: 0 });
+  assert.deepEqual(checksSummary({ state: 'PENDING', contexts: { nodes: [run('COMPLETED', 'FAILURE'), queue('PENDING')] } }), { checks: 'FAILURE', checksFailed: 1 });
+  assert.deepEqual(checksSummary({ state: 'PENDING', contexts: { nodes: [queue('PENDING')] } }), { checks: null, checksFailed: 0 });
+});

@@ -114,6 +114,7 @@ const FAILED_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTU
  * counted.
  */
 function checksSummary(rollup) {
+  rollup = withoutQueueStatus(rollup);
   if (!rollup) return { checks: null, checksFailed: 0 };
   let running = 0;
   let failed = 0;
@@ -129,6 +130,30 @@ function checksSummary(rollup) {
   return { checks: running ? 'PENDING' : rollup.state || null, checksFailed: failed };
 }
 
+// The merge queue (MoveLab-Studio/merge-queue) sets this commit status on
+// every labelled PR: its place in the queue, not a CI result.
+const QUEUE_STATUS = 'automerge';
+
+/**
+ * A status check rollup without the merge queue's status, its state worked
+ * out again from the rest when the queue's was in it: a queued PR waits
+ * (pending) for good, and would show as CI still running.
+ */
+function withoutQueueStatus(rollup) {
+  const nodes = rollup?.contexts?.nodes;
+  if (!nodes?.some(isQueueStatus)) return rollup;
+  const rest = nodes.filter(n => !isQueueStatus(n));
+  const state = !rest.length ? null
+    : rest.some(n => n.__typename === 'CheckRun' ? n.status !== 'COMPLETED' : n.state === 'PENDING' || n.state === 'EXPECTED') ? 'PENDING'
+    : rest.some(n => n.__typename === 'CheckRun' ? FAILED_CONCLUSIONS.has(n.conclusion) : n.state === 'FAILURE' || n.state === 'ERROR') ? 'FAILURE'
+    : 'SUCCESS';
+  return { ...rollup, state, contexts: { ...rollup.contexts, nodes: rest } };
+}
+
+function isQueueStatus(n) {
+  return n?.__typename === 'StatusContext' && n.context === QUEUE_STATUS;
+}
+
 const PR_FIELDS = `
   number title url state isDraft reviewDecision updatedAt mergedAt mergeCommit { oid } headRefOid
   mine: reviews(last: 20, author: $me) { nodes { state body submittedAt commit { oid } } }
@@ -136,7 +161,7 @@ const PR_FIELDS = `
   reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } ... on Bot { login } } } }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
-    __typename ... on CheckRun { status conclusion } ... on StatusContext { state }
+    __typename ... on CheckRun { status conclusion } ... on StatusContext { context state }
   } } } } } }`;
 
 const ISSUE_FIELDS = `
@@ -889,8 +914,13 @@ async function setReviewRequest(owner, repo, number, login, on) {
 
 // --- Pull request and issue detail (the side panel) ---
 
-const AUTOREBASE_LABEL = 'autorebase:opt-in';
-const AUTOREBASE_FAILED_LABEL = 'autorebase:non-rebaseable';
+// The merge queue's labels: opt-in queues a PR (it is rebased and merged once
+// approved and green), next puts it ahead, failed is the queue's verdict.
+const QUEUE_LABEL = 'automerge:opt-in';
+const QUEUE_NEXT_LABEL = 'automerge:next';
+const QUEUE_FAILED_LABEL = 'automerge:failed';
+const QUEUE_HEAD_LABEL = 'bot: first in queue';
+const REBASE_FAILED_LABEL = 'autorebase:non-rebaseable';
 
 const COMMENT_FIELDS = 'author { login } body createdAt url';
 
@@ -899,7 +929,7 @@ async function getPullRequest(owner, repo, number) {
   const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!, $me: String) {
     repository(owner: $owner, name: $repo) {
       nameWithOwner squashMergeAllowed rebaseMergeAllowed mergeCommitAllowed autoMergeAllowed defaultBranchRef { name }
-      autorebase: label(name: "${AUTOREBASE_LABEL}") { id }
+      queue: label(name: "${QUEUE_LABEL}") { id }
       pullRequest(number: $number) {
         id number title url state isDraft merged mergedAt mergeCommit { oid } body createdAt updatedAt
         author { login }
@@ -917,7 +947,7 @@ async function getPullRequest(owner, repo, number) {
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
           __typename
           ... on CheckRun { databaseId name status conclusion detailsUrl isRequired(pullRequestNumber: $number) checkSuite { workflowRun { databaseId } } }
-          ... on StatusContext { context state targetUrl isRequired(pullRequestNumber: $number) }
+          ... on StatusContext { context state description targetUrl isRequired(pullRequestNumber: $number) }
         } } } } } }
       }
     }
@@ -927,6 +957,8 @@ async function getPullRequest(owner, repo, number) {
   const pr = r?.pullRequest;
   if (!pr) throw new Error(`${owner}/${repo}#${number} was not found, or your GitHub login cannot see it.`);
   const commit = pr.commits?.nodes?.[0]?.commit;
+  const queueStatus = (commit?.statusCheckRollup?.contexts?.nodes || []).find(isQueueStatus);
+  const rollup = withoutQueueStatus(commit?.statusCheckRollup);
   const labels = (pr.labels?.nodes || []).map(l => l.name);
   const mine = { repo: r.nameWithOwner, number: pr.number, state: pr.state, headOid: pr.headRefOid, myReview: latestMyReview(pr.mine?.nodes) };
   await addReviewChanges([mine]);
@@ -942,11 +974,17 @@ async function getPullRequest(owner, repo, number) {
     mergeable: pr.mergeable, mergeState: pr.mergeStateStatus, reviewDecision: pr.reviewDecision,
     additions: pr.additions, deletions: pr.deletions, changedFiles: pr.changedFiles,
     labels,
-    autorebase: {
-      available: !!r.autorebase?.id,
-      on: labels.includes(AUTOREBASE_LABEL),
-      failed: labels.includes(AUTOREBASE_FAILED_LABEL),
-      label: AUTOREBASE_LABEL,
+    rebaseFailed: labels.includes(REBASE_FAILED_LABEL),
+    // The merge queue, in a repo that has its labels: on, ahead, first, failed,
+    // and its own status line ("Number 2 in the merge queue").
+    queue: {
+      available: !!r.queue?.id,
+      on: labels.includes(QUEUE_LABEL) || labels.includes(QUEUE_NEXT_LABEL),
+      next: labels.includes(QUEUE_NEXT_LABEL),
+      head: labels.includes(QUEUE_HEAD_LABEL),
+      failed: labels.includes(QUEUE_FAILED_LABEL),
+      status: queueStatus ? { state: queueStatus.state, text: queueStatus.description || '' } : null,
+      label: QUEUE_LABEL,
     },
     mergeMethods: [
       r.squashMergeAllowed && 'SQUASH', r.rebaseMergeAllowed && 'REBASE', r.mergeCommitAllowed && 'MERGE',
@@ -974,8 +1012,8 @@ async function getPullRequest(owner, repo, number) {
       comments: (t.comments?.nodes || []).map(c => ({ id: c.databaseId, author: c.author?.login || 'ghost', body: c.body, at: c.createdAt, url: c.url })),
     })),
     checks: {
-      state: commit?.statusCheckRollup?.state || null,
-      runs: (commit?.statusCheckRollup?.contexts?.nodes || []).map(n => n.__typename === 'CheckRun'
+      state: rollup?.state || null,
+      runs: (rollup?.contexts?.nodes || []).map(n => n.__typename === 'CheckRun'
         // jobId and runId only for GitHub Actions: what Re-run needs.
         ? { name: n.name, status: n.status, conclusion: n.conclusion, url: n.detailsUrl, required: !!n.isRequired, jobId: n.checkSuite?.workflowRun ? n.databaseId : null, runId: n.checkSuite?.workflowRun?.databaseId || null }
         : { name: n.context, status: n.state === 'PENDING' || n.state === 'EXPECTED' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: n.state === 'SUCCESS' ? 'SUCCESS' : n.state === 'PENDING' || n.state === 'EXPECTED' ? null : 'FAILURE', url: n.targetUrl, required: !!n.isRequired }),
@@ -1046,17 +1084,35 @@ async function getPrSummaries(keys) {
   return { prs: out };
 }
 
-/** Turn auto-rebase on or off for a PR: the autorebase:opt-in label. */
-async function setAutorebase(owner, repo, number, on) {
+/**
+ * Put a PR in the merge queue (the automerge:opt-in label) or take it out.
+ * Out drops automerge:next too, and in drops automerge:failed, so the queue
+ * tries a failed PR again.
+ */
+async function setMergeQueue(owner, repo, number, on) {
   const data = await graphql(`query($owner: String!, $repo: String!, $number: Int!) {
-    repository(owner: $owner, name: $repo) { label(name: "${AUTOREBASE_LABEL}") { id } pullRequest(number: $number) { id } }
+    repository(owner: $owner, name: $repo) {
+      queue: label(name: "${QUEUE_LABEL}") { id }
+      next: label(name: "${QUEUE_NEXT_LABEL}") { id }
+      failed: label(name: "${QUEUE_FAILED_LABEL}") { id }
+      pullRequest(number: $number) { id labels(first: 30) { nodes { name } } }
+    }
   }`, { owner, repo, number });
-  const labelId = data?.repository?.label?.id;
-  const prId = data?.repository?.pullRequest?.id;
-  if (!labelId) throw new Error(`${owner}/${repo} has no "${AUTOREBASE_LABEL}" label.`);
+  const r = data?.repository;
+  const prId = r?.pullRequest?.id;
+  if (!r?.queue?.id) throw new Error(`${owner}/${repo} has no "${QUEUE_LABEL}" label, so it has no merge queue.`);
   if (!prId) throw new Error(`${owner}/${repo}#${number} was not found.`);
-  const mutation = on ? 'addLabelsToLabelable' : 'removeLabelsFromLabelable';
-  await graphql(`mutation($id: ID!, $labels: [ID!]!) { ${mutation}(input: { labelableId: $id, labelIds: $labels }) { clientMutationId } }`, { id: prId, labels: [labelId] });
+  const has = new Set((r.pullRequest.labels?.nodes || []).map(l => l.name));
+  const label = (mutation, ids) => ids.length && graphql(`mutation($id: ID!, $labels: [ID!]!) { ${mutation}(input: { labelableId: $id, labelIds: $labels }) { clientMutationId } }`, { id: prId, labels: ids });
+  if (on) {
+    if (has.has(QUEUE_FAILED_LABEL) && r.failed?.id) await label('removeLabelsFromLabelable', [r.failed.id]);
+    await label('addLabelsToLabelable', [r.queue.id]);
+  } else {
+    await label('removeLabelsFromLabelable', [
+      has.has(QUEUE_LABEL) && r.queue.id, has.has(QUEUE_NEXT_LABEL) && r.next?.id,
+    ].filter(Boolean));
+  }
+  cache.clear();
   return { ok: true };
 }
 
@@ -1664,7 +1720,7 @@ function asResult(promise) {
 
 module.exports = {
   parseRef, formatRef, linkedIssueRefs, itemStatus, summarize, shapeIssue, getTracker, ITEM_STATUSES,
-  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setAutorebase, setPrType, submitReview, rerunChecks, checksSummary, planPrTypeLabels, mergePullRequest, asResult, AUTOREBASE_LABEL,
+  humanReview, isIgnoredReviewer, getMyPullRequests, getPullRequest, pullRequestForBranch, getRefStates, getPrSummaries, setAutoMerge, getFileContent, getPullRequestFiles, getReviewComments, createReviewComment, replyToReviewComment, addComment, setThreadResolved, getIssue, setMergeQueue, setPrType, submitReview, rerunChecks, checksSummary, planPrTypeLabels, mergePullRequest, asResult, withoutQueueStatus,
   phasesFrom, shapeFieldValues, shapeProjectValues, phaseFieldsFor, issueFieldsOf, setIssueField, seedPhaseField, setIssueClosed, renameIssue, createTodo, updatePlan, setIssueMilestone,
   milestonePlanFromTable, seedMilestones, cloneRepo,
   releaseModel, parseReleaseTargets, resolveRelease, getReleaseStatus, markReviewed, graphql,
