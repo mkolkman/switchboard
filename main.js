@@ -57,6 +57,7 @@ const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
 const { AccessWatch } = require('./access-watch');
+const { AccessPanel } = require('./access-panel');
 const grafana = require('./grafana');
 const observability = require('./observability');
 const bugsnag = require('./bugsnag');
@@ -864,6 +865,26 @@ const accessWatch = new AccessWatch({
   log,
 });
 ipcMain.handle('access-snapshot', () => accessWatch.snapshot());
+// The same rows as the window's banner, in a panel just above the dialog, over every app.
+const accessPanel = new AccessPanel({
+  log,
+  onOpen: (sessionId) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    app.focus({ steal: true });
+    mainWindow.webContents.send('access-open-session', sessionId);
+  },
+});
+const ACCESS_ROW_FIELDS = ['id', 'sessionId', 'title', 'asks', 'command', 'kind'];
+ipcMain.handle('access-panel-rows', (_e, rows) => {
+  const clean = (Array.isArray(rows) ? rows : []).map(r => ({
+    ...Object.fromEntries(ACCESS_ROW_FIELDS.map(k => [k, r?.[k] == null ? '' : String(r[k]).slice(0, 400)])),
+    count: Number(r?.count) || 1,
+  }));
+  accessPanel.update(clean).catch(err => log.warn(`[access] panel: ${err.message}`));
+});
+ipcMain.on('access-panel-open', (_e, sessionId) => accessPanel.open(String(sessionId || '')));
 ipcMain.handle('get-sleep-disabled', () => sleepControl.isSleepDisabled());
 ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisabled(!!disabled, log));
 
@@ -2958,6 +2979,7 @@ app.on('before-quit', () => {
   shutdownAllMcp();
   previewMcp.stop();
   accessWatch.stop();
+  accessPanel.destroy();
   taskManager.shutdown();
 
   // Close filesystem watcher

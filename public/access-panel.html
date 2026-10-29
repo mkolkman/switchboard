@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif; color: #e0e0f0; -webkit-user-select: none; cursor: default; }
+  #rows { margin: 12px; display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 10px; background: rgba(35,32,26,0.97); border: 1px solid rgba(224,184,96,0.55); box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+  .row { display: flex; align-items: center; gap: 9px; height: 42px; }
+  .icon { color: #e0b860; display: inline-flex; flex-shrink: 0; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .text { flex: 1; min-width: 0; }
+  .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .line b { font-weight: 600; }
+  .count { margin-left: 4px; padding: 0 5px; border-radius: 8px; background: rgba(224,184,96,0.18); color: #e0b860; font-size: 11px; }
+  .cmd { margin-top: 1px; font: 11px ui-monospace, Menlo, monospace; color: #a0a0b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { flex-shrink: 0; height: 24px; padding: 0 9px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); color: #e0e0f0; font: inherit; font-size: 11.5px; }
+  button:hover { background: rgba(255,255,255,0.12); }
+</style>
+</head>
+<body>
+<div id="rows"></div>
+<script>
+  const LOCK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  window.accessPanel.onRows((rows) => {
+    const box = document.getElementById('rows');
+    box.replaceChildren(...rows.map((r) => {
+      const row = el('div', 'row');
+      const icon = el('span', 'icon');
+      icon.innerHTML = LOCK;
+      const text = el('div', 'text');
+      const line = el('div', 'line');
+      line.append(el('b', null, r.title), ` ${r.asks}`);
+      if (r.count > 1) line.append(el('span', 'count', `×${r.count}`));
+      text.append(line);
+      if (r.command) { const cmd = el('div', 'cmd', `via: ${r.command}`); cmd.title = r.command; text.append(cmd); }
+      row.append(icon, text);
+      if (r.sessionId) {
+        const open = el('button', null, 'Open session');
+        open.onclick = () => window.accessPanel.open(r.sessionId);
+        row.append(open);
+      }
+      return row;
+    }));
+  });
+</script>
+</body>
+</html>

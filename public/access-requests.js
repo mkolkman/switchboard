@@ -54,9 +54,18 @@ function accessBannerRows() {
   return [...rows.values()];
 }
 
+/** The banner's rows for the panel over other apps (access-panel.js), the newest request first. */
+function sendAccessPanelRows(rows) {
+  const list = rows.slice().sort((a, b) => String(b.latest.at).localeCompare(String(a.latest.at))).map(({ latest: r, count }) => ({
+    id: r.id, sessionId: r.sessionId || '', title: accessSessionName(r.sessionId), asks: accessAsks(r), command: r.command || '', kind: r.kind, count,
+  }));
+  window.api.setAccessPanelRows(list).catch(() => {});
+}
+
 function renderAccessBanner() {
   let banner = document.getElementById('access-banner');
   const rows = accessBannerRows();
+  sendAccessPanelRows(rows);
   if (!rows.length) { banner?.remove(); return; }
   if (!banner) {
     banner = document.createElement('div');
@@ -150,6 +159,7 @@ function addAccessRequest(r) {
 }
 
 window.api.onAccessRequest((r) => { addAccessRequest(r); renderAccess(); });
+window.api.onAccessOpenSession((sessionId) => accessOpenSession(sessionId));
 window.api.onAccessAnswer(({ id, answer, answeredAt }) => {
   const r = accessHistory.find(h => h.id === id);
   if (r) Object.assign(r, { answer, answeredAt });
