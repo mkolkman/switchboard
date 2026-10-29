@@ -885,6 +885,7 @@ ipcMain.handle('access-panel-rows', (_e, rows) => {
   accessPanel.update(clean).catch(err => log.warn(`[access] panel: ${err.message}`));
 });
 ipcMain.on('access-panel-open', (_e, sessionId) => accessPanel.open(String(sessionId || '')));
+ipcMain.on('access-panel-height', (_e, height) => accessPanel.resize(height));
 ipcMain.handle('get-sleep-disabled', () => sleepControl.isSleepDisabled());
 ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisabled(!!disabled, log));
 

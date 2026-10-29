@@ -14,9 +14,11 @@ const { BrowserWindow, screen } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 
-const PANEL_WIDTH = 440;
-const ROW_HEIGHT = 50;
+const PANEL_WIDTH = 520;
+// A first guess per row; the page measures itself and reports its height.
+const ROW_HEIGHT = 64;
 const PANEL_PAD = 12;
+const MAX_HEIGHT = 420;
 const GAP = 10;
 const MAX_ROWS = 4;
 // How long to look for the dialog after a request: it shows within a split second.
@@ -76,6 +78,9 @@ class AccessPanel {
     this.win = null;
     this.rows = [];
     this.placedFor = null; // the request the panel was last placed for
+    this.dialog = null; // where that request's dialog is, or null
+    this.workArea = null;
+    this.height = panelHeight(1);
     this.ready = null;
   }
 
@@ -111,18 +116,29 @@ class AccessPanel {
     if (win.isDestroyed()) return;
     win.webContents.send('access-panel-rows', this.rows);
     const latest = this.rows[0];
-    const height = panelHeight(this.rows.length);
     if (this.placedFor !== latest.id) {
       this.placedFor = latest.id;
       const dialog = await findDialog(latest.kind === 'op' ? ['1Password', 'UserNotificationCenter'] : ['UserNotificationCenter']);
       if (win.isDestroyed() || this.placedFor !== latest.id) return;
       const near = dialog ? { x: dialog.x + dialog.width / 2, y: dialog.y } : screen.getCursorScreenPoint();
-      win.setBounds(panelBounds(dialog, height, screen.getDisplayNearestPoint(near).workArea));
-    } else {
-      const b = win.getBounds();
-      win.setBounds({ ...b, height });
+      this.dialog = dialog;
+      this.workArea = screen.getDisplayNearestPoint(near).workArea;
+      this.place();
     }
     if (!win.isVisible()) win.showInactive();
+  }
+
+  /** The page's own height, once it has laid out its rows (wrapped text). */
+  resize(height) {
+    const h = Math.min(Math.max(Math.round(Number(height) || 0), 40), MAX_HEIGHT);
+    if (h === this.height) return;
+    this.height = h;
+    this.place();
+  }
+
+  place() {
+    if (!this.win || this.win.isDestroyed() || !this.workArea) return;
+    this.win.setBounds(panelBounds(this.dialog, this.height, this.workArea));
   }
 
   open(sessionId) {
