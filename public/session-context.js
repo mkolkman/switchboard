@@ -578,6 +578,8 @@ function renderSessionContextHeader() {
   if (fullBtn) fullBtn.onclick = () => openSessionInSessionsTab(id);
   const hideBtn = terminalHeaderContext.querySelector('[data-ctx-hide]');
   if (hideBtn) hideBtn.onclick = () => { const spec = sessionSplits.get(activeTab); if (spec?.hide) spec.hide(); else leaveSessionSplit(); };
+  // What the session asked macOS or 1Password for (access-requests.js).
+  if (typeof renderAccessHeader === 'function') renderAccessHeader();
 }
 
 /** A session row's context label (sidebar.js): what it works on, a click goes there. */

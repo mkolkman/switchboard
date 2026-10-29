@@ -8155,3 +8155,25 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .ghv-type-btn.on.ghv-type--bugfix { color: #e0b860; }
 .ghv-type-btn.on.ghv-type--upkeep { color: #c8c8dc; }
 .ghv-type-btn:not(.on) { color: #8a8aa0; background: none; }
+
+/* ---- Who asks for access: macOS dialogs and 1Password, traced to a session (access-requests.js) ---- */
+:root { --access-lock: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='11' width='16' height='10' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 0 1 8 0v4'/%3E%3C/svg%3E"); }
+@keyframes access-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+#access-banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 900; width: min(640px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px; -webkit-app-region: no-drag; }
+.access-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 9px; background: #23201a; border: 1px solid rgba(224,184,96,0.45); box-shadow: 0 6px 24px rgba(0,0,0,0.45); font-size: 12.5px; color: #e0e0f0; }
+.access-icon { display: inline-flex; color: #e0b860; flex-shrink: 0; }
+.access-row .access-icon { animation: access-pulse 1.4s ease-in-out infinite; }
+.access-text { flex: 1; min-width: 0; }
+.access-line b { font-weight: 600; }
+.access-count { white-space: nowrap; margin-left: 4px; padding: 0 5px; border-radius: 8px; background: rgba(224,184,96,0.18); color: #e0b860; font-size: 11px; }
+.access-cmd { margin-top: 2px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #a0a0b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#terminal-header-access { order: 4; flex: 1 1 100%; display: flex; align-items: flex-start; gap: 6px; min-width: 0; padding-top: 3px; font-size: 11.5px; color: #a0a0b8; -webkit-app-region: no-drag; }
+#terminal-header-access .access-icon { margin-top: 1px; }
+.access-h-list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.access-h-row { display: flex; gap: 8px; min-width: 0; }
+.access-h-row--waiting { color: #e0b860; }
+.access-h-time { flex-shrink: 0; font-variant-numeric: tabular-nums; color: #7a7a90; }
+.access-h-what { flex-shrink: 0; }
+.access-h-cmd { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.access-h-answer { flex-shrink: 0; color: #7a7a90; }
+.access-h-row--waiting .access-h-answer { color: #e0b860; }

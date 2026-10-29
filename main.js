@@ -56,6 +56,7 @@ const { repoInfoForPath, repoInfoForPaths, findLocalClones } = require('./repo-i
 const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
+const { AccessWatch } = require('./access-watch');
 const grafana = require('./grafana');
 const observability = require('./observability');
 const bugsnag = require('./bugsnag');
@@ -855,6 +856,14 @@ ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTra
   method: String(opts?.method || ''), expectedHeadOid: String(opts?.expectedHeadOid || ''),
 })));
 // --- IPC: the Mac's sleep switch (sleep-control.js), the sidebar toolbar's button ---
+// Which session asks for access: macOS dialogs and 1Password (access-watch.js).
+// Dev runs are Electron to macOS, so its dialogs name Electron.
+const accessWatch = new AccessWatch({
+  bundleId: app.isPackaged ? 'ai.doctly.switchboard' : 'com.github.Electron',
+  send: (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload); },
+  log,
+});
+ipcMain.handle('access-snapshot', () => accessWatch.snapshot());
 ipcMain.handle('get-sleep-disabled', () => sleepControl.isSleepDisabled());
 ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisabled(!!disabled, log));
 
@@ -2918,6 +2927,7 @@ function startScheduleTicker() {
     } catch (err) { log.error('[schedule] legacy import failed', err); }
     startScheduleTicker();
     startNotionTodoPoll();
+    accessWatch.start();
 
     // Re-index search if FTS table was recreated (e.g. tokenizer config change)
     if (searchFtsRecreated) populateCacheViaWorker();
@@ -2947,6 +2957,7 @@ app.on('before-quit', () => {
   // Shut down all MCP servers
   shutdownAllMcp();
   previewMcp.stop();
+  accessWatch.stop();
   taskManager.shutdown();
 
   // Close filesystem watcher
