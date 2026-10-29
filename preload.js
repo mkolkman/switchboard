@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld('api', {
   setHelpscoutStatus: (id, status) => ipcRenderer.invoke('helpscout-set-status', id, status),
   getHelpscoutAttachment: (convId, attId) => ipcRenderer.invoke('helpscout-attachment', convId, attId),
   openHelpscoutAttachment: (convId, attId, name) => ipcRenderer.invoke('helpscout-open-attachment', convId, attId, name),
+  getHelpscoutSessionAttachments: (convId) => ipcRenderer.invoke('helpscout-session-attachments', convId),
   getHelpscoutDraftPrompt: (id, extra) => ipcRenderer.invoke('helpscout-draft-prompt', id, extra),
   getHelpscoutDraftReply: (sessionId) => ipcRenderer.invoke('helpscout-draft-reply', sessionId),
   setHelpscoutSuggestion: (sid, status) => ipcRenderer.invoke('helpscout-set-suggestion', sid, status),

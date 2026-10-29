@@ -252,6 +252,54 @@ async function openAttachment(conversationId, attachmentId, name) {
   return { file };
 }
 
+// Bigger files are left out of a session's folder: no screenshot is this big.
+const SESSION_ATTACHMENT_MAX = 25 * 1024 * 1024;
+
+/**
+ * Every attachment of a ticket, written to `<dir>/<number>/` for a Claude
+ * session: the skill reads a ticket as text only, and the API's file links
+ * want a token. Files already there are kept. Returns them oldest first with
+ * who sent them, and the ones left out with why.
+ */
+async function saveAttachments(conv, dir) {
+  const folder = path.join(dir, String(Number(conv.number) || Number(conv.id)));
+  const files = [];
+  const skipped = [];
+  for (const t of [...conv.threads].reverse().filter(t => !t.draft)) {
+    for (const a of t.attachments || []) {
+      const safe = path.basename(String(a.name || 'attachment')).replace(/[^\w.\- ]+/g, '_') || 'attachment';
+      const file = path.join(folder, `${Number(a.id)}-${safe}`);
+      if (a.size > SESSION_ATTACHMENT_MAX) { skipped.push({ name: a.name, why: 'over 25 MB' }); continue; }
+      try {
+        if (!fs.existsSync(file)) {
+          const { data } = await getAttachment(conv.id, a.id);
+          fs.mkdirSync(folder, { recursive: true });
+          fs.writeFileSync(file, Buffer.from(data, 'base64'));
+        }
+        files.push({ path: file, name: a.name, mimeType: a.mimeType, from: t.from, createdAt: t.createdAt });
+      } catch (err) {
+        skipped.push({ name: a.name, why: err?.message || String(err) });
+      }
+    }
+  }
+  return { files, skipped };
+}
+
+/** The part of a session's first message that points Claude at the saved attachments. */
+function attachmentsPrompt({ files = [], skipped = [] } = {}) {
+  if (!files.length && !skipped.length) return '';
+  return '\n\nThe ticket\'s attachments, saved by Switchboard (look at images and PDFs with the Read tool; '
+    + 'the Help Scout script does not fetch them):\n'
+    + files.map(f => `- ${f.path} (${f.name}${f.from ? `, from ${f.from}` : ''}${f.createdAt ? `, ${f.createdAt}` : ''})`).join('\n')
+    + (skipped.length ? `${files.length ? '\n' : ''}${skipped.map(s => `- ${s.name}: not saved (${s.why})`).join('\n')}` : '');
+}
+
+/** A ticket's attachments saved for a session, and the prompt text naming them. */
+async function getSessionAttachments(id, dir) {
+  const saved = await saveAttachments(await getConversation(id), dir);
+  return { ...saved, prompt: attachmentsPrompt(saved) };
+}
+
 // --- A draft reply written by Claude, in a session of its own ---
 
 const DRAFT_SKILL = '/movelab-claude-skills:customer-support';
@@ -262,7 +310,7 @@ const DRAFT_LABELS = { customer: 'Customer', message: 'Reply', reply: 'Reply', n
  * as text (oldest first) and what to hand back. The tab takes the reply out
  * of the session's last message, between <reply> tags (splitDraftReply).
  */
-function draftPrompt(conv, extra = '') {
+function draftPrompt(conv, extra = '', attachments = null) {
   const threads = [...conv.threads].reverse().filter(t => !t.draft && t.type !== 'lineitem');
   const customer = [conv.customer?.name, conv.customer?.email && `<${conv.customer.email}>`].filter(Boolean).join(' ');
   const note = String(extra || '').trim();
@@ -274,7 +322,8 @@ function draftPrompt(conv, extra = '') {
     + 'Notion) unless I ask for it here.\n\n'
     + `Subject: ${conv.subject}\nCustomer: ${customer}\n\nThe conversation, oldest first:\n\n`
     + threads.map(t => `--- ${DRAFT_LABELS[t.type] || t.type}${t.from ? `, ${t.from}` : ''}${t.createdAt ? `, ${t.createdAt}` : ''}`
-      + `${t.attachments.length ? ` (attached: ${t.attachments.map(a => a.name).join(', ')})` : ''}\n${t.text}`).join('\n\n');
+      + `${t.attachments.length ? ` (attached: ${t.attachments.map(a => a.name).join(', ')})` : ''}\n${t.text}`).join('\n\n')
+    + attachmentsPrompt(attachments || {});
 }
 
 /**
@@ -289,9 +338,10 @@ function splitDraftReply(message) {
   return { reply: tagged[1].trim(), notes };
 }
 
-/** The first message of a draft session for a ticket, read fresh. */
-async function getDraftPrompt(id, extra) {
-  return { prompt: draftPrompt(await getConversation(id), extra) };
+/** The first message of a draft session for a ticket, read fresh, its attachments saved in `dir`. */
+async function getDraftPrompt(id, extra, dir) {
+  const conv = await getConversation(id);
+  return { prompt: draftPrompt(conv, extra, await saveAttachments(conv, dir)) };
 }
 
 // --- Writes: each one is a click in the tab ---
@@ -384,5 +434,5 @@ function asResult(promise) {
 
 module.exports = {
   htmlToText, textToHtml, groupOf, shapeConversation, shapeThread, CLAUDE_NOTE_LABEL,
-  getInbox, getConversation, getStatuses, getAttachment, openAttachment, draftPrompt, getDraftPrompt, splitDraftReply, saveDraft, sendReply, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
+  getInbox, getConversation, getStatuses, getAttachment, openAttachment, saveAttachments, attachmentsPrompt, getSessionAttachments, draftPrompt, getDraftPrompt, splitDraftReply, saveDraft, sendReply, addNote, assign, setStatus, readSuggestions, setSuggestionStatus, asResult,
 };

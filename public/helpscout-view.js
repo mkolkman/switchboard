@@ -194,8 +194,16 @@ async function helpscoutViewSession(conv, prompt, label, { focus = true } = {}) 
   return sessionId;
 }
 
-function helpscoutSupportSession(conv) {
-  helpscoutViewSession(conv, `${HELPSCOUT_SUPPORT_SKILL} Help Scout ticket #${conv.number}: ${conv.url}`, `Support on #${conv.number}`);
+let helpscoutSupportStarting = false;
+
+async function helpscoutSupportSession(conv) {
+  if (helpscoutSupportStarting) return;
+  helpscoutSupportStarting = true;
+  // The skill reads the ticket as text; its screenshots go along as files.
+  const saved = await window.api.getHelpscoutSessionAttachments(conv.id).catch(err => ({ error: err?.message || String(err) }));
+  const attachments = saved?.error ? `\n\nSwitchboard could not save the ticket's attachments: ${saved.error}` : saved?.prompt || '';
+  await helpscoutViewSession(conv, `${HELPSCOUT_SUPPORT_SKILL} Help Scout ticket #${conv.number}: ${conv.url}${attachments}`, `Support on #${conv.number}`).catch(() => null);
+  helpscoutSupportStarting = false;
 }
 
 function helpscoutLogSession(sug) {

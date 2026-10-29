@@ -68,3 +68,32 @@ test('splitDraftReply: the reply between its tags, notes around them, all of it 
   assert.deepEqual(splitDraftReply('Hi Ann,\n\nThanks!'), { reply: 'Hi Ann,\n\nThanks!', notes: '' });
   assert.deepEqual(splitDraftReply('```\nHi Ann\n```'), { reply: 'Hi Ann', notes: '' });
 });
+
+test('saveAttachments: a ticket\'s files in its own folder for a session, oldest first, drafts and huge files left out', async () => {
+  const { saveAttachments, attachmentsPrompt } = require('../helpscout');
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hs-att-'));
+  // Already saved, so nothing is read from Help Scout.
+  fs.mkdirSync(path.join(dir, '7'));
+  for (const f of ['9-shot 1.png', '8-log.txt', '6-old.jpg']) fs.writeFileSync(path.join(dir, '7', f), 'x');
+  const thread = (id, extra) => ({ id, type: 'customer', from: 'Ann', createdAt: `2026-10-0${id}`, draft: false, attachments: [], ...extra });
+  const conv = {
+    id: 70, number: 7,
+    threads: [
+      thread(3, { draft: true, attachments: [{ id: 5, name: 'mine.png', size: 1 }] }),
+      thread(2, { attachments: [{ id: 9, name: 'shot 1.png', size: 1 }, { id: 8, name: '../log.txt', size: 1 }, { id: 4, name: 'video.mov', size: 26 * 1024 * 1024 }] }),
+      thread(1, { attachments: [{ id: 6, name: 'old.jpg', size: 1 }] }),
+    ],
+  };
+  const saved = await saveAttachments(conv, dir);
+  assert.deepEqual(saved.files.map(f => path.basename(f.path)), ['6-old.jpg', '9-shot 1.png', '8-log.txt']);
+  assert.deepEqual(saved.skipped, [{ name: 'video.mov', why: 'over 25 MB' }]);
+  const prompt = attachmentsPrompt(saved);
+  assert.match(prompt, /Read tool/);
+  assert.ok(prompt.includes(`- ${path.join(dir, '7', '9-shot 1.png')} (shot 1.png, from Ann, 2026-10-02)`));
+  assert.match(prompt, /- video\.mov: not saved \(over 25 MB\)/);
+  assert.equal(attachmentsPrompt({ files: [], skipped: [] }), '');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

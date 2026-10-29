@@ -796,11 +796,15 @@ ipcMain.handle('get-schedule-context', guarded((spec) => projects.resolveSchedul
 ipcMain.handle('get-projects-root', guarded(() => projects.projectsRoot()));
 // Where repo-less chat sessions run: a plain folder under the projects root,
 // created on first use, so they get a sidebar group of their own.
-ipcMain.handle('get-chat-folder', guarded(() => {
+function chatFolder() {
   const dir = path.join(projects.projectsRoot(), 'Chats');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
-}));
+}
+ipcMain.handle('get-chat-folder', guarded(chatFolder));
+// A Help Scout ticket's attachments, for its sessions: inside the chat folder
+// they run in, so Claude reads them without asking.
+const helpscoutAttachmentDir = () => path.join(chatFolder(), '.helpscout-attachments');
 ipcMain.handle('get-repo-info', guarded((paths) => repoInfoForPaths(Array.isArray(paths) ? paths : [])));
 // A project's GitHub tracking, fetched live (github-tracker.js keeps it in memory only).
 ipcMain.handle('get-github-tracker', guarded((ref, opts) => githubTracker.getTracker(String(ref || ''), { force: !!opts?.force })));
@@ -901,7 +905,8 @@ ipcMain.handle('helpscout-open-attachment', (_e, convId, attId, name) => helpsco
   if (err) throw new Error(err);
   return {};
 })));
-ipcMain.handle('helpscout-draft-prompt', (_e, id, extra) => helpscout.asResult(helpscout.getDraftPrompt(id, String(extra || ''))));
+ipcMain.handle('helpscout-draft-prompt', (_e, id, extra) => helpscout.asResult(helpscout.getDraftPrompt(id, String(extra || ''), helpscoutAttachmentDir())));
+ipcMain.handle('helpscout-session-attachments', (_e, id) => helpscout.asResult(helpscout.getSessionAttachments(id, helpscoutAttachmentDir())));
 ipcMain.handle('helpscout-set-suggestion', (_e, sid, status) => helpscout.asResult(helpscout.setSuggestionStatus(sid, String(status || ''))));
 
 // --- IPC: the Notion todo list (notion-todo.js) ---
