@@ -45,6 +45,9 @@ const SERVICE_LABELS = {
 const OP_POLL_MS = 700;
 // Claude Code writes a tool call to the transcript a moment after it starts: look again.
 const REASON_RETRIES_MS = [0, 400, 1000, 2000];
+// A ! command reaches the transcript only once it has finished, so while its
+// dialog waits there is nothing to find: no running tool call means that.
+const NO_TOOL_REASON = { tool: 'bash', why: "No tool call of Claude's is running: probably a ! command typed in the session.", detail: '' };
 const HISTORY_LIMIT = 20;
 
 /** A tccd line saying it shows a dialog: { msgId, subject, service, pid }, or null. */
@@ -314,6 +317,8 @@ class AccessWatch {
         return;
       }
     }
+    entry.reason = NO_TOOL_REASON;
+    this.send('access-reason', { id: entry.id, reason: entry.reason });
   }
 
   answer(id, answer) {

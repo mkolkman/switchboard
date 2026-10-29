@@ -78,6 +78,7 @@ class AccessPanel {
     this.win = null;
     this.rows = [];
     this.placedFor = null; // the request the panel was last placed for
+    this.handled = new Set(); // rows whose session was opened from the panel: Switchboard shows them now
     this.dialog = null; // where that request's dialog is, or null
     this.workArea = null;
     this.height = panelHeight(1);
@@ -105,7 +106,7 @@ class AccessPanel {
    * sessionId, title, asks, command, count, kind }. None hides the panel.
    */
   async update(rows) {
-    this.rows = (rows || []).slice(0, MAX_ROWS);
+    this.rows = (rows || []).filter(r => !this.handled.has(r.id)).slice(0, MAX_ROWS);
     if (!this.rows.length) {
       this.placedFor = null;
       if (this.win && !this.win.isDestroyed()) this.win.hide();
@@ -141,7 +142,12 @@ class AccessPanel {
     this.win.setBounds(panelBounds(this.dialog, this.height, this.workArea));
   }
 
+  /** Open session: Switchboard comes forward with its own banner, so the panel goes until a new request. */
   open(sessionId) {
+    for (const r of this.rows) this.handled.add(r.id);
+    if (this.handled.size > 500) this.handled = new Set([...this.handled].slice(-200));
+    this.placedFor = null;
+    if (this.win && !this.win.isDestroyed()) this.win.hide();
     this.onOpen?.(sessionId);
   }
 

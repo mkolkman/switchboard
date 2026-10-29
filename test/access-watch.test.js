@@ -120,3 +120,11 @@ test('AccessWatch: a request shows at once, its reason follows once the transcri
   assert.equal(reads, 2);
   assert.deepEqual(sent[1], ['access-reason', { id: 'op:1', reason: { tool: 'Bash', why: 'Because.', detail: '' } }]);
 });
+
+test('AccessWatch: no running tool call after every look means a ! command typed in the session', async () => {
+  const sent = [];
+  const watch = new AccessWatch({ bundleId: 'x', log: {}, send: (channel, payload) => sent.push([channel, payload]), explain: async () => null });
+  await watch.add({ id: 'tcc:9', kind: 'tcc', what: 'x', sessionId: 's1', command: 'ls', pid: 1 });
+  assert.equal(sent[1][0], 'access-reason');
+  assert.match(sent[1][1].reason.why, /probably a ! command/);
+});
