@@ -1,8 +1,8 @@
 /**
- * access-panel.js: a small panel right above a macOS or 1Password dialog,
- * saying which session asks (access-watch.js finds it, the window names it).
- * The banner in Switchboard's window is no use while another app is in
- * front; this panel floats over every app and never takes the focus.
+ * access-panel.js: a small panel right under a macOS or 1Password dialog,
+ * saying which session asks and why (access-watch.js finds both, the window
+ * names the session). It floats over every app, never takes the focus and
+ * lets every click through: it only informs, the dialog decides.
  *
  * macOS shows its privacy dialogs from UserNotificationCenter; 1Password's
  * approval is a floating window of its own. Their place comes from the
@@ -53,14 +53,14 @@ function run(argv) {
   }
 }`;
 
-/** Where the panel goes: centred just above the dialog, else below it, else at the top of the screen. */
+/** Where the panel goes: centred just under the dialog, else above it, else at the top of the screen. */
 function panelBounds(dialog, height, workArea) {
   if (!dialog) {
     return { x: Math.round(workArea.x + (workArea.width - PANEL_WIDTH) / 2), y: workArea.y + 40, width: PANEL_WIDTH, height };
   }
   const x = Math.round(dialog.x + dialog.width / 2 - PANEL_WIDTH / 2);
-  const above = dialog.y - GAP - height;
-  const y = above >= workArea.y ? above : dialog.y + dialog.height + GAP;
+  const below = dialog.y + dialog.height + GAP;
+  const y = below + height <= workArea.y + workArea.height ? below : Math.max(workArea.y, dialog.y - GAP - height);
   return {
     x: Math.min(Math.max(x, workArea.x), workArea.x + workArea.width - PANEL_WIDTH),
     y: Math.round(y), width: PANEL_WIDTH, height,
@@ -72,13 +72,11 @@ function panelHeight(rows) {
 }
 
 class AccessPanel {
-  constructor({ onOpen, log = console }) {
-    this.onOpen = onOpen;
+  constructor({ log = console } = {}) {
     this.log = log;
     this.win = null;
     this.rows = [];
     this.placedFor = null; // the request the panel was last placed for
-    this.handled = new Set(); // rows whose session was opened from the panel: Switchboard shows them now
     this.dialog = null; // where that request's dialog is, or null
     this.workArea = null;
     this.height = panelHeight(1);
@@ -96,6 +94,8 @@ class AccessPanel {
     // Above other apps' windows, on every desktop and over a full-screen app.
     this.win.setAlwaysOnTop(true, 'floating');
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // Nothing to click: a click lands on whatever is under it.
+    this.win.setIgnoreMouseEvents(true);
     this.ready = this.win.loadFile(path.join(__dirname, 'public', 'access-panel.html')).catch(err => this.log.warn?.(`[access] panel: ${err.message}`));
     this.win.on('closed', () => { this.win = null; });
     return this.win;
@@ -106,7 +106,7 @@ class AccessPanel {
    * sessionId, title, asks, command, count, kind }. None hides the panel.
    */
   async update(rows) {
-    this.rows = (rows || []).filter(r => !this.handled.has(r.id)).slice(0, MAX_ROWS);
+    this.rows = (rows || []).slice(0, MAX_ROWS);
     if (!this.rows.length) {
       this.placedFor = null;
       if (this.win && !this.win.isDestroyed()) this.win.hide();
@@ -129,7 +129,7 @@ class AccessPanel {
     if (!win.isVisible()) win.showInactive();
   }
 
-  /** The page's own height, once it has laid out its rows (wrapped text). */
+  /** The page's own height, once it has laid out its rows (wrapped text); the top stays under the dialog. */
   resize(height) {
     const h = Math.min(Math.max(Math.round(Number(height) || 0), 40), MAX_HEIGHT);
     if (h === this.height) return;
@@ -140,15 +140,6 @@ class AccessPanel {
   place() {
     if (!this.win || this.win.isDestroyed() || !this.workArea) return;
     this.win.setBounds(panelBounds(this.dialog, this.height, this.workArea));
-  }
-
-  /** Open session: Switchboard comes forward with its own banner, so the panel goes until a new request. */
-  open(sessionId) {
-    for (const r of this.rows) this.handled.add(r.id);
-    if (this.handled.size > 500) this.handled = new Set([...this.handled].slice(-200));
-    this.placedFor = null;
-    if (this.win && !this.win.isDestroyed()) this.win.hide();
-    this.onOpen?.(sessionId);
   }
 
   destroy() {

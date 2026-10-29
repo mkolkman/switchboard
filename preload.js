@@ -114,7 +114,6 @@ contextBridge.exposeInMainWorld('api', {
   onAccessAnswer: (callback) => ipcRenderer.on('access-answer', (_event, answer) => callback(answer)),
   onAccessReason: (callback) => ipcRenderer.on('access-reason', (_event, update) => callback(update)),
   setAccessPanelRows: (rows) => ipcRenderer.invoke('access-panel-rows', rows),
-  onAccessOpenSession: (callback) => ipcRenderer.on('access-open-session', (_event, sessionId) => callback(sessionId)),
   getHelpscoutSessionAttachments: (convId) => ipcRenderer.invoke('helpscout-session-attachments', convId),
   getHelpscoutDraftPrompt: (id, extra) => ipcRenderer.invoke('helpscout-draft-prompt', id, extra),
   getHelpscoutDraftReply: (sessionId) => ipcRenderer.invoke('helpscout-draft-reply', sessionId),

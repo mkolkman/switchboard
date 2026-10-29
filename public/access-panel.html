@@ -17,8 +17,6 @@
   .why { margin-top: 2px; line-height: 1.35; color: #d8d0bc; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .why i { font-style: normal; color: #e0b860; }
   .cmd { margin-top: 2px; font: 11px/1.35 ui-monospace, Menlo, monospace; color: #a0a0b8; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  button { flex-shrink: 0; height: 24px; padding: 0 9px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); color: #e0e0f0; font: inherit; font-size: 11.5px; }
-  button:hover { background: rgba(255,255,255,0.12); }
 </style>
 </head>
 <body>
@@ -40,11 +38,6 @@
       if (r.why) { const why = el('div', 'why'); why.append(el('i', null, 'Why: '), r.why); text.append(why); }
       if (r.command) { const cmd = el('div', 'cmd', `via: ${r.command}`); cmd.title = r.command; text.append(cmd); }
       row.append(icon, text);
-      if (r.sessionId) {
-        const open = el('button', null, 'Open session');
-        open.onclick = () => window.accessPanel.open(r.sessionId);
-        row.append(open);
-      }
       return row;
     }));
     // The window takes the height the wrapped rows need.

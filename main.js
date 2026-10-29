@@ -901,17 +901,8 @@ const accessWatch = new AccessWatch({
   log,
 });
 ipcMain.handle('access-snapshot', () => accessWatch.snapshot());
-// The same rows as the window's banner, in a panel just above the dialog, over every app.
-const accessPanel = new AccessPanel({
-  log,
-  onOpen: (sessionId) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    app.focus({ steal: true });
-    mainWindow.webContents.send('access-open-session', sessionId);
-  },
-});
+// Which session asks and why, in a panel just under the dialog, over every app.
+const accessPanel = new AccessPanel({ log });
 const ACCESS_ROW_FIELDS = ['id', 'sessionId', 'title', 'asks', 'why', 'command', 'kind'];
 ipcMain.handle('access-panel-rows', (_e, rows) => {
   const clean = (Array.isArray(rows) ? rows : []).map(r => ({
@@ -920,7 +911,6 @@ ipcMain.handle('access-panel-rows', (_e, rows) => {
   }));
   accessPanel.update(clean).catch(err => log.warn(`[access] panel: ${err.message}`));
 });
-ipcMain.on('access-panel-open', (_e, sessionId) => accessPanel.open(String(sessionId || '')));
 ipcMain.on('access-panel-height', (_e, height) => accessPanel.resize(height));
 ipcMain.handle('get-sleep-disabled', () => sleepControl.isSleepDisabled());
 ipcMain.handle('set-sleep-disabled', (_e, disabled) => sleepControl.setSleepDisabled(!!disabled, log));

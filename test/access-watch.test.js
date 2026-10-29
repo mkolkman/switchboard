@@ -66,12 +66,12 @@ test('AccessWatch: a dialog of this app becomes a request, its answer closes it;
   assert.equal(snap.history[0].answer, 'denied');
 });
 
-test('panelBounds: centred just above the dialog, below it when there is no room, else at the top', () => {
+test('panelBounds: centred just under the dialog, above it when there is no room, else at the top', () => {
   const { panelBounds, PANEL_WIDTH } = require('../access-panel');
   const work = { x: 0, y: 25, width: 1512, height: 957 };
   // The dialog of 2026-10-29: 298 wide at 607,171.
-  assert.deepEqual(panelBounds({ x: 607, y: 171, width: 298, height: 286 }, 74, work), { x: 756 - PANEL_WIDTH / 2, y: 87, width: PANEL_WIDTH, height: 74 });
-  assert.equal(panelBounds({ x: 607, y: 60, width: 298, height: 286 }, 74, work).y, 60 + 286 + 10);
+  assert.deepEqual(panelBounds({ x: 607, y: 171, width: 298, height: 286 }, 74, work), { x: 756 - PANEL_WIDTH / 2, y: 171 + 286 + 10, width: PANEL_WIDTH, height: 74 });
+  assert.equal(panelBounds({ x: 607, y: 650, width: 298, height: 286 }, 74, work).y, 650 - 10 - 74);
   assert.deepEqual(panelBounds(null, 74, work), { x: (1512 - PANEL_WIDTH) / 2, y: 65, width: PANEL_WIDTH, height: 74 });
   // Never off the screen's side.
   assert.equal(panelBounds({ x: 0, y: 300, width: 100, height: 100 }, 74, work).x, 0);

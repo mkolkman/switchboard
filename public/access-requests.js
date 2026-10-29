@@ -1,15 +1,14 @@
 // --- Who asks for access ---
 // macOS and 1Password name Switchboard in every dialog a session's process
-// brings up; access-watch.js (main) traces each one to its session. Here: a
-// banner above every tab while a dialog waits, a lock on the session in the
-// sidebar and rail, and a line in the session's header with what it asked.
+// brings up; access-watch.js (main) traces each one to its session. Here:
+// the rows for the panel under the dialog (access-panel.js), a lock on the
+// session in the sidebar and rail, and a line in the session's header with
+// what it asked.
 // Depends on: escapeHtml (utils.js), currentSession (project-github-view.js),
-// sessionTitle (projects-view.js), openSessionInSessionsTab (session-context.js),
-// openSession, openSessions, activeSessionId (app.js).
+// sessionTitle (projects-view.js), activeSessionId (app.js).
 
 const accessPending = new Map(); // id → request a dialog still waits on
 const accessHistory = []; // every request this app run, oldest first
-const accessDismissed = new Set(); // banner rows the user put away
 const accessHeaderOpen = new Set(); // sessions whose header shows every request
 // The header keeps the last request this long after it was answered.
 const ACCESS_RECENT_MS = 15 * 60 * 1000;
@@ -21,15 +20,6 @@ function accessSessionName(sessionId) {
   if (!sessionId) return 'Switchboard itself';
   const session = currentSession(sessionId);
   return session ? sessionTitle(session) : `Session ${sessionId.slice(0, 8)}`;
-}
-
-/** The session in the Sessions tab, its terminal attached when it was not yet. */
-function accessOpenSession(sessionId) {
-  openSessionInSessionsTab(sessionId);
-  if (!openSessions.has(sessionId)) {
-    const session = currentSession(sessionId);
-    if (session) openSession(session);
-  }
 }
 
 /** Why the session asks, from its transcript (access-watch.js runningToolReason), or ''. */
@@ -48,10 +38,9 @@ function accessTime(iso) {
 }
 
 /** Waiting requests, one row per session and kind of access, with how many. */
-function accessBannerRows() {
+function accessPanelRows() {
   const rows = new Map();
   for (const r of accessPending.values()) {
-    if (accessDismissed.has(r.id)) continue;
     const key = `${r.sessionId || ''}|${r.kind}|${r.what}`;
     const row = rows.get(key);
     if (row) { row.count++; row.ids.push(r.id); row.latest = r; } else rows.set(key, { count: 1, ids: [r.id], latest: r });
@@ -59,7 +48,7 @@ function accessBannerRows() {
   return [...rows.values()];
 }
 
-/** The banner's rows for the panel over other apps (access-panel.js), the newest request first. */
+/** The rows for the panel over other apps (access-panel.js), the newest request first. */
 function sendAccessPanelRows(rows) {
   const list = rows.slice().sort((a, b) => String(b.latest.at).localeCompare(String(a.latest.at))).map(({ latest: r, count }) => ({
     id: r.id, sessionId: r.sessionId || '', title: accessSessionName(r.sessionId), asks: accessAsks(r), why: accessWhy(r), command: r.command || '', kind: r.kind, count,
@@ -67,40 +56,9 @@ function sendAccessPanelRows(rows) {
   window.api.setAccessPanelRows(list).catch(() => {});
 }
 
-function renderAccessBanner() {
-  let banner = document.getElementById('access-banner');
-  const rows = accessBannerRows();
-  sendAccessPanelRows(rows);
-  if (!rows.length) { banner?.remove(); return; }
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'access-banner';
-    document.getElementById('main')?.appendChild(banner);
-  }
-  // Below a shown session's header, so its own line of requests stays in view.
-  const header = document.getElementById('terminal-header');
-  const main = document.getElementById('main');
-  const below = header && main && header.offsetParent ? header.getBoundingClientRect().bottom - main.getBoundingClientRect().top : 0;
-  banner.style.top = `${Math.max(0, below) + 10}px`;
-  banner.innerHTML = rows.map(({ latest: r, count, ids }) => `<div class="access-row" data-ids="${accessAttr(ids.join(' '))}">
-      <span class="access-icon">${ACCESS_LOCK}</span>
-      <div class="access-text">
-        <div class="access-line"><b>${escapeHtml(accessSessionName(r.sessionId))}</b> ${escapeHtml(accessAsks(r))}${count > 1 ? ` <span class="access-count">×${count}</span>` : ''}</div>
-        ${accessWhy(r) ? `<div class="access-why" title="${accessAttr(r.reason.detail || '')}">Why: ${escapeHtml(accessWhy(r))}</div>` : ''}
-        ${r.command ? `<div class="access-cmd" title="${accessAttr(r.command)}">via: ${escapeHtml(r.command)}</div>` : ''}
-      </div>
-      ${r.sessionId ? `<button type="button" class="ws-btn ws-btn--sm" data-access-open="${accessAttr(r.sessionId)}">Open session</button>` : ''}
-      <button type="button" class="ws-ghost ws-ghost--sm" data-access-dismiss="1" title="Hide this until the next request">Dismiss</button>
-    </div>`).join('');
-  banner.querySelectorAll('[data-access-open]').forEach(b => {
-    b.onclick = () => accessOpenSession(b.dataset.accessOpen);
-  });
-  banner.querySelectorAll('[data-access-dismiss]').forEach(b => {
-    b.onclick = () => {
-      for (const id of b.closest('.access-row').dataset.ids.split(' ')) accessDismissed.add(id);
-      renderAccessBanner();
-    };
-  });
+/** The waiting requests to the panel over the dialog (access-panel.js). */
+function renderAccessPanel() {
+  sendAccessPanelRows(accessPanelRows());
 }
 
 /**
@@ -152,10 +110,9 @@ function renderAccessHeader() {
 }
 
 function renderAccess() {
-  // The header first: the banner goes below it.
   renderAccessHeader();
   renderAccessMarks();
-  renderAccessBanner();
+  renderAccessPanel();
 }
 
 function addAccessRequest(r) {
@@ -165,7 +122,6 @@ function addAccessRequest(r) {
 }
 
 window.api.onAccessRequest((r) => { addAccessRequest(r); renderAccess(); });
-window.api.onAccessOpenSession((sessionId) => accessOpenSession(sessionId));
 window.api.onAccessReason(({ id, reason }) => {
   const r = accessHistory.find(h => h.id === id);
   if (!r) return;
@@ -176,7 +132,6 @@ window.api.onAccessAnswer(({ id, answer, answeredAt }) => {
   const r = accessHistory.find(h => h.id === id);
   if (r) Object.assign(r, { answer, answeredAt });
   accessPending.delete(id);
-  accessDismissed.delete(id);
   renderAccess();
 });
 // What was asked before this window (re)loaded.
