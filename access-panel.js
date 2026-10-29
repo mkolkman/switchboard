@@ -22,11 +22,13 @@ const MAX_HEIGHT = 420;
 const GAP = 10;
 const MAX_ROWS = 4;
 // How long to look for the dialog after a request: it shows within a split second.
-const FIND_MS = 2500;
+const FIND_MS = 3000;
 
 // Prints the bounds of the dialog windows of the given owners as JSON, once
-// one shows or the time is up: any window of UserNotificationCenter, and a
-// floating one (layer above 0) of 1Password, whose main window may be open too.
+// they hold still or the time is up: any window of UserNotificationCenter,
+// and a floating one (layer above 0) of 1Password, whose main window may be
+// open too. A macOS dialog grows in as it opens (14x14 to 260x250 in about
+// 0.4 s, overshooting on the way), so its first bounds are not its last.
 const FIND_SCRIPT = `
 ObjC.import('CoreGraphics');
 function dialogs(owners) {
@@ -46,10 +48,15 @@ function dialogs(owners) {
 function run(argv) {
   const end = Date.now() + Number(argv[0]);
   const owners = argv.slice(1);
+  let last = '';
+  let same = 0;
   for (;;) {
     const found = dialogs(owners);
-    if (found.length || Date.now() > end) return JSON.stringify(found);
-    delay(0.15);
+    const now = JSON.stringify(found);
+    same = found.length && now === last ? same + 1 : 0;
+    last = now;
+    if (same >= 3 || Date.now() > end) return now;
+    delay(0.06);
   }
 }`;
 
