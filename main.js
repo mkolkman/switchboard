@@ -56,7 +56,7 @@ const { repoInfoForPath, repoInfoForPaths, findLocalClones } = require('./repo-i
 const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
-const { AccessWatch } = require('./access-watch');
+const { AccessWatch, runningToolReason } = require('./access-watch');
 const { AccessPanel } = require('./access-panel');
 const grafana = require('./grafana');
 const observability = require('./observability');
@@ -859,8 +859,44 @@ ipcMain.handle('github-merge', (_e, t, opts) => githubTracker.asResult(githubTra
 // --- IPC: the Mac's sleep switch (sleep-control.js), the sidebar toolbar's button ---
 // Which session asks for access: macOS dialogs and 1Password (access-watch.js).
 // Dev runs are Electron to macOS, so its dialogs name Electron.
+// Why a session asks: the tool call still running at the end of its transcript.
+const ACCESS_TRANSCRIPT_TAIL = 512 * 1024;
+function sessionTranscriptFile(sessionId) {
+  const row = getCachedSession(sessionId);
+  if (row) {
+    try { const file = transcriptPath(row); if (file && fs.existsSync(file)) return file; } catch {}
+  }
+  // A session too new for the index: its file is <id>.jsonl in some project folder.
+  const projectsDir = path.join(CLAUDE_DIR, 'projects');
+  for (const dir of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+    const file = path.join(projectsDir, dir.name, `${sessionId}.jsonl`);
+    if (dir.isDirectory() && fs.existsSync(file)) return file;
+  }
+  return null;
+}
+async function explainAccess(sessionId) {
+  const file = sessionTranscriptFile(sessionId);
+  if (!file) return null;
+  const handle = await fs.promises.open(file, 'r');
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, ACCESS_TRANSCRIPT_TAIL);
+    const { buffer } = await handle.read(Buffer.alloc(length), 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    if (length < size) lines.shift(); // cut off mid-line
+    const entries = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try { entries.push(JSON.parse(line)); } catch {}
+    }
+    return runningToolReason(entries);
+  } finally {
+    await handle.close();
+  }
+}
 const accessWatch = new AccessWatch({
   bundleId: app.isPackaged ? 'ai.doctly.switchboard' : 'com.github.Electron',
+  explain: explainAccess,
   send: (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload); },
   log,
 });
@@ -876,7 +912,7 @@ const accessPanel = new AccessPanel({
     mainWindow.webContents.send('access-open-session', sessionId);
   },
 });
-const ACCESS_ROW_FIELDS = ['id', 'sessionId', 'title', 'asks', 'command', 'kind'];
+const ACCESS_ROW_FIELDS = ['id', 'sessionId', 'title', 'asks', 'why', 'command', 'kind'];
 ipcMain.handle('access-panel-rows', (_e, rows) => {
   const clean = (Array.isArray(rows) ? rows : []).map(r => ({
     ...Object.fromEntries(ACCESS_ROW_FIELDS.map(k => [k, r?.[k] == null ? '' : String(r[k]).slice(0, 400)])),

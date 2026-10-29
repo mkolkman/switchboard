@@ -112,6 +112,7 @@ contextBridge.exposeInMainWorld('api', {
   getAccessSnapshot: () => ipcRenderer.invoke('access-snapshot'),
   onAccessRequest: (callback) => ipcRenderer.on('access-request', (_event, request) => callback(request)),
   onAccessAnswer: (callback) => ipcRenderer.on('access-answer', (_event, answer) => callback(answer)),
+  onAccessReason: (callback) => ipcRenderer.on('access-reason', (_event, update) => callback(update)),
   setAccessPanelRows: (rows) => ipcRenderer.invoke('access-panel-rows', rows),
   onAccessOpenSession: (callback) => ipcRenderer.on('access-open-session', (_event, sessionId) => callback(sessionId)),
   getHelpscoutSessionAttachments: (convId) => ipcRenderer.invoke('helpscout-session-attachments', convId),

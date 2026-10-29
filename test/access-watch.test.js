@@ -76,3 +76,47 @@ test('panelBounds: centred just above the dialog, below it when there is no room
   // Never off the screen's side.
   assert.equal(panelBounds({ x: 0, y: 300, width: 100, height: 100 }, 74, work).x, 0);
 });
+
+test('runningToolReason: the tool call still running, with what Claude wrote before it', () => {
+  const { runningToolReason } = require('../access-watch');
+  const user = (content) => ({ type: 'user', message: { content } });
+  const assistant = (...content) => ({ type: 'assistant', message: { content } });
+  const bash = (id, command, description) => ({ type: 'tool_use', id, name: 'Bash', input: { command, description } });
+  const result = (id) => user([{ type: 'tool_result', tool_use_id: id, content: 'ok' }]);
+  // Finished calls never count; the running one does, with the text before it.
+  assert.deepEqual(runningToolReason([
+    user('Look at the Bugsnag errors'),
+    assistant(bash('t1', 'ls', 'List files')), result('t1'),
+    assistant({ type: 'text', text: 'I need the Bugsnag token to read the errors. Then I list them.' }, bash('t2', 'op read op://Private/Bugsnag/token', 'Read the Bugsnag token')),
+  ]), { tool: 'Bash', why: 'I need the Bugsnag token to read the errors. Then I list them.', detail: 'Read the Bugsnag token' });
+  // Without text: its own description; a new prompt drops the old text.
+  assert.deepEqual(runningToolReason([
+    assistant({ type: 'text', text: 'Old reasoning.' }), user('Next question'),
+    assistant(bash('t3', 'file x', 'Check the file type')),
+  ]), { tool: 'Bash', why: 'Check the file type', detail: '' });
+  // Without a description either: the tool and its target.
+  assert.equal(runningToolReason([assistant({ type: 'tool_use', id: 't4', name: 'Read', input: { file_path: '/Users/me/Downloads/a.pdf' } })]).why, 'Read /Users/me/Downloads/a.pdf');
+  // A ! command typed in the session.
+  assert.deepEqual(runningToolReason([user('<bash-input>op vault list</bash-input>')]), { tool: 'bash', why: 'You ran this command yourself.', detail: '' });
+  assert.equal(runningToolReason([user('<bash-input>ls</bash-input>'), user('<bash-stdout>a</bash-stdout><bash-stderr></bash-stderr>')]), null);
+  assert.equal(runningToolReason([]), null);
+  // A call cut off long ago is not what runs now.
+  const old = { ...assistant(bash('t5', 'sleep 9', 'Wait')), timestamp: '2026-10-29T10:00:00Z' };
+  assert.equal(runningToolReason([old], Date.parse('2026-10-29T11:00:00Z')), null);
+  assert.equal(runningToolReason([old], Date.parse('2026-10-29T10:05:00Z')).why, 'Wait');
+});
+
+test('AccessWatch: a request shows at once, its reason follows once the transcript has it', async () => {
+  const sent = [];
+  let reads = 0;
+  const watch = new AccessWatch({
+    bundleId: 'ai.doctly.switchboard', log: {}, send: (channel, payload) => sent.push([channel, payload]),
+    // The tool call is not in the transcript on the first read.
+    explain: async () => (++reads > 1 ? { tool: 'Bash', why: 'Because.', detail: '' } : null),
+  });
+  const adding = watch.add({ id: 'op:1', kind: 'op', what: '1Password', sessionId: 's1', command: 'op vault list', pid: 1 });
+  assert.equal(sent[0][0], 'access-request');
+  await adding;
+  assert.equal(reads, 2);
+  assert.deepEqual(sent[1], ['access-reason', { id: 'op:1', reason: { tool: 'Bash', why: 'Because.', detail: '' } }]);
+});

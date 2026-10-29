@@ -32,6 +32,11 @@ function accessOpenSession(sessionId) {
   }
 }
 
+/** Why the session asks, from its transcript (access-watch.js runningToolReason), or ''. */
+function accessWhy(r) {
+  return r.reason?.why || '';
+}
+
 /** What a request asks, as the banner's line says it. */
 function accessAsks(r) {
   return r.kind === 'op' ? 'waits for 1Password' : `asks for ${r.what}`;
@@ -57,7 +62,7 @@ function accessBannerRows() {
 /** The banner's rows for the panel over other apps (access-panel.js), the newest request first. */
 function sendAccessPanelRows(rows) {
   const list = rows.slice().sort((a, b) => String(b.latest.at).localeCompare(String(a.latest.at))).map(({ latest: r, count }) => ({
-    id: r.id, sessionId: r.sessionId || '', title: accessSessionName(r.sessionId), asks: accessAsks(r), command: r.command || '', kind: r.kind, count,
+    id: r.id, sessionId: r.sessionId || '', title: accessSessionName(r.sessionId), asks: accessAsks(r), why: accessWhy(r), command: r.command || '', kind: r.kind, count,
   }));
   window.api.setAccessPanelRows(list).catch(() => {});
 }
@@ -81,6 +86,7 @@ function renderAccessBanner() {
       <span class="access-icon">${ACCESS_LOCK}</span>
       <div class="access-text">
         <div class="access-line"><b>${escapeHtml(accessSessionName(r.sessionId))}</b> ${escapeHtml(accessAsks(r))}${count > 1 ? ` <span class="access-count">×${count}</span>` : ''}</div>
+        ${accessWhy(r) ? `<div class="access-why" title="${accessAttr(r.reason.detail || '')}">Why: ${escapeHtml(accessWhy(r))}</div>` : ''}
         ${r.command ? `<div class="access-cmd" title="${accessAttr(r.command)}">via: ${escapeHtml(r.command)}</div>` : ''}
       </div>
       ${r.sessionId ? `<button type="button" class="ws-btn ws-btn--sm" data-access-open="${accessAttr(r.sessionId)}">Open session</button>` : ''}
@@ -133,7 +139,7 @@ function renderAccessHeader() {
   const open = accessHeaderOpen.has(id);
   const row = (r) => `<div class="access-h-row${r.answer ? '' : ' access-h-row--waiting'}">
       <span class="access-h-time">${escapeHtml(accessTime(r.at))}</span>
-      <span class="access-h-what">${escapeHtml(r.kind === 'op' ? '1Password' : r.what)}</span>
+      <span class="access-h-what" title="${accessAttr(accessWhy(r) ? `Why: ${accessWhy(r)}` : '')}">${escapeHtml(r.kind === 'op' ? '1Password' : r.what)}</span>
       <span class="access-h-cmd" title="${accessAttr(r.command || '')}">${escapeHtml(r.command || '')}</span>
       <span class="access-h-answer">${escapeHtml(r.answer ? r.answer : 'waiting')}</span>
     </div>`;
@@ -160,6 +166,12 @@ function addAccessRequest(r) {
 
 window.api.onAccessRequest((r) => { addAccessRequest(r); renderAccess(); });
 window.api.onAccessOpenSession((sessionId) => accessOpenSession(sessionId));
+window.api.onAccessReason(({ id, reason }) => {
+  const r = accessHistory.find(h => h.id === id);
+  if (!r) return;
+  r.reason = reason;
+  renderAccess();
+});
 window.api.onAccessAnswer(({ id, answer, answeredAt }) => {
   const r = accessHistory.find(h => h.id === id);
   if (r) Object.assign(r, { answer, answeredAt });

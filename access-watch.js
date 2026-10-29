@@ -13,7 +13,8 @@
  *
  * Either way the process is traced up the process tree to the `claude` of a
  * session. Its command line is shown, `op`'s without arguments that hold a
- * value (`password=…`).
+ * value (`password=…`), with why: the session's transcript already holds the
+ * tool call that is still running (runningToolReason).
  */
 
 const { spawn, execFile } = require('child_process');
@@ -42,6 +43,8 @@ const SERVICE_LABELS = {
 };
 
 const OP_POLL_MS = 700;
+// Claude Code writes a tool call to the transcript a moment after it starts: look again.
+const REASON_RETRIES_MS = [0, 400, 1000, 2000];
 const HISTORY_LIMIT = 20;
 
 /** A tccd line saying it shows a dialog: { msgId, subject, service, pid }, or null. */
@@ -124,6 +127,77 @@ function containerOf(command) {
   return (String(command || '').match(/Library\/(?:Group )?Containers\/([^/\s]+)/) || [])[1] || null;
 }
 
+const WHY_MAX = 220;
+// A call without a result that is older than this was cut off, not running.
+const RUNNING_MAX_AGE_MS = 30 * 60 * 1000;
+
+function blocksOf(entry) {
+  const content = entry?.message?.content;
+  if (Array.isArray(content)) return content;
+  return typeof content === 'string' ? [{ type: 'text', text: content }] : [];
+}
+
+/** A tool call as a few words, for tools without a description of their own. */
+function toolSummary(use) {
+  const input = use.input || {};
+  const target = input.file_path || input.path || input.pattern || input.url || input.command || '';
+  return `${use.name}${target ? ` ${String(target).slice(0, 120)}` : ''}`;
+}
+
+/** The first sentence or two of what Claude wrote, short enough for a panel line. */
+function shortText(text) {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  const sentences = flat.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [flat];
+  let out = '';
+  for (const s of sentences) {
+    if (out && (out + s).length > WHY_MAX) break;
+    out += s;
+  }
+  out = out.trim();
+  return out.length > WHY_MAX ? `${out.slice(0, WHY_MAX - 1)}\u2026` : out;
+}
+
+/**
+ * Why a session is running what asks for access, from its transcript
+ * entries (oldest first): the tool call without a result yet, with what
+ * Claude wrote just before it, else its own description of the command.
+ * A `!` command typed in the session is the user's own. Null when neither.
+ */
+function runningToolReason(entries, now = Date.now()) {
+  const recent = (e) => !e.timestamp || now - new Date(e.timestamp).getTime() < RUNNING_MAX_AGE_MS;
+  const done = new Set();
+  for (const e of entries) for (const b of blocksOf(e)) if (b.type === 'tool_result') done.add(b.tool_use_id);
+  let running = null;
+  let text = '';
+  let userBash = false;
+  for (const e of entries) {
+    if (e.type === 'user') {
+      const blocks = blocksOf(e);
+      const plain = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n');
+      if (/<bash-input>/.test(plain)) userBash = recent(e);
+      if (/<bash-stdout>|<bash-stderr>/.test(plain)) userBash = false;
+      // A new prompt starts a new turn: what Claude wrote before it no longer explains anything.
+      if (!blocks.some(b => b.type === 'tool_result') && !/<bash-/.test(plain)) text = '';
+      continue;
+    }
+    if (e.type !== 'assistant') continue;
+    for (const b of blocksOf(e)) {
+      if (b.type === 'text' && b.text.trim()) text = b.text;
+      if (b.type === 'tool_use' && !done.has(b.id)) running = recent(e) ? { use: b, text } : null;
+    }
+  }
+  if (running) {
+    const description = String(running.use.input?.description || '').trim();
+    return {
+      tool: running.use.name,
+      why: shortText(running.text) || description || toolSummary(running.use),
+      detail: running.text && description ? description : '',
+    };
+  }
+  return userBash ? { tool: 'bash', why: 'You ran this command yourself.', detail: '' } : null;
+}
+
 function describeService(service, command) {
   const label = SERVICE_LABELS[service] || service.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
   const container = service === 'SystemPolicyAppData' ? containerOf(command) : null;
@@ -135,8 +209,9 @@ class AccessWatch {
    * bundleId: the app the dialogs name (ai.doctly.switchboard, or Electron
    * in development); send(channel, payload) reaches the window.
    */
-  constructor({ bundleId, send, log = console }) {
+  constructor({ bundleId, send, explain = null, log = console }) {
     this.bundleId = bundleId;
+    this.explain = explain; // async sessionId → runningToolReason of its transcript
     this.send = send;
     this.log = log;
     this.pending = new Map(); // id → request still waiting
@@ -223,12 +298,22 @@ class AccessWatch {
     }
   }
 
-  add(request) {
-    const entry = { ...request, at: new Date().toISOString(), answer: null };
+  /** A request shows at once; why it is asked follows when the transcript has it. */
+  async add(request) {
+    const entry = { ...request, reason: null, at: new Date().toISOString(), answer: null };
     this.pending.set(entry.id, entry);
     this.history.push(entry);
     if (this.history.length > 200) this.history.splice(0, this.history.length - 200);
     this.send('access-request', entry);
+    if (!request.sessionId || !this.explain) return;
+    for (const wait of REASON_RETRIES_MS) {
+      if (wait) await new Promise(r => setTimeout(r, wait));
+      try { entry.reason = await this.explain(request.sessionId); } catch (err) { this.log.warn?.(`[access] why: ${err.message}`); return; }
+      if (entry.reason) {
+        this.send('access-reason', { id: entry.id, reason: entry.reason });
+        return;
+      }
+    }
   }
 
   answer(id, answer) {
@@ -267,4 +352,4 @@ function pgrep(name) {
   });
 }
 
-module.exports = { AccessWatch, parsePrompting, parseResult, parsePs, traceProcess, safeCommand, safeOpCommand, containerOf, describeService, SERVICE_LABELS };
+module.exports = { AccessWatch, runningToolReason, shortText, parsePrompting, parseResult, parsePs, traceProcess, safeCommand, safeOpCommand, containerOf, describeService, SERVICE_LABELS };

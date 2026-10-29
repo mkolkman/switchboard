@@ -8177,3 +8177,4 @@ button.gh-srow-line { width: 100%; padding: 0; border: 0; background: none; font
 .access-h-cmd { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .access-h-answer { flex-shrink: 0; color: #7a7a90; }
 .access-h-row--waiting .access-h-answer { color: #e0b860; }
+.access-why { margin-top: 2px; line-height: 1.35; color: #d8d0bc; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
