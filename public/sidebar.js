@@ -1087,13 +1087,35 @@ function buildSessionItem(session) {
   summaryEl.textContent = displayName;
   header.append(summaryEl, pin);
 
-  // Which repo the session is in, except where the group already says so.
+  // Which project and repo the session is in, except where the group already
+  // says which repo.
   let sourceEl = null;
-  if (sidebarGroupMode !== 'repo' && session.projectPath) {
+  const owner = typeof projectForSession === 'function' ? projectForSession(session) : null;
+  const showRepo = sidebarGroupMode !== 'repo' && session.projectPath
+    && !(owner && session.projectPath === owner.project.root);
+  if (owner || showRepo) {
     sourceEl = document.createElement('div');
     sourceEl.className = 'session-source';
-    sourceEl.textContent = sessionSourceLabel(session.projectPath);
-    sourceEl.title = sessionSourceTitle(session.projectPath);
+    const titles = [];
+    if (owner) {
+      const chip = document.createElement('span');
+      chip.className = 'session-project';
+      chip.innerHTML = markHtml(owner.project, 13, 'proj-mark--sm');
+      const name = document.createElement('span');
+      name.className = 'session-project-name';
+      name.textContent = owner.project.name;
+      chip.appendChild(name);
+      sourceEl.appendChild(chip);
+      titles.push(`Project: ${owner.project.name}`);
+    }
+    if (showRepo) {
+      const repo = document.createElement('span');
+      repo.className = 'session-source-repo';
+      repo.textContent = (owner ? '\u00b7 ' : '') + sessionSourceLabel(session.projectPath);
+      sourceEl.appendChild(repo);
+      titles.push(sessionSourceTitle(session.projectPath));
+    }
+    sourceEl.title = titles.join('\n');
   }
 
   const footer = document.createElement('div');
