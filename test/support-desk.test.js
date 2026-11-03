@@ -164,3 +164,31 @@ test('a refusal reads as Support Desk words it', async (t) => {
   global.fetch = async () => new Response(JSON.stringify({ message: 'This token may not send.' }), { status: 403 });
   await assert.rejects(supportDesk.assign(1628, 1), /Support Desk: This token may not send\./);
 });
+
+// --- Settings: what saveConfig refuses, all before anything reaches the keychain ---
+
+test('saveConfig refuses a URL without a scheme, before asking Support Desk', async (t) => {
+  const calls = fakeDesk(t, ticket());
+  await assert.rejects(supportDesk.saveConfig({ url: 'desk.test', token: 'tok' }), /must start with https:\/\//);
+  assert.equal(calls.length, 0);
+});
+
+test('saveConfig checks the token with Support Desk and refuses one it cannot use', async (t) => {
+  const calls = fakeDesk(t, ticket());
+  const answer = (status, json) => { global.fetch = async (url, init = {}) => { calls.push({ url, auth: init.headers?.Authorization }); return new Response(JSON.stringify(json), { status }); }; };
+
+  answer(401, { message: 'Unauthenticated.' });
+  await assert.rejects(supportDesk.saveConfig({ url: 'https://desk.test/api/v1', token: 'bad' }), /does not accept this token/);
+  // The pasted API path is dropped, and the token given is the one checked.
+  assert.deepEqual(calls.at(-1), { url: 'https://desk.test/api/v1/me', auth: 'Bearer bad' });
+
+  // A Claude token cannot send or assign, so Send and Assign would fail later.
+  answer(200, { id: 7, name: 'Mike', abilities: ['read', 'write', 'claude'] });
+  await assert.rejects(supportDesk.saveConfig({ url: 'https://desk.test', token: 'claude-tok' }), /cannot send or assign/);
+
+  answer(500, {});
+  await assert.rejects(supportDesk.saveConfig({ url: 'https://desk.test', token: 'tok' }), /answered 500/);
+
+  global.fetch = async () => { throw new Error('getaddrinfo ENOTFOUND desk.test'); };
+  await assert.rejects(supportDesk.saveConfig({ url: 'https://desk.test/', token: 'tok' }), /unreachable at https:\/\/desk\.test: getaddrinfo ENOTFOUND/);
+});
