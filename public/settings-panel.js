@@ -112,6 +112,9 @@
     // Global-only: the Notion todo list (notion-todo.js). The token itself
     // never comes back from main, only whether one is saved.
     const notionTodo = !isProject ? await window.api.getNotionTodoConfig().catch(() => null) : null;
+    // Global-only: the app the Help Scout tab works on (support-backend.js),
+    // and Support Desk's URL; its token stays in main, like Notion's.
+    const supportInbox = !isProject ? await window.api.getSupportBackendConfig().catch(() => null) : null;
     const fontFamilyValue = fieldValue('terminalFontFamily', '');
     const fontSizeValue = fieldValue('terminalFontSize', DEFAULT_TERMINAL_FONT_SIZE);
     const lineHeightValue = fieldValue('terminalLineHeight', DEFAULT_TERMINAL_LINE_HEIGHT);
@@ -436,6 +439,40 @@
       </div>` : ''}
 
       ${!isProject ? `<div class="settings-section">
+        <div class="settings-section-title">Support inbox</div>
+        <div class="settings-field">
+          <div class="settings-field-info">
+            <span class="settings-label">App</span>
+            <div class="settings-description">What the Help Scout tab works on: Help Scout, or MoveLab's own Support Desk.</div>
+          </div>
+          <div class="settings-field-control">
+            <select class="settings-select" id="sv-support-backend">
+              <option value="helpscout"${supportInbox?.backend !== 'support-desk' ? ' selected' : ''}>Help Scout</option>
+              <option value="support-desk"${supportInbox?.backend === 'support-desk' ? ' selected' : ''}>Support Desk</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-field settings-field-stacked">
+          <div class="settings-field-info">
+            <span class="settings-label">Support Desk URL</span>
+            <div class="settings-description">The address of the Support Desk site.</div>
+          </div>
+          <div class="settings-field-control">
+            <input type="text" class="settings-input" id="sv-support-url" spellcheck="false" placeholder="https://…" value="${escapeHtml(supportInbox?.url || '')}">
+          </div>
+        </div>
+        <div class="settings-field settings-field-stacked">
+          <div class="settings-field-info">
+            <span class="settings-label">Support Desk token</span>
+            <div class="settings-description">In Support Desk: Settings, API tokens, a "Switchboard token". Kept in the keychain. Leave empty to keep the saved token.</div>
+          </div>
+          <div class="settings-field-control">
+            <input type="password" class="settings-input" id="sv-support-token" autocomplete="off" spellcheck="false" placeholder="${supportInbox?.hasToken ? 'Saved' : ''}">
+          </div>
+        </div>
+      </div>` : ''}
+
+      ${!isProject ? `<div class="settings-section">
         <div class="settings-section-title">Updates</div>
         <div class="settings-field">
           <div class="settings-field-info">
@@ -640,6 +677,18 @@
         const saved = await window.api.setNotionTodoConfig(spec);
         if (saved?.error) alert(saved.error);
         else if (typeof todoConfigChanged === 'function') todoConfigChanged();
+
+        // Only when changed: saving Support Desk's settings checks them with it.
+        const support = {
+          backend: settingsViewerBody.querySelector('#sv-support-backend').value,
+          url: settingsViewerBody.querySelector('#sv-support-url').value.trim(),
+          token: settingsViewerBody.querySelector('#sv-support-token').value.trim(),
+        };
+        if (supportInbox && (support.token || support.backend !== supportInbox.backend || (support.backend === 'support-desk' && support.url !== (supportInbox.url || '')))) {
+          const result = await window.api.setSupportBackendConfig(support);
+          if (result?.error) alert(`Support inbox: ${result.error}`);
+          else if (typeof helpscoutBackendChanged === 'function') helpscoutBackendChanged();
+        }
       }
 
       // Update visibleSessionCount, sessionMaxAgeDays, and theme
