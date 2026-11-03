@@ -15,7 +15,8 @@
 // projects-view.js (projectForSession, findTreeProject, selectProject, PICONS,
 // planState, loadProjectPlan, mainEl), project-github-view.js
 // (githubLinkForSession, githubTabState, githubRepoName), github-view.js
-// (openGithubViewPullRequest), helpscout-view.js (helpscoutLinkFor,
+// (openGithubViewPullRequest), helpscout-view.js (helpscoutLinkFor, helpscoutLinkApp,
+// helpscoutLinkHere, openHelpscoutLink,
 // openHelpscoutTicket), grafana-view.js (openGrafanaAlert, selectGrafana),
 // observability-view.js (openObservabilityError, observabilityPlaceLabel).
 
@@ -130,7 +131,12 @@ function sessionContexts(sessionId) {
     }
   }
   const ticket = typeof helpscoutLinkFor === 'function' ? helpscoutLinkFor(sessionId) : null;
-  if (ticket) push({ kind: 'ticket', key: `ticket:${ticket.conversation}`, ref: ticket.conversation, label: `Ticket #${ticket.number}`, title: `Help Scout ticket: ${ticket.subject || ''}`, open: () => openHelpscoutTicket(ticket.conversation) });
+  if (ticket) {
+    // A ticket in the other app (Settings switched since) opens on the web, and has no status to read here.
+    const app = helpscoutLinkApp(ticket);
+    const elsewhere = !helpscoutLinkHere(ticket);
+    push({ kind: 'ticket', key: `ticket:${app}:${ticket.conversation}`, ref: ticket.conversation, elsewhere, label: `Ticket #${ticket.number}`, title: `${app} ticket: ${ticket.subject || ''}${elsewhere ? `\nOpens in ${app} on the web` : ''}`, open: () => openHelpscoutLink(ticket) });
+  }
   // Only for sessions open in this run: reading every listed session's branch would be a flood.
   const branchPr = session && openSessions.has(sessionId) ? sessionBranchPr(sessionId) : null;
   if (branchPr) push({ kind: 'pr', key: branchPr.key.toLowerCase(), ref: branchPr.key, label: `PR #${branchPr.number}`, title: `${branchPr.key}: ${branchPr.title}\nThe PR of the branch this session works on`, detected: true, open: () => openGithubContext(branchPr.key, { url: branchPr.url, ...prInProject(branchPr.key) }) });
@@ -505,7 +511,7 @@ function sessionContextStatus(ctx) {
     const text = [`${SESSION_CTX_PR_STATE_TEXT[state]}${marks.review ? `, ${marks.review}` : ''}`, marks.requested, marks.mine, githubChecksText(pr.state === 'OPEN' ? pr.checks : null, pr.checksFailed)].filter(Boolean).join('\n');
     return { state: `pr-${state}`, icon: SESSION_CONTEXT_STATE_ICONS[`pr-${state}`](), marks: marks.html, text };
   }
-  if (ctx.kind === 'ticket') {
+  if (ctx.kind === 'ticket' && !ctx.elsewhere) {
     const status = sessionCtxTicketStatus(ctx.ref);
     if (!SESSION_CTX_TICKET_STATE_TEXT[status]) return null;
     return { state: `ticket-${status}`, icon: SESSION_CONTEXT_STATE_ICONS[`ticket-${status}`](), marks: '', text: SESSION_CTX_TICKET_STATE_TEXT[status] };

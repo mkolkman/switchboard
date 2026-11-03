@@ -118,6 +118,8 @@ contextBridge.exposeInMainWorld('api', {
   getHelpscoutDraftPrompt: (id, extra) => ipcRenderer.invoke('helpscout-draft-prompt', id, extra),
   getHelpscoutDraftReply: (sessionId) => ipcRenderer.invoke('helpscout-draft-reply', sessionId),
   setHelpscoutSuggestion: (sid, status) => ipcRenderer.invoke('helpscout-set-suggestion', sid, status),
+  getSupportBackendConfig: () => ipcRenderer.invoke('support-backend-config'),
+  setSupportBackendConfig: (spec) => ipcRenderer.invoke('support-backend-set-config', spec),
   getNotionTodoConfig: () => ipcRenderer.invoke('notion-todo-config'),
   setNotionTodoConfig: (spec) => ipcRenderer.invoke('notion-todo-set-config', spec),
   loadNotionTodo: (opts) => ipcRenderer.invoke('notion-todo-load', opts),
