@@ -43,6 +43,7 @@ const helpscoutViewState = {
   generating: null, // a draft session at work: { conversation, session, state }
   generated: null, // its reply, on its way into the box: { conversation, text }
   draftExtras: new Map(), // conversation id → the extra info typed for Claude
+  inboxGen: 0, // bumped when the app changes, so an inbox read from the old app is dropped
 };
 
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
@@ -53,7 +54,9 @@ const helpscoutApp = () => helpscoutViewState.inbox?.app || helpscoutViewState.c
 /** Settings switched the app: its tickets have other ids, so start over (settings-panel.js). */
 function helpscoutBackendChanged() {
   const s = helpscoutViewState;
-  Object.assign(s, { inbox: null, error: null, mailbox: null, selectedId: null, conversation: null, convError: null, notice: null, generating: null, generated: null });
+  // A read still on its way is the old app's: drop it (loadHelpscoutView), and read anew.
+  s.inboxGen++;
+  Object.assign(s, { inbox: null, error: null, loading: false, mailbox: null, selectedId: null, conversation: null, convError: null, notice: null, generating: null, generated: null });
   if (activeTab === 'helpscout') { showHelpscoutView(); }
 }
 
@@ -75,7 +78,10 @@ async function loadHelpscoutView({ quiet = false } = {}) {
   if (helpscoutViewState.loading) return;
   helpscoutViewState.loading = true;
   if (!quiet) renderHelpscoutViewList();
+  const gen = helpscoutViewState.inboxGen;
   const result = await window.api.getHelpscoutInbox().catch(err => ({ error: err?.message || String(err) }));
+  // The app changed meanwhile: these are the other app's tickets, and a new read has started.
+  if (gen !== helpscoutViewState.inboxGen) return;
   helpscoutViewState.loading = false;
   if (result?.error) helpscoutViewState.error = result.error;
   else { helpscoutViewState.error = null; helpscoutViewState.inbox = result; }
