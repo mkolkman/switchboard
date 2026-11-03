@@ -44,19 +44,34 @@ const helpscoutViewState = {
   generated: null, // its reply, on its way into the box: { conversation, text }
   draftExtras: new Map(), // conversation id → the extra info typed for Claude
   inboxGen: 0, // bumped when the app changes, so an inbox read from the old app is dropped
+  app: null, // the app Settings picks, before the inbox says so (helpscoutApp)
 };
+
+// Settings' choice (support-backend.js BACKEND_SETTING) by the name the apps give themselves.
+const HELPSCOUT_APP_NAMES = { helpscout: 'Help Scout', 'support-desk': 'Support Desk' };
+const helpscoutAppName = (backend) => HELPSCOUT_APP_NAMES[backend] || 'Help Scout';
+
+// Read at start: a session's ticket chip needs to know the app before the tab is ever opened.
+window.api.getSetting('supportBackend').then((backend) => {
+  if (!helpscoutViewState.app) helpscoutViewState.app = helpscoutAppName(backend);
+}).catch(() => {});
 
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
 
 /** The app the tab works on now: Help Scout, or Support Desk (support-backend.js). */
-const helpscoutApp = () => helpscoutViewState.inbox?.app || helpscoutViewState.conversation?.app || 'Help Scout';
+const helpscoutApp = () => helpscoutViewState.inbox?.app || helpscoutViewState.app || helpscoutViewState.conversation?.app || 'Help Scout';
 
-/** Settings switched the app: its tickets have other ids, so start over (settings-panel.js). */
-function helpscoutBackendChanged() {
+/** Settings switched the app to `backend`: its tickets have other ids, so start over (settings-panel.js). */
+function helpscoutBackendChanged(backend) {
   const s = helpscoutViewState;
+  s.app = helpscoutAppName(backend);
+  // Ticket statuses read from the other app say nothing about this one's ids (session-context.js).
+  if (typeof sessionCtxTickets !== 'undefined') sessionCtxTickets.clear();
   // A read still on its way is the old app's: drop it (loadHelpscoutView), and read anew.
   s.inboxGen++;
   Object.assign(s, { inbox: null, error: null, loading: false, mailbox: null, selectedId: null, conversation: null, convError: null, notice: null, generating: null, generated: null });
+  // Ticket chips on sessions now open here or on the web (session-context.js).
+  if (typeof refreshSessionContextViews === 'function') refreshSessionContextViews(activeSessionId);
   if (activeTab === 'helpscout') { showHelpscoutView(); }
 }
 
@@ -84,7 +99,7 @@ async function loadHelpscoutView({ quiet = false } = {}) {
   if (gen !== helpscoutViewState.inboxGen) return;
   helpscoutViewState.loading = false;
   if (result?.error) helpscoutViewState.error = result.error;
-  else { helpscoutViewState.error = null; helpscoutViewState.inbox = result; }
+  else { helpscoutViewState.error = null; helpscoutViewState.inbox = result; helpscoutViewState.app = result.app || helpscoutViewState.app; }
   renderHelpscoutViewList();
 }
 
@@ -148,10 +163,12 @@ async function sendHelpscoutReplyNow(c, draft, text, status) {
 // suggestions) stays linked to it: the ticket lists it with its state and last
 // step (the PR panel's rows, project-github-view.js), the session header links
 // back to the ticket, and when the session closes the ticket comes back.
+// A link names its app: after Settings switches apps, the other app's tickets
+// have ids this one does not know, so they open on the web instead.
 
 const HELPSCOUT_SESSIONS_KEY = 'helpscoutSessionLinks';
 const HELPSCOUT_SESSIONS_KEEP = 300;
-const helpscoutSessionLinks = new Map(); // sessionId → { conversation, number, subject }
+const helpscoutSessionLinks = new Map(); // sessionId → { conversation, number, subject, app, url }
 let helpscoutSessionTicker = null;
 
 window.api.getSetting(HELPSCOUT_SESSIONS_KEY).then((saved) => {
@@ -160,7 +177,8 @@ window.api.getSetting(HELPSCOUT_SESSIONS_KEY).then((saved) => {
 
 function linkHelpscoutSession(sessionId, conv) {
   helpscoutSessionLinks.delete(sessionId);
-  helpscoutSessionLinks.set(sessionId, { conversation: conv.id, number: conv.number, subject: conv.subject });
+  // Help Scout's ticket has no app of its own; the inbox it came from does.
+  helpscoutSessionLinks.set(sessionId, { conversation: conv.id, number: conv.number, subject: conv.subject, app: conv.app || helpscoutApp(), url: conv.url || null });
   const kept = [...helpscoutSessionLinks].slice(-HELPSCOUT_SESSIONS_KEEP);
   window.api.setSetting(HELPSCOUT_SESSIONS_KEY, Object.fromEntries(kept)).catch(() => {});
 }
@@ -170,9 +188,23 @@ function helpscoutLinkFor(sessionId) {
   return helpscoutSessionLinks.get(sessionId) || null;
 }
 
+/** The app a link's ticket is in; links made before Support Desk are Help Scout's. */
+const helpscoutLinkApp = (link) => link.app || 'Help Scout';
+
+/** Whether a link's ticket is in the app the tab works on now, so its id means something there. */
+const helpscoutLinkHere = (link) => helpscoutLinkApp(link) === helpscoutApp();
+
+/** A link's ticket: in the tab when it is this app's, else on its app's website. */
+function openHelpscoutLink(link) {
+  if (helpscoutLinkHere(link)) { openHelpscoutTicket(link.conversation); return; }
+  // Older Help Scout links kept no URL; Help Scout's page is found by the id and number (helpscout.js).
+  const url = link.url || (helpscoutLinkApp(link) === 'Help Scout' ? `https://secure.helpscout.net/conversation/${link.conversation}/${link.number}` : null);
+  if (url) window.api.openExternal(url);
+}
+
 /** A ticket's sessions that still exist, newest first. */
 function helpscoutSessionIds(conversationId) {
-  return [...helpscoutSessionLinks].filter(([, link]) => link.conversation === conversationId).map(([id]) => id)
+  return [...helpscoutSessionLinks].filter(([, link]) => link.conversation === conversationId && helpscoutLinkHere(link)).map(([id]) => id)
     .filter(id => openSessions.has(id) || sessionMap.has(id)).reverse();
 }
 
@@ -188,7 +220,7 @@ function openHelpscoutTicket(conversationId) {
 /** A linked session closed while on screen: show its ticket again. */
 function returnToHelpscoutTicket(sessionId) {
   const link = helpscoutLinkFor(sessionId);
-  if (link && (activeTab === 'sessions' || activeTab === 'helpscout')) openHelpscoutTicket(link.conversation);
+  if (link && helpscoutLinkHere(link) && (activeTab === 'sessions' || activeTab === 'helpscout')) openHelpscoutTicket(link.conversation);
 }
 
 async function helpscoutViewSession(conv, prompt, label, { focus = true } = {}) {

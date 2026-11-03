@@ -687,7 +687,7 @@
         if (supportInbox && (support.token || support.backend !== supportInbox.backend || (support.backend === 'support-desk' && support.url !== (supportInbox.url || '')))) {
           const result = await window.api.setSupportBackendConfig(support);
           if (result?.error) alert(`Support inbox: ${result.error}`);
-          else if (typeof helpscoutBackendChanged === 'function') helpscoutBackendChanged();
+          else if (typeof helpscoutBackendChanged === 'function') helpscoutBackendChanged(result.backend);
         }
       }
 
