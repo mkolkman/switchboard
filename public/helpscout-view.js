@@ -4,7 +4,9 @@
 // customer-support skill saved to log later. The main area is one
 // conversation: its threads, its status and assignee, a note, and your
 // reply, saved as a draft or sent (after a confirm) with the status it leaves
-// the conversation in. Main does the API calls (helpscout.js).
+// the conversation in. Main does the API calls: helpscout.js, or
+// support-desk.js when Settings picks Support Desk; the inbox says which
+// (app), and the tab names that app where it says Help Scout.
 // Depends on: utils.js (escapeHtml, formatDate), projects-view.js (PICONS,
 // showContextMenu), dialogs.js (resolveDefaultSessionOptions), app.js
 // (launchNewSession, openSession, encodeProjectPath), project-github-view.js
@@ -41,9 +43,37 @@ const helpscoutViewState = {
   generating: null, // a draft session at work: { conversation, session, state }
   generated: null, // its reply, on its way into the box: { conversation, text }
   draftExtras: new Map(), // conversation id → the extra info typed for Claude
+  inboxGen: 0, // bumped when the app changes, so an inbox read from the old app is dropped
+  app: null, // the app Settings picks, before the inbox says so (helpscoutApp)
 };
 
+// Settings' choice (support-backend.js BACKEND_SETTING) by the name the apps give themselves.
+const HELPSCOUT_APP_NAMES = { helpscout: 'Help Scout', 'support-desk': 'Support Desk' };
+const helpscoutAppName = (backend) => HELPSCOUT_APP_NAMES[backend] || 'Help Scout';
+
+// Read at start: a session's ticket chip needs to know the app before the tab is ever opened.
+window.api.getSetting('supportBackend').then((backend) => {
+  if (!helpscoutViewState.app) helpscoutViewState.app = helpscoutAppName(backend);
+}).catch(() => {});
+
 const hsvAttr = (value) => escapeHtml(value).replace(/"/g, '&quot;');
+
+/** The app the tab works on now: Help Scout, or Support Desk (support-backend.js). */
+const helpscoutApp = () => helpscoutViewState.inbox?.app || helpscoutViewState.app || helpscoutViewState.conversation?.app || 'Help Scout';
+
+/** Settings switched the app to `backend`: its tickets have other ids, so start over (settings-panel.js). */
+function helpscoutBackendChanged(backend) {
+  const s = helpscoutViewState;
+  s.app = helpscoutAppName(backend);
+  // Ticket statuses read from the other app say nothing about this one's ids (session-context.js).
+  if (typeof sessionCtxTickets !== 'undefined') sessionCtxTickets.clear();
+  // A read still on its way is the old app's: drop it (loadHelpscoutView), and read anew.
+  s.inboxGen++;
+  Object.assign(s, { inbox: null, error: null, loading: false, mailbox: null, selectedId: null, conversation: null, convError: null, notice: null, generating: null, generated: null });
+  // Ticket chips on sessions now open here or on the web (session-context.js).
+  if (typeof refreshSessionContextViews === 'function') refreshSessionContextViews(activeSessionId);
+  if (activeTab === 'helpscout') { showHelpscoutView(); }
+}
 
 /** "3h", "2d": how long ago, short, for the list. */
 function helpscoutAgo(iso) {
@@ -63,10 +93,13 @@ async function loadHelpscoutView({ quiet = false } = {}) {
   if (helpscoutViewState.loading) return;
   helpscoutViewState.loading = true;
   if (!quiet) renderHelpscoutViewList();
+  const gen = helpscoutViewState.inboxGen;
   const result = await window.api.getHelpscoutInbox().catch(err => ({ error: err?.message || String(err) }));
+  // The app changed meanwhile: these are the other app's tickets, and a new read has started.
+  if (gen !== helpscoutViewState.inboxGen) return;
   helpscoutViewState.loading = false;
   if (result?.error) helpscoutViewState.error = result.error;
-  else { helpscoutViewState.error = null; helpscoutViewState.inbox = result; }
+  else { helpscoutViewState.error = null; helpscoutViewState.inbox = result; helpscoutViewState.app = result.app || helpscoutViewState.app; }
   renderHelpscoutViewList();
 }
 
@@ -130,10 +163,12 @@ async function sendHelpscoutReplyNow(c, draft, text, status) {
 // suggestions) stays linked to it: the ticket lists it with its state and last
 // step (the PR panel's rows, project-github-view.js), the session header links
 // back to the ticket, and when the session closes the ticket comes back.
+// A link names its app: after Settings switches apps, the other app's tickets
+// have ids this one does not know, so they open on the web instead.
 
 const HELPSCOUT_SESSIONS_KEY = 'helpscoutSessionLinks';
 const HELPSCOUT_SESSIONS_KEEP = 300;
-const helpscoutSessionLinks = new Map(); // sessionId → { conversation, number, subject }
+const helpscoutSessionLinks = new Map(); // sessionId → { conversation, number, subject, app, url }
 let helpscoutSessionTicker = null;
 
 window.api.getSetting(HELPSCOUT_SESSIONS_KEY).then((saved) => {
@@ -142,7 +177,8 @@ window.api.getSetting(HELPSCOUT_SESSIONS_KEY).then((saved) => {
 
 function linkHelpscoutSession(sessionId, conv) {
   helpscoutSessionLinks.delete(sessionId);
-  helpscoutSessionLinks.set(sessionId, { conversation: conv.id, number: conv.number, subject: conv.subject });
+  // Help Scout's ticket has no app of its own; the inbox it came from does.
+  helpscoutSessionLinks.set(sessionId, { conversation: conv.id, number: conv.number, subject: conv.subject, app: conv.app || helpscoutApp(), url: conv.url || null });
   const kept = [...helpscoutSessionLinks].slice(-HELPSCOUT_SESSIONS_KEEP);
   window.api.setSetting(HELPSCOUT_SESSIONS_KEY, Object.fromEntries(kept)).catch(() => {});
 }
@@ -152,9 +188,23 @@ function helpscoutLinkFor(sessionId) {
   return helpscoutSessionLinks.get(sessionId) || null;
 }
 
+/** The app a link's ticket is in; links made before Support Desk are Help Scout's. */
+const helpscoutLinkApp = (link) => link.app || 'Help Scout';
+
+/** Whether a link's ticket is in the app the tab works on now, so its id means something there. */
+const helpscoutLinkHere = (link) => helpscoutLinkApp(link) === helpscoutApp();
+
+/** A link's ticket: in the tab when it is this app's, else on its app's website. */
+function openHelpscoutLink(link) {
+  if (helpscoutLinkHere(link)) { openHelpscoutTicket(link.conversation); return; }
+  // Older Help Scout links kept no URL; Help Scout's page is found by the id and number (helpscout.js).
+  const url = link.url || (helpscoutLinkApp(link) === 'Help Scout' ? `https://secure.helpscout.net/conversation/${link.conversation}/${link.number}` : null);
+  if (url) window.api.openExternal(url);
+}
+
 /** A ticket's sessions that still exist, newest first. */
 function helpscoutSessionIds(conversationId) {
-  return [...helpscoutSessionLinks].filter(([, link]) => link.conversation === conversationId).map(([id]) => id)
+  return [...helpscoutSessionLinks].filter(([, link]) => link.conversation === conversationId && helpscoutLinkHere(link)).map(([id]) => id)
     .filter(id => openSessions.has(id) || sessionMap.has(id)).reverse();
 }
 
@@ -170,7 +220,7 @@ function openHelpscoutTicket(conversationId) {
 /** A linked session closed while on screen: show its ticket again. */
 function returnToHelpscoutTicket(sessionId) {
   const link = helpscoutLinkFor(sessionId);
-  if (link && (activeTab === 'sessions' || activeTab === 'helpscout')) openHelpscoutTicket(link.conversation);
+  if (link && helpscoutLinkHere(link) && (activeTab === 'sessions' || activeTab === 'helpscout')) openHelpscoutTicket(link.conversation);
 }
 
 async function helpscoutViewSession(conv, prompt, label, { focus = true } = {}) {
@@ -202,7 +252,7 @@ async function helpscoutSupportSession(conv) {
   // The skill reads the ticket as text; its screenshots go along as files.
   const saved = await window.api.getHelpscoutSessionAttachments(conv.id).catch(err => ({ error: err?.message || String(err) }));
   const attachments = saved?.error ? `\n\nSwitchboard could not save the ticket's attachments: ${saved.error}` : saved?.prompt || '';
-  await helpscoutViewSession(conv, `${HELPSCOUT_SUPPORT_SKILL} Help Scout ticket #${conv.number}: ${conv.url}${attachments}`, `Support on #${conv.number}`).catch(() => null);
+  await helpscoutViewSession(conv, `${HELPSCOUT_SUPPORT_SKILL} ${conv.app || 'Help Scout'} ticket #${conv.number}: ${conv.url}${attachments}`, `Support on #${conv.number}`).catch(() => null);
   helpscoutSupportStarting = false;
 }
 
@@ -323,9 +373,9 @@ function renderHelpscoutViewList() {
   const toLog = (inbox?.suggestions || []).filter(x => x.status === 'open');
   const mailboxes = inbox?.mailboxes || [];
   helpscoutViewContent.innerHTML = `
-    <div class="ghv-head"><span class="ghv-head-title">Help Scout</span><span class="ws-flex"></span>
+    <div class="ghv-head"><span class="ghv-head-title">${escapeHtml(helpscoutApp())}</span><span class="ws-flex"></span>
       <span class="gh-muted">${status}</span>
-      <button type="button" class="ws-ghost ws-ghost--sm" id="hsv-refresh" title="Read Help Scout again">${PICONS.refresh(12)}</button></div>
+      <button type="button" class="ws-ghost ws-ghost--sm" id="hsv-refresh" title="Read ${hsvAttr(helpscoutApp())} again">${PICONS.refresh(12)}</button></div>
     ${mailboxes.length > 1 ? `<div class="hsv-mailboxes">${[{ id: null, name: 'All' }, ...mailboxes].map(m => `<button type="button" class="ws-ghost ws-ghost--sm${s.mailbox === m.id ? ' active' : ''}" data-mailbox="${m.id ?? ''}">${escapeHtml(m.name)}</button>`).join('')}</div>` : ''}
     ${s.error ? `<div class="ghv-empty gh-error">${escapeHtml(s.error)}</div>` : ''}
     ${groups}
@@ -380,6 +430,7 @@ function renderHelpscoutViewMain() {
   if (!helpscoutViewer || activeTab !== 'helpscout') return;
   const s = helpscoutViewState;
   const c = s.conversation;
+  const app = helpscoutApp();
   // A repaint while typing would throw the text away; keep what is typed.
   const typed = helpscoutViewer.querySelector('#hsv-compose')?.value;
   const scroll = helpscoutViewer.querySelector('.hsv-body')?.scrollTop || 0;
@@ -409,7 +460,7 @@ function renderHelpscoutViewMain() {
         <label class="hsv-control">Assignee <select id="hsv-assignee"${busy}><option value="">Unassigned</option>${people.map(p => `<option value="${p.id}"${c.assignee?.id === p.id ? ' selected' : ''}>${escapeHtml(p.name)}${p.id === inbox?.me?.id ? ' (you)' : p.team ? ' (team)' : ''}</option>`).join('')}</select></label>
         <span class="ws-flex"></span>
         <button type="button" class="ws-ghost" id="hsv-session" title="${hsvAttr(`A Claude session with ${HELPSCOUT_SUPPORT_SKILL} on this ticket`)}">${ICONS.claude(12)}<span>Claude session</span></button>
-        <button type="button" class="ws-ghost" id="hsv-open" title="Open the conversation in Help Scout">${PICONS.open(12)}<span>Help Scout</span></button>
+        <button type="button" class="ws-ghost" id="hsv-open" title="Open the conversation in ${hsvAttr(app)}">${PICONS.open(12)}<span>${escapeHtml(app)}</span></button>
       </div>
     </div>
     ${s.notice && !s.notice.draft ? helpscoutNoticeHtml(s.notice) : ''}
@@ -421,7 +472,7 @@ function renderHelpscoutViewMain() {
         <button type="button" class="ws-ghost ws-ghost--sm${s.composer === 'reply' ? ' active' : ''}" data-composer="reply">${draft ? 'Draft reply' : 'Reply'}</button>
         <button type="button" class="ws-ghost ws-ghost--sm${s.composer === 'note' ? ' active' : ''}" data-composer="note">Note</button>
         <span class="ws-flex"></span>
-        <span class="gh-muted">${s.composer === 'reply' ? 'Save it as a draft in Help Scout, or send it now.' : 'Only your team sees a note.'}</span>
+        <span class="gh-muted">${s.composer === 'reply' ? `Save it as a draft in ${escapeHtml(app)}, or send it now.` : 'Only your team sees a note.'}</span>
       </div>
       ${s.notice?.draft && s.composer === 'reply' ? helpscoutNoticeHtml(s.notice) : ''}
       <textarea id="hsv-compose" class="hsv-compose" rows="${s.composer === 'reply' ? 9 : 4}" spellcheck="true" placeholder="${s.composer === 'reply' ? `Reply to ${hsvAttr(c.customer.name || c.customer.email)}` : 'A note for the team; type @ to mention someone'}">${escapeHtml(composeValue)}</textarea>
@@ -432,7 +483,7 @@ function renderHelpscoutViewMain() {
              <span class="ws-flex"></span>
              <button type="button" class="ws-btn" id="hsv-save-draft"${busy}>${s.busy === 'draft' ? 'Saving…' : draft ? 'Save draft' : 'Save as draft'}</button>
              <label class="hsv-control" title="The status the conversation gets once the reply is sent">then <select id="hsv-send-status"${busy}>${['active', 'pending', 'closed'].map(st => `<option value="${st}"${helpscoutSendStatus() === st ? ' selected' : ''}>${st[0].toUpperCase() + st.slice(1)}</option>`).join('')}</select></label>
-             <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="${hsvAttr(`Send this reply to ${c.customer.email || c.customer.name} now, from Help Scout`)}">${s.busy === 'send' ? 'Sending…' : 'Send'}</button>`
+             <button type="button" class="ws-btn ws-btn--primary" id="hsv-send"${busy} title="${hsvAttr(`Send this reply to ${c.customer.email || c.customer.name} now, from ${app}`)}">${s.busy === 'send' ? 'Sending…' : 'Send'}</button>`
           : `<button type="button" class="ws-btn ws-btn--primary" id="hsv-add-note"${busy}>${s.busy === 'note' ? 'Adding…' : 'Add note'}</button>`}
       </div>
     </div>
@@ -463,7 +514,7 @@ function bindHelpscoutViewMain(c, draft) {
     btn.onclick = () => { s.composer = btn.dataset.composer; s.composerKept = null; renderHelpscoutViewMain(); };
   });
   const text = () => $('#hsv-compose').value;
-  const saveDraft = () => helpscoutViewWrite('draft', () => window.api.saveHelpscoutDraft(c.id, { threadId: draft?.id || null, text: text() }), 'Draft saved in Help Scout.');
+  const saveDraft = () => helpscoutViewWrite('draft', () => window.api.saveHelpscoutDraft(c.id, { threadId: draft?.id || null, text: text() }), `Draft saved in ${helpscoutApp()}.`);
   if ($('#hsv-save-draft')) $('#hsv-save-draft').onclick = () => saveDraft();
   bindHelpscoutDraftButtons(c);
   if ($('#hsv-send-status')) $('#hsv-send-status').onchange = (e) => { try { localStorage.setItem(HELPSCOUT_SEND_STATUS_KEY, e.target.value); } catch {} };

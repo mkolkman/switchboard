@@ -200,6 +200,7 @@ async function getInbox() {
     pages('/conversations?status=spam&sortField=modifiedAt&sortOrder=desc', 'conversations', 1),
   ]);
   return {
+    app: 'Help Scout',
     me: { id: user.id, name: personName(user) },
     mailboxes: mailboxes.map(m => ({ id: m.id, name: m.name, email: m.email })),
     people: [
@@ -242,8 +243,8 @@ async function getAttachment(conversationId, attachmentId) {
 }
 
 /** A non-image attachment: written to a temp folder and opened in its default app. */
-async function openAttachment(conversationId, attachmentId, name) {
-  const { data } = await getAttachment(conversationId, attachmentId);
+async function openAttachment(conversationId, attachmentId, name, read = getAttachment) {
+  const { data } = await read(conversationId, attachmentId);
   const dir = path.join(os.tmpdir(), 'switchboard-helpscout');
   fs.mkdirSync(dir, { recursive: true });
   const safe = path.basename(String(name || 'attachment')).replace(/[^\w.\- ]+/g, '_') || 'attachment';
@@ -259,9 +260,10 @@ const SESSION_ATTACHMENT_MAX = 25 * 1024 * 1024;
  * Every attachment of a ticket, written to `<dir>/<number>/` for a Claude
  * session: the skill reads a ticket as text only, and the API's file links
  * want a token. Files already there are kept. Returns them oldest first with
- * who sent them, and the ones left out with why.
+ * who sent them, and the ones left out with why. `read` fetches one file:
+ * Support Desk (support-desk.js) passes its own.
  */
-async function saveAttachments(conv, dir) {
+async function saveAttachments(conv, dir, read = getAttachment) {
   const folder = path.join(dir, String(Number(conv.number) || Number(conv.id)));
   const files = [];
   const skipped = [];
@@ -272,7 +274,7 @@ async function saveAttachments(conv, dir) {
       if (a.size > SESSION_ATTACHMENT_MAX) { skipped.push({ name: a.name, why: 'over 25 MB' }); continue; }
       try {
         if (!fs.existsSync(file)) {
-          const { data } = await getAttachment(conv.id, a.id);
+          const { data } = await read(conv.id, a.id);
           fs.mkdirSync(folder, { recursive: true });
           fs.writeFileSync(file, Buffer.from(data, 'base64'));
         }
@@ -286,10 +288,10 @@ async function saveAttachments(conv, dir) {
 }
 
 /** The part of a session's first message that points Claude at the saved attachments. */
-function attachmentsPrompt({ files = [], skipped = [] } = {}) {
+function attachmentsPrompt({ files = [], skipped = [] } = {}, app = 'Help Scout') {
   if (!files.length && !skipped.length) return '';
-  return '\n\nThe ticket\'s attachments, saved by Switchboard (look at images and PDFs with the Read tool; '
-    + 'the Help Scout script does not fetch them):\n'
+  return '\n\nThe ticket\'s attachments, saved by Switchboard (look at images and PDFs with the Read tool'
+    + `${app === 'Help Scout' ? '; the Help Scout script does not fetch them' : ''}):\n`
     + files.map(f => `- ${f.path} (${f.name}${f.from ? `, from ${f.from}` : ''}${f.createdAt ? `, ${f.createdAt}` : ''})`).join('\n')
     + (skipped.length ? `${files.length ? '\n' : ''}${skipped.map(s => `- ${s.name}: not saved (${s.why})`).join('\n')}` : '');
 }
@@ -311,19 +313,21 @@ const DRAFT_LABELS = { customer: 'Customer', message: 'Reply', reply: 'Reply', n
  * of the session's last message, between <reply> tags (splitDraftReply).
  */
 function draftPrompt(conv, extra = '', attachments = null) {
+  // Support Desk tickets (support-desk.js) say which app they come from.
+  const app = conv.app || 'Help Scout';
   const threads = [...conv.threads].reverse().filter(t => !t.draft && t.type !== 'lineitem');
   const customer = [conv.customer?.name, conv.customer?.email && `<${conv.customer.email}>`].filter(Boolean).join(' ');
   const note = String(extra || '').trim();
-  return `${DRAFT_SKILL} Write the reply to Help Scout ticket #${conv.number} (${conv.url}).\n\n`
+  return `${DRAFT_SKILL} Write the reply to ${app} ticket #${conv.number} (${conv.url}).\n\n`
     + (note ? `From me, to take into account:\n${note}\n\n` : '')
     + 'In your last message, put the text of the reply between <reply> and </reply>; notes for me go outside '
     + 'those tags. Switchboard puts what is between them into the reply box, where it is checked and saved as '
-    + 'a draft by hand. Do not post, save or log anything yourself (no Help Scout draft or note, no GitHub, no '
+    + `a draft by hand. Do not post, save or log anything yourself (no ${app} draft or note, no GitHub, no `
     + 'Notion) unless I ask for it here.\n\n'
     + `Subject: ${conv.subject}\nCustomer: ${customer}\n\nThe conversation, oldest first:\n\n`
     + threads.map(t => `--- ${DRAFT_LABELS[t.type] || t.type}${t.from ? `, ${t.from}` : ''}${t.createdAt ? `, ${t.createdAt}` : ''}`
       + `${t.attachments.length ? ` (attached: ${t.attachments.map(a => a.name).join(', ')})` : ''}\n${t.text}`).join('\n\n')
-    + attachmentsPrompt(attachments || {});
+    + attachmentsPrompt(attachments || {}, app);
 }
 
 /**

@@ -56,6 +56,8 @@ const { repoInfoForPath, repoInfoForPaths, findLocalClones } = require('./repo-i
 const githubTracker = require('./github-tracker');
 const notionTodo = require('./notion-todo');
 const helpscout = require('./helpscout');
+const supportDesk = require('./support-desk');
+const supportBackend = require('./support-backend');
 const { AccessWatch, runningToolReason } = require('./access-watch');
 const { AccessPanel } = require('./access-panel');
 const grafana = require('./grafana');
@@ -945,26 +947,31 @@ ipcMain.handle('appstores-save-config', (_e, spec) => appstores.asResult(appstor
 ipcMain.handle('appstores-installs', (_e, opts) => appstores.asResult(appstores.getInstalls({ targets: Array.isArray(opts?.targets) ? opts.targets.map(String) : undefined, force: !!opts?.force })));
 ipcMain.handle('appstores-start-reports', (_e, target) => appstores.asResult(appstores.startAppStoreReports(String(target || ''))));
 
-// --- IPC: Help Scout (helpscout.js) ---
-// Each write is a click in the Help Scout tab. A reply is always a draft:
-// you send it in Help Scout itself.
-ipcMain.handle('helpscout-inbox', () => helpscout.asResult(helpscout.getInbox()));
-ipcMain.handle('helpscout-conversation', (_e, id) => helpscout.asResult(helpscout.getConversation(id)));
-ipcMain.handle('helpscout-statuses', (_e, ids) => helpscout.asResult(helpscout.getStatuses(Array.isArray(ids) ? ids : [])));
-ipcMain.handle('helpscout-save-draft', (_e, id, spec) => helpscout.asResult(helpscout.saveDraft(id, spec || {})));
-ipcMain.handle('helpscout-send-reply', (_e, id, spec) => helpscout.asResult(helpscout.sendReply(id, spec || {})));
-ipcMain.handle('helpscout-add-note', (_e, id, text) => helpscout.asResult(helpscout.addNote(id, String(text || ''))));
-ipcMain.handle('helpscout-assign', (_e, id, assigneeId) => helpscout.asResult(helpscout.assign(id, assigneeId || null)));
-ipcMain.handle('helpscout-set-status', (_e, id, status) => helpscout.asResult(helpscout.setStatus(id, String(status || ''))));
-ipcMain.handle('helpscout-attachment', (_e, convId, attId) => helpscout.asResult(helpscout.getAttachment(convId, attId)));
-ipcMain.handle('helpscout-open-attachment', (_e, convId, attId, name) => helpscout.asResult(helpscout.openAttachment(convId, attId, String(name || '')).then(async ({ file }) => {
-  const err = await shell.openPath(file);
-  if (err) throw new Error(err);
-  return {};
-})));
-ipcMain.handle('helpscout-draft-prompt', (_e, id, extra) => helpscout.asResult(helpscout.getDraftPrompt(id, String(extra || ''), helpscoutAttachmentDir())));
-ipcMain.handle('helpscout-session-attachments', (_e, id) => helpscout.asResult(helpscout.getSessionAttachments(id, helpscoutAttachmentDir())));
-ipcMain.handle('helpscout-set-suggestion', (_e, sid, status) => helpscout.asResult(helpscout.setSuggestionStatus(sid, String(status || ''))));
+// --- IPC: Help Scout (helpscout.js) or Support Desk (support-desk.js) ---
+// Each write is a click in the Help Scout tab; a reply is only sent on Send,
+// after a confirm. The tab works on whichever app Settings picks
+// (support-backend.js); Help Scout unless Support Desk is chosen.
+const helpscoutBackend = () => (supportBackend.backendName(getSetting(supportBackend.BACKEND_SETTING)) === 'support-desk' ? supportDesk : helpscout);
+for (const [channel, handler] of Object.entries(supportBackend.helpscoutHandlers({
+  backend: helpscoutBackend,
+  attachmentDir: helpscoutAttachmentDir,
+  openPath: (file) => shell.openPath(file),
+}))) ipcMain.handle(channel, handler);
+// Settings > Support inbox: the app, and Support Desk's URL and token (kept in
+// the keychain by support-desk.js; the token never comes back here).
+ipcMain.handle('support-backend-config', () => supportBackend.asResult(supportDesk.getConfig().then(config => ({
+  backend: supportBackend.backendName(getSetting(supportBackend.BACKEND_SETTING)), ...config,
+}))));
+// spec: { backend, url, token }. A token is checked with Support Desk before
+// it is saved; empty keeps the saved one. Help Scout needs nothing more.
+ipcMain.handle('support-backend-set-config', (_e, spec = {}) => supportBackend.asResult((async () => {
+  const backend = supportBackend.backendName(spec.backend);
+  const url = String(spec.url || '').trim();
+  const token = String(spec.token || '').trim();
+  if (backend === 'support-desk' || token) await supportDesk.saveConfig({ url, token });
+  setSetting(supportBackend.BACKEND_SETTING, backend);
+  return { backend };
+})()));
 
 // --- IPC: the Notion todo list (notion-todo.js) ---
 // The token is the first secret Switchboard keeps, so it is stored encrypted
